@@ -48,7 +48,7 @@ src/MbdGitTool.Host/
 | 本地+Gitea（假 Gitea API） | 3 组件：CF100A **BEHIND**（MIL 落后）、CF200B **BINDING_ERROR**（远程缺 MIL/SIL）、CF300C **MISSING**（远程独有、本地未克隆）；数据源 `本地扫描 + Gitea` |
 | 刷新 | 点击刷新 → `刷新中…` → 完成 Toast「已刷新 · 本地扫描 + Gitea」，行数稳定 |
 | 控制台 | 0 error / 0 exception；1440×900 无横向溢出 |
-| 截图 | ![M1 看板](images/m1/board-real.png) · [组件列表](images/m1/components-real.png) |
+| 真实 Gitea | RTCRepos 15 仓 + 3 轮真实提交；工具接入后 4 组件/14 仓，Demo=BEHIND、Synced=SYNCED、RemoteOnly=MISSING、Incomplete=BINDING_ERROR；详见 [real-gitea-test.md](real-gitea-test.md) |\n| 鼠标/键盘 | CDP Input 事件：搜索输入/清空、点行、切 Tab、点导航、点设置、点刷新全部通过；0 console error |\n| 截图 | ![M1 看板](images/m1/board-real.png) · [组件列表](images/m1/components-real.png) · [真实 Gitea 测试](real-gitea-test.md) |
 
 ## 4. 如何本地运行
 

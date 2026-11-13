@@ -20,7 +20,7 @@ ui/                            # Vue 3 + TS + Vite：App Shell / 看板 Mock / C
 docs/
 ├─ dev-environment.md          # 本机工具链体检与复现命令
 ├─ vs-workflow.md              # VS 打开/编译/测试/发布命令与验证记录
-├─ ui-review-m0.md             # M0 界面自检（CDP 驱动、截图、修复记录）\n├─ m1-status.md                # M1-a：本地扫描 + Gitea 只读同步 + 真实看板（含验证/偏差）
+├─ ui-review-m0.md             # M0 界面自检（CDP 驱动、截图、修复记录）\n├─ m1-status.md                # M1-a：本地扫描 + Gitea 只读同步 + 真实看板（含验证/偏差）\n├─ real-gitea-test.md          # 真实 Gitea（RTCRepos）端到端 + 鼠标键盘操作测试
 └─ m0-status.md                # M0 完成状态、运行方式、CI 锚点映射
 artifacts/                     # 发布产物（gitignored）：publish/ + zip
 reqs/                          # 需求工程（唯一需求源 + 评审证据 + 冻结资产）
