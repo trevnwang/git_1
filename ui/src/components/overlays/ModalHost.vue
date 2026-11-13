@@ -1,0 +1,411 @@
+<script setup lang="ts">
+import { computed, nextTick, ref, watch } from 'vue'
+import { useWorkbench } from '../../stores/workbench'
+import { mockHostInfo } from '../../mocks/workbenchMock'
+
+const w = useWorkbench()
+const state = w.state
+const dialog = ref<HTMLElement | null>(null)
+const logLevel = ref('全部')
+
+const kind = computed(() => state.overlays.modal)
+const hostInfo = computed(() => state.hostInfo ?? mockHostInfo())
+const title = computed(() => {
+  switch (kind.value) {
+    case 'ci':
+      return 'CI 流水线'
+    case 'settings':
+      return '设置'
+    case 'logs':
+      return '日志与诊断'
+    case 'unbound':
+      return '未绑定仓库'
+    case 'about':
+      return '关于 MBD Git Tool'
+    case 'shortcuts':
+      return '快捷键'
+    default:
+      return ''
+  }
+})
+const sizeClass = computed(() => {
+  switch (kind.value) {
+    case 'settings':
+      return 'modal-md'
+    case 'about':
+    case 'shortcuts':
+      return 'modal-sm'
+    default:
+      return 'modal-lg'
+  }
+})
+const logs = [
+  { level: 'INFO', at: '17:32:02', msg: 'Host started; webview2 initialized（Mock）' },
+  { level: 'INFO', at: '17:32:03', msg: 'RemoteSync: org MBD_Org list watermark reached（Mock）' },
+  { level: 'WARN', at: '17:32:18', msg: 'LocalScan: safe.directory rejected for D:\\Work\\legacy\\X_Design（Mock）' },
+  { level: 'ERROR', at: '17:32:24', msg: 'SYNC-E002: 429 rate limited, retry in 30s（Mock）' },
+  { level: 'INFO', at: '17:32:30', msg: 'StatusCalc: 7 components / 28 repos, dirty-set 3（Mock）' },
+  { level: 'DEBUG', at: '17:32:31', msg: 'job queue depth=0, db size=12.4MB（Mock）' },
+]
+const filteredLogs = computed(() => (logLevel.value === '全部' ? logs : logs.filter((line) => line.level === logLevel.value)))
+
+const settingsSections = [
+  { key: 'general', label: '通用' },
+  { key: 'workspace', label: '工作区' },
+  { key: 'auth', label: '认证' },
+  { key: 'safety', label: '操作与安全' },
+  { key: 'ci', label: 'CI 集成' },
+  { key: 'experimental', label: '实验特性' },
+]
+
+const scope = computed(() => (state.focusedRepoType ? state.focusedRepoType : 'IMPL'))
+
+const anchors = [
+  ['CI-1', '标题区 CI 入口 / 菜单栏 工具- CI 流水线', 'ci-nav'],
+  ['CI-2', '组件卡 L1 右侧 18×18 槽位', 'ci-slot'],
+  ['CI-3', '右栏顶部 40px 汇总条', 'ci-strip'],
+  ['CI-4', '右栏 Tab 第 4 项', 'ci-tab'],
+  ['CI-5', '状态栏 CI 队列段', 'ci-queue'],
+  ['CI-6', '通知抽屉 CI 事件类目', 'ci-notif-category'],
+  ['CI-7', '左栏筛选 popover CI facet', 'ci-facet'],
+  ['CI-8', '设置弹窗 CI 集成分区', 'ci-settings'],
+  ['CI-9', 'CI 弹窗契约块', 'ci-contract'],
+  ['CI-10', '组件列表容器（data-ci-affects-base=false）', 'ci-card-base'],
+]
+
+function focusFirst(): void {
+  void nextTick(() => {
+    const node = dialog.value?.querySelector<HTMLElement>('button, input, select, [tabindex="0"]')
+    node?.focus()
+  })
+}
+
+function trapTab(event: KeyboardEvent): void {
+  const root = dialog.value
+  if (!root) return
+  const focusables = [...root.querySelectorAll<HTMLElement>('button, input, select, textarea, [tabindex="0"]')].filter(
+    (node) => !node.hasAttribute('disabled') && node.offsetParent !== null,
+  )
+  if (focusables.length === 0) return
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+watch(kind, (value) => {
+  if (value) focusFirst()
+})
+</script>
+
+<template>
+  <div v-if="kind" class="modal-overlay" @click.self="w.closeModal()" @keydown.tab="trapTab">
+    <section
+      ref="dialog"
+      class="modal"
+      :class="sizeClass"
+      data-testid="modal"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="title"
+    >
+      <header class="modal-head">
+        <span class="modal-title">{{ title }}</span>
+        <span v-if="kind === 'ci'" class="experiment">实验</span>
+        <span class="spacer" />
+        <button type="button" class="icon-btn" title="关闭（Esc）" aria-label="关闭" @click="w.closeModal()">✕</button>
+      </header>
+
+      <!-- CI 流水线（CI-1 落点 / CI-9 契约） -->
+      <div v-if="kind === 'ci'" class="modal-body" data-testid="ci-page">
+        <nav class="breadcrumb" aria-label="面包屑">工具 / CI 流水线</nav>
+        <p class="hint">
+          当前版本不调用真实 CI API；结构按 SRS 预留，接入 v2 时仅替换数据源与开关，不改导航/卡片/聚合语义。
+        </p>
+        <div class="ci-empty">
+          <div class="big">CI 流水线尚未接入</div>
+          <div class="muted">该页面为 v1 预留（CI-1）；接入后显示按组件/仓库/commit 聚合的流水线列表。</div>
+          <div class="muted mono">feature flag: ci.enabled = false</div>
+        </div>
+        <h4 class="section">数据契约（CI-9）</h4>
+        <pre class="contract" data-testid="ci-contract">CiLatest { repoId: number; componentId: string; repoType: 'DESIGN'|'IMPL'|'MIL'|'SIL'; branch; commitHash;
+  state: 'PASS'|'FAIL'|'RUNNING'|'QUEUED'|'NONE'|'UNKNOWN'; pipelineId?; buildNumber?; failedStage?;
+  startedAt?; finishedAt?; durationMs?; url?; provider; fetchedAt }
+ComponentCiAggregate { componentId; byState: Record&lt;CiState, number&gt;; worstState; lastFailed?; dataFreshAt }
+ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_UPDATED') }  // v1 空实现</pre>
+        <h4 class="section">10 个 CI 锚点新落点</h4>
+        <table class="anchor-table">
+          <thead><tr><th>#</th><th>新落点</th><th>data-testid</th></tr></thead>
+          <tbody>
+            <tr v-for="row in anchors" :key="row[0]">
+              <td class="mono">{{ row[0] }}</td>
+              <td>{{ row[1] }}</td>
+              <td class="mono">{{ row[2] }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="hint">CI 独立通道：永不参与组件聚合、卡片底色与严重度排序（CI-10）。</p>
+      </div>
+
+      <!-- 设置 -->
+      <div v-else-if="kind === 'settings'" class="modal-body settings-body">
+        <div class="settings-layout">
+          <nav class="settings-nav" aria-label="设置分区">
+            <a v-for="section in settingsSections" :key="section.key" :href="`#settings-${section.key}`">{{ section.label }}</a>
+          </nav>
+          <div class="settings-sections">
+            <section id="settings-general" class="settings-section">
+              <h3>通用</h3>
+              <div class="field"><label>主题</label><select disabled><option>跟随系统（v1）</option></select></div>
+              <div class="field"><label>界面密度</label><select disabled><option>标准</option></select></div>
+              <div class="field"><label>语言</label><select disabled><option>简体中文</option></select></div>
+              <p class="hint">主题 token 已生效（跟随系统浅/深色）；其余项 M1 接入。</p>
+            </section>
+            <section id="settings-workspace" class="settings-section">
+              <h3>工作区</h3>
+              <div class="field"><label>本地根目录</label><input disabled :value="state.workspaceRoot || '（Host 未返回工作区根目录）'" /></div>
+              <div class="field"><label>扫描频率</label><input disabled value="指纹 15s / 深扫变化触发" /></div>
+              <p class="hint">M1 接入真实目录扫描与首扫三阶段进度。</p>
+            </section>
+            <section id="settings-auth" class="settings-section">
+              <h3>认证</h3>
+              <div class="field"><label>Gitea 地址</label><input disabled :value="state.giteaBaseUrl || '（Host 未返回）'" /></div>
+              <div class="field"><label>组织</label><input disabled :value="state.owner || '（未配置）'" /></div>
+              <div class="field"><label>Token 状态</label><input disabled value="已注入（环境变量/凭据管理器；值不展示）" /></div>
+              <p class="hint">M1 接入真实连接测试与 PAT 校验；Token 不落配置文件。</p>
+            </section>
+            <section id="settings-safety" class="settings-section">
+              <h3>操作与安全</h3>
+              <div class="field"><label>删除保留期</label><input disabled value="30 天（.trash 可恢复）" /></div>
+              <div class="field"><label>备份 ref 保留</label><input disabled value="30 天（refs/backup/*）" /></div>
+              <div class="field"><label>强制覆盖确认</label><input type="checkbox" disabled checked /></div>
+              <p class="hint">M2 接入 dry-run / 备份 / 恢复。</p>
+            </section>
+            <section id="settings-ci" class="settings-section" data-testid="ci-settings">
+              <h3>CI 集成 <span class="experiment">实验</span></h3>
+              <p class="hint">v1 禁用；接入 v2 后启用。Token 仅存 Windows 凭据管理器，不落配置文件。</p>
+              <div class="field"><label>CI 类型</label><select disabled><option>未接入（v1）</option></select></div>
+              <div class="field"><label>Base URL</label><input disabled placeholder="https://ci.example.com" /></div>
+              <div class="field"><label>Token</label><input disabled placeholder="凭据管理器引用" /></div>
+              <div class="field"><label>轮询间隔（秒）</label><input disabled value="60" /></div>
+              <div class="field"><label>启用 CI</label><input type="checkbox" disabled /></div>
+              <p class="hint">CI 独立通道：永不参与组件聚合与卡片底色；空/未知使用中性样式（CI-10）。</p>
+            </section>
+            <section id="settings-experimental" class="settings-section">
+              <h3>实验特性</h3>
+              <p class="hint">v1 暂无可配置实验项（对应 SRS 附录 D：实验特性分区无可配置键）。</p>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <!-- 日志与诊断 -->
+      <div v-else-if="kind === 'logs'" class="modal-body">
+        <div class="toolbar">
+          <select v-model="logLevel" aria-label="日志级别过滤">
+            <option>全部</option><option>INFO</option><option>WARN</option><option>ERROR</option><option>DEBUG</option>
+          </select>
+          <button type="button" class="drawer-btn" @click="w.notify('导出脱敏诊断包将在 M3 接入', 'info')">导出诊断包（M3）</button>
+          <span class="muted">保留：运行日志 30 天 / 审计 90 天</span>
+        </div>
+        <div class="log-list" role="log" aria-label="结构化日志">
+          <div v-for="(line, index) in filteredLogs" :key="index" class="log-line">
+            <span class="log-at">{{ line.at }}</span>
+            <span class="log-level" :class="line.level.toLowerCase()">{{ line.level }}</span>
+            <span class="log-msg">{{ line.msg }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 未绑定仓库 -->
+      <div v-else-if="kind === 'unbound'" class="modal-body">
+        <div class="ci-empty">
+          <div class="big">未绑定仓库（0）</div>
+          <div class="muted">按原因分组：命名不符合 RepoNameParser / 路径不存在 / 未纳入管理。M1 只读展示，重新解析与忽略在 M2 接入。</div>
+          <button type="button" class="drawer-btn" @click="w.refresh()">重新对账</button>
+        </div>
+        <h4 class="section">分组字段（契约占位）</h4>
+        <div class="kv"><span>原因</span><span class="muted">—</span></div>
+        <div class="kv"><span>路径</span><span class="muted">—</span></div>
+        <div class="kv"><span>重新解析 / 忽略（写理由）</span><span class="muted">M2 接入</span></div>
+      </div>
+
+      <!-- 关于 -->
+      <div v-else-if="kind === 'about'" class="modal-body">
+        <div class="about">
+          <div class="about-brand">MBD Git Tool</div>
+          <div class="muted">版本 {{ hostInfo.appVersion }} · WebView2 {{ hostInfo.webView2Version }}</div>
+          <div class="kv"><span>数据源</span><span>{{ state.source }}（{{ w.sourceLabel() }}）</span></div>
+          <div class="kv"><span>工作区</span><span class="mono">{{ state.workspaceRoot || '—' }}</span></div>
+          <div class="kv"><span>组件 / 仓</span><span>{{ state.counts.components }} / {{ state.counts.repos }}</span></div>
+          <div class="kv"><span>当前聚焦仓</span><span class="mono">{{ scope }}</span></div>
+          <p class="hint">M1 只读：写操作（PULL/FETCH/CHKOUT/COMMIT/PUSH）在 M2 接入；文件树与文件夹视图只读。</p>
+        </div>
+      </div>
+
+      <!-- 快捷键 -->
+      <div v-else class="modal-body">
+        <table class="anchor-table">
+          <thead><tr><th>快捷键</th><th>动作</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">Ctrl+K</td><td>聚焦搜索</td></tr>
+            <tr><td class="mono">Ctrl+1 / Ctrl+2</td><td>工作台 / 文件夹视图</td></tr>
+            <tr><td class="mono">F5</td><td>刷新当前视图</td></tr>
+            <tr><td class="mono">Alt+1…Alt+5</td><td>PULL / FETCH / CHKOUT / COMMIT / PUSH</td></tr>
+            <tr><td class="mono">↑ / ↓</td><td>组件卡片或树节点移动</td></tr>
+            <tr><td class="mono">Enter</td><td>打开（卡片=详情 / 文件=默认程序）</td></tr>
+            <tr><td class="mono">Space</td><td>树节点展开/折叠</td></tr>
+            <tr><td class="mono">Esc</td><td>关闭浮层 / 清除批量选择</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</template>
+
+<style scoped>
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(10 12 16 / 38%);
+}
+.modal {
+  display: flex;
+  flex-direction: column;
+  max-width: 96vw;
+  max-height: 92vh;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  box-shadow: 0 20px 48px rgb(0 0 0 / 28%);
+  overflow: hidden;
+}
+.modal-lg { width: 960px; height: min(90vh, 640px); }
+.modal-md { width: 760px; height: min(90vh, 560px); }
+.modal-sm { width: 560px; height: min(90vh, 480px); }
+.modal-head {
+  flex: 0 0 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-title { font-size: 14px; font-weight: 650; }
+.experiment {
+  font-size: 10px;
+  color: var(--st-warning-fg);
+  border: 1px solid var(--st-warning-bd);
+  background: var(--st-warning-bg);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.spacer { flex: 1; }
+.modal-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px 20px; }
+.breadcrumb { font-size: 11px; color: var(--text-2); margin-bottom: 8px; }
+.hint { color: var(--text-2); font-size: 11px; line-height: 1.7; margin: 6px 0 10px; }
+.section { margin: 14px 0 6px; font-size: 12px; }
+.ci-empty {
+  min-height: 210px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-panel);
+  color: var(--text-2);
+  padding: 16px;
+}
+.ci-empty .big { font-size: 16px; color: var(--text); font-weight: 600; }
+.contract {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+}
+.anchor-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.anchor-table th, .anchor-table td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.anchor-table th { color: var(--text-2); font-weight: 600; background: var(--surface-2); }
+.settings-layout { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; }
+.settings-nav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; align-self: start; }
+.settings-nav a {
+  padding: 6px 8px;
+  border-radius: var(--r-btn);
+  color: var(--text-2);
+  font-size: 12px;
+  text-decoration: none;
+}
+.settings-nav a:hover { background: var(--surface-2); color: var(--text); }
+.settings-sections { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.settings-section {
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  padding: 10px 12px;
+}
+.settings-section h3 { margin: 0 0 8px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.field { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 8px; align-items: center; margin-bottom: 6px; }
+.field label { color: var(--text-2); font-size: 11px; }
+.field input, .field select {
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  padding: 0 8px;
+}
+.field input[disabled], .field select[disabled] { opacity: 0.55; }
+.toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.toolbar select { height: 26px; border: 1px solid var(--border); border-radius: var(--r-btn); background: var(--surface); color: var(--text); font-size: 11px; }
+.drawer-btn {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+.drawer-btn:hover { background: var(--surface-2); }
+.log-list {
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  overflow: hidden;
+}
+.log-line { display: grid; grid-template-columns: 68px 54px 1fr; gap: 10px; padding: 5px 10px; border-bottom: 1px solid var(--border); }
+.log-line:last-child { border-bottom: 0; }
+.log-at { color: var(--text-2); }
+.log-level { font-weight: 700; }
+.log-level.info { color: var(--st-info-fg); }
+.log-level.warn { color: var(--st-warning-fg); }
+.log-level.error { color: var(--st-danger-fg); }
+.log-level.debug { color: var(--text-2); }
+.log-msg { word-break: break-word; }
+.kv { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; padding: 5px 0; border-bottom: 1px dashed var(--border); }
+.about { display: flex; flex-direction: column; gap: 2px; }
+.about-brand { font-size: 18px; font-weight: 650; margin-bottom: 2px; }
+.muted { color: var(--text-2); }
+.mono { font-family: ui-monospace, Consolas, monospace; }
+</style>

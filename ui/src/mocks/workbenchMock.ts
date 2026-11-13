@@ -1,0 +1,652 @@
+/**
+ * 内置 Mock 数据（无 Host / 浏览器 CDP / Host 方法未实现时回退）。
+ * 覆盖 7 个组件（SYNCED/BEHIND/DIVERGED/DIRTY/DETACHED/MISSING/UNKNOWN）、
+ * 4 仓文件树、仓库详情/提交、工作区树、CI 占位与 HostInfo。
+ * 数据来源标注 source='mock'，UI 数据源胶囊常驻「Mock 数据」。
+ */
+import { HostError } from '../api'
+import type {
+  CiStatusDto,
+  CommitDto,
+  ComponentDto,
+  HostInfoDto,
+  OpenPathResultDto,
+  RepoDetailDto,
+  RepoDto,
+  RepoTreeDto,
+  SnapshotDto,
+  TreeNodeDto,
+  WorkspaceNodeDto,
+  WorkspaceTreeDto,
+} from '../api'
+import type { GitStatus, RepoType } from '../types/workbench'
+import { REPO_TYPES } from '../types/workbench'
+
+export const MOCK_WORKSPACE_ROOT = 'D:\\Work\\MBD'
+
+interface MockRepo {
+  type: RepoType
+  state: string
+  branch: string
+  tag?: string | null
+  ahead?: number
+  behind?: number
+  dirty?: number
+  untracked?: number
+  head?: string
+  ci?: string
+}
+
+interface MockComponent {
+  id: string
+  state: string
+  severity: number
+  branch: string
+  tag?: string | null
+  mixed?: boolean
+  dirtyTotal?: number
+  repos: MockRepo[]
+  lastActivityAt?: string
+}
+
+const HEAD_A = '3f2a9c1d4b5e6f7a8b9c0d1e2f3a4b5c6d7e8f90'
+const HEAD_B = '7c2e9c1a5d8f3b0e6a4c2d9f1b7e3a5c8d0f2b46'
+const HEAD_C = 'b41d08e7a2c5f9d3e6b0a8c4f1d7e9b5a3c6f024'
+const HEAD_D = '9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d'
+
+const MOCK_COMPONENTS: MockComponent[] = [
+  {
+    id: 'CF325F_ChanganSigProcgBascFct',
+    state: 'SYNCED',
+    severity: 14,
+    branch: 'main',
+    tag: 'v1.2.0',
+    repos: REPO_TYPES.map((type) => ({ type, state: 'SYNCED', branch: 'main', head: HEAD_A })),
+  },
+  {
+    id: 'CF123A_ShortName',
+    state: 'BEHIND',
+    severity: 6,
+    branch: 'main',
+    tag: 'v1.1.3',
+    repos: [
+      { type: 'DESIGN', state: 'BEHIND', branch: 'main', behind: 2, head: HEAD_B },
+      { type: 'IMPL', state: 'BEHIND', branch: 'main', behind: 3, head: HEAD_B },
+      { type: 'MIL', state: 'SYNCED', branch: 'main', head: HEAD_B },
+      { type: 'SIL', state: 'SYNCED', branch: 'main', head: HEAD_B },
+    ],
+  },
+  {
+    id: 'CF900A_TractionCtrl',
+    state: 'DIVERGED',
+    severity: 4,
+    branch: 'feat-x',
+    mixed: true,
+    repos: [
+      { type: 'DESIGN', state: 'DIVERGED', branch: 'feat-x', ahead: 2, behind: 1, head: HEAD_C },
+      { type: 'IMPL', state: 'AHEAD', branch: 'feat-x', ahead: 1, head: HEAD_C },
+      { type: 'MIL', state: 'SYNCED', branch: 'main', head: HEAD_C },
+      { type: 'SIL', state: 'BEHIND', branch: 'main', behind: 2, head: HEAD_C },
+    ],
+  },
+  {
+    id: 'CF777B_BatteryMgmt',
+    state: 'DIRTY',
+    severity: 8,
+    branch: 'dev',
+    dirtyTotal: 3,
+    repos: [
+      { type: 'DESIGN', state: 'DIRTY', branch: 'dev', dirty: 1, head: HEAD_D },
+      { type: 'IMPL', state: 'DIRTY', branch: 'dev', dirty: 2, untracked: 1, head: HEAD_D },
+      { type: 'MIL', state: 'SYNCED', branch: 'dev', head: HEAD_D },
+      { type: 'SIL', state: 'AHEAD', branch: 'dev', ahead: 2, head: HEAD_D },
+    ],
+  },
+  {
+    id: 'CF555C_Gateway',
+    state: 'DETACHED',
+    severity: 10,
+    branch: '—',
+    tag: 'v2.0.0',
+    repos: [
+      { type: 'DESIGN', state: 'DETACHED_TAG', branch: '—', tag: 'v2.0.0', head: HEAD_B },
+      { type: 'IMPL', state: 'DETACHED_COMMIT', branch: '—', head: HEAD_B },
+      { type: 'MIL', state: 'SYNCED', branch: 'main', head: HEAD_B },
+      { type: 'SIL', state: 'SYNCED', branch: 'main', head: HEAD_B },
+    ],
+  },
+  {
+    id: 'CF111D_BrakeCtrl',
+    state: 'MISSING',
+    severity: 12,
+    branch: '—',
+    repos: [
+      { type: 'DESIGN', state: 'MISSING', branch: '—' },
+      { type: 'IMPL', state: 'MISSING', branch: '—' },
+      { type: 'MIL', state: 'MISSING', branch: '—' },
+      { type: 'SIL', state: 'MISSING', branch: '—' },
+    ],
+  },
+  {
+    id: 'CF001E_VehicleState',
+    state: 'UNKNOWN',
+    severity: 2,
+    branch: 'main',
+    repos: [
+      { type: 'DESIGN', state: 'UNKNOWN', branch: 'main' },
+      { type: 'IMPL', state: 'SYNCED', branch: 'main', head: HEAD_A },
+      { type: 'MIL', state: 'SYNCED', branch: 'main', head: HEAD_A },
+      { type: 'SIL', state: 'SYNCED', branch: 'main', head: HEAD_A },
+    ],
+  },
+]
+
+/** Mock 组件仓库的相对目录名（文件夹视图用）：`<componentId>_<Design|Impl|MIL|SIL>`。 */
+export function mockRepoDir(componentId: string, type: RepoType): string {
+  const suffix = type === 'DESIGN' ? 'Design' : type === 'IMPL' ? 'Impl' : type
+  return `${componentId}_${suffix}`
+}
+
+function repoName(componentId: string, type: RepoType): string {
+  return mockRepoDir(componentId, type)
+}
+
+function nowIso(): string {
+  return new Date().toISOString()
+}
+
+function buildRepo(dto: MockRepositoryComponent, repo: MockRepo): RepoDto {
+  const local = repo.state !== 'MISSING'
+  return {
+    repoType: repo.type,
+    repoName: repoName(dto.id, repo.type),
+    state: repo.state,
+    subType: null,
+    branch: repo.branch === '—' ? null : repo.branch,
+    tag: repo.tag ?? null,
+    headSha: repo.head ?? null,
+    upstreamRef: repo.branch === '—' ? null : `refs/remotes/origin/${repo.branch}`,
+    compareRef: repo.branch === '—' ? null : `refs/remotes/origin/${repo.branch}`,
+    ahead: repo.ahead ?? 0,
+    behind: repo.behind ?? 0,
+    dirtyCount: repo.dirty ?? 0,
+    untrackedCount: repo.untracked ?? 0,
+    stashCount: 0,
+    isLocal: local,
+    localPath: local ? `${MOCK_WORKSPACE_ROOT}\\${repoName(dto.id, repo.type)}` : null,
+    isStale: false,
+    calcAt: nowIso(),
+    dataSource: 'local',
+    errorCode: null,
+    flags: repo.dirty
+      ? ['dirty_tracked']
+      : repo.untracked
+        ? ['untracked']
+        : repo.state === 'UNKNOWN'
+          ? ['calc_timeout']
+          : [],
+  }
+}
+
+type MockRepositoryComponent = MockComponent
+
+function toComponentDto(component: MockComponent): ComponentDto {
+  const repos = component.repos.map((repo) => buildRepo(component, repo))
+  return {
+    componentId: component.id,
+    aggregateState: component.state,
+    severityRank: component.severity,
+    branch: component.branch,
+    tag: component.tag ?? null,
+    mixedBranch: Boolean(component.mixed),
+    flags: component.repos.some((repo) => repo.state === 'MISSING') ? ['missing_repo'] : [],
+    incomplete: component.repos.some((repo) => repo.state === 'MISSING'),
+    lastActivityAt: component.lastActivityAt ?? new Date(Date.now() - component.severity * 60_000).toISOString(),
+    ciAggregate: {
+      componentId: component.id,
+      byState: { PASS: 0, FAIL: 0, RUNNING: 0, QUEUED: 0, NONE: 4, UNKNOWN: 0 },
+      worstState: 'NONE',
+      dataFreshAt: nowIso(),
+    },
+    repos,
+  }
+}
+
+/** 内置 7 组件快照（source=mock，浏览器/CDP 默认数据源）。 */
+export function mockSnapshot(): SnapshotDto {
+  const components = MOCK_COMPONENTS.map(toComponentDto)
+  const repos = components.reduce((sum, component) => sum + component.repos.length, 0)
+  return {
+    source: 'mock',
+    workspaceRoot: MOCK_WORKSPACE_ROOT,
+    error: null,
+    generatedAt: nowIso(),
+    components,
+    counts: { components: components.length, repos, missingRepos: 4 },
+    freshness: {
+      localScanAt: new Date(Date.now() - 12_000).toISOString(),
+      remoteFetchAt: new Date(Date.now() - 180_000).toISOString(),
+      localStale: false,
+      remoteStale: false,
+    },
+  }
+}
+
+// ───────────────────────────── Mock 文件树 ─────────────────────────────
+
+interface MockNodeDef {
+  name: string
+  kind: 'DIR' | 'FILE'
+  status?: GitStatus
+  size?: number
+}
+
+type TreeDef = Record<string, MockNodeDef[]>
+
+const IMPL_TREE: TreeDef = {
+  '': [
+    { name: 'src', kind: 'DIR' },
+    { name: 'tests', kind: 'DIR' },
+    { name: 'docs', kind: 'DIR' },
+    { name: 'tools', kind: 'DIR' },
+    { name: '.gitignore', kind: 'FILE', size: 118 },
+    { name: 'README.md', kind: 'FILE', size: 1834, status: 'MODIFIED' },
+  ],
+  src: [
+    { name: 'app', kind: 'DIR' },
+    { name: 'control', kind: 'DIR' },
+    { name: 'init.m', kind: 'FILE', size: 4096 },
+    { name: 'config.json', kind: 'FILE', size: 812, status: 'MODIFIED' },
+  ],
+  'src/app': [
+    { name: 'main.m', kind: 'FILE', size: 20480, status: 'MODIFIED' },
+    { name: 'plant.slx', kind: 'FILE', size: 155_648 },
+    { name: 'notes.txt', kind: 'FILE', size: 320, status: 'UNTRACKED' },
+  ],
+  'src/control': [
+    { name: 'trac.c', kind: 'FILE', size: 8192 },
+    { name: 'trac.h', kind: 'FILE', size: 2048 },
+    { name: 'controller.mdl', kind: 'FILE', size: 98_304 },
+    { name: 'legacy_ctrl.m', kind: 'FILE', size: 5120, status: 'DELETED' },
+  ],
+  tests: [
+    { name: 'test_main.m', kind: 'FILE', size: 6144, status: 'ADDED' },
+    { name: 'fixtures', kind: 'DIR' },
+  ],
+  'tests/fixtures': [
+    { name: 'case_01.json', kind: 'FILE', size: 1024 },
+    { name: 'case_02.json', kind: 'FILE', size: 1200, status: 'MODIFIED' },
+  ],
+  docs: [
+    { name: 'design.md', kind: 'FILE', size: 2400 },
+    { name: 'api.yaml', kind: 'FILE', size: 3600 },
+  ],
+  tools: [
+    { name: 'build.ps1', kind: 'FILE', size: 640 },
+    { name: 'deploy.bat', kind: 'FILE', size: 220 },
+    { name: 'very_long_file_name_for_ellipsis_and_overflow_testing_0123456789.m', kind: 'FILE', size: 900 },
+  ],
+}
+
+const DESIGN_TREE: TreeDef = {
+  '': [
+    { name: 'docs', kind: 'DIR' },
+    { name: 'model', kind: 'DIR' },
+    { name: 'src', kind: 'DIR' },
+    { name: 'README.md', kind: 'FILE', size: 1500 },
+    { name: 'requirements.md', kind: 'FILE', size: 4200, status: 'MODIFIED' },
+  ],
+  docs: [
+    { name: 'design.md', kind: 'FILE', size: 3200 },
+    { name: 'interface.md', kind: 'FILE', size: 2100 },
+  ],
+  model: [
+    { name: 'plant.slx', kind: 'FILE', size: 128_000 },
+    { name: 'controller.mdl', kind: 'FILE', size: 76_800 },
+  ],
+  src: [
+    { name: 'requirements.yaml', kind: 'FILE', size: 1800 },
+    { name: 'signals.csv', kind: 'FILE', size: 900 },
+  ],
+}
+
+const MIL_TREE: TreeDef = {
+  '': [
+    { name: 'src', kind: 'DIR' },
+    { name: 'tests', kind: 'DIR' },
+    { name: 'README.md', kind: 'FILE', size: 980 },
+  ],
+  src: [
+    { name: 'harness', kind: 'DIR' },
+    { name: 'main.m', kind: 'FILE', size: 12_288 },
+  ],
+  'src/harness': [
+    { name: 'io.c', kind: 'FILE', size: 4096 },
+    { name: 'io.h', kind: 'FILE', size: 1024 },
+  ],
+  tests: [{ name: 'case_01.m', kind: 'FILE', size: 2048 }],
+}
+
+const SIL_TREE: TreeDef = {
+  '': [
+    { name: 'src', kind: 'DIR' },
+    { name: 'docs', kind: 'DIR' },
+    { name: 'README.md', kind: 'FILE', size: 900 },
+    { name: '.gitignore', kind: 'FILE', size: 100 },
+  ],
+  src: [
+    { name: 'sim', kind: 'DIR' },
+    { name: 'main.m', kind: 'FILE', size: 9216 },
+  ],
+  'src/sim': [
+    { name: 'plant.m', kind: 'FILE', size: 6144 },
+    { name: 'scenario.json', kind: 'FILE', size: 1200, status: 'UNTRACKED' },
+  ],
+  docs: [{ name: 'validation.md', kind: 'FILE', size: 2400 }],
+}
+
+const TREE_BY_REPO: Record<RepoType, TreeDef> = {
+  DESIGN: DESIGN_TREE,
+  IMPL: IMPL_TREE,
+  MIL: MIL_TREE,
+  SIL: SIL_TREE,
+}
+
+function findMockComponent(componentId: string): MockComponent | undefined {
+  return MOCK_COMPONENTS.find((component) => component.id === componentId)
+}
+
+function findMockRepo(componentId: string, type: RepoType): MockRepo | undefined {
+  return findMockComponent(componentId)?.repos.find((repo) => repo.type === type)
+}
+
+/**
+ * Mock 兜底解析：真实 Host 的组件 ID 不在内置 7 组件里时，按仓库类型给一个可浏览的
+ * 合成仓（SYNCED/main），保证「Host 已连接但只读方法未实现」时文件树仍可展示 mock 内容。
+ */
+function resolveMockRepo(
+  componentId: string,
+  type: RepoType,
+): { component: MockComponent; repo: MockRepo } {
+  const foundRepo = findMockRepo(componentId, type)
+  const foundComponent = findMockComponent(componentId)
+  if (foundRepo && foundComponent) return { component: foundComponent, repo: foundRepo }
+  const repo: MockRepo = { type, state: 'SYNCED', branch: 'main', head: HEAD_A }
+  const component: MockComponent = {
+    id: componentId,
+    state: 'SYNCED',
+    severity: 50,
+    branch: 'main',
+    repos: [{ type, state: 'SYNCED', branch: 'main', head: HEAD_A }],
+  }
+  return { component, repo }
+}
+
+function toMockTreeNodes(defs: MockNodeDef[], parentPath: string): TreeNodeDto[] {
+  return defs.map((def) => ({
+    path: parentPath ? `${parentPath}/${def.name}` : def.name,
+    name: def.name,
+    kind: def.kind,
+    hasChildren: def.kind === 'DIR',
+    size: def.kind === 'FILE' ? def.size ?? 1024 : null,
+    mtime: nowIso(),
+    gitStatus: def.status ?? 'NONE',
+    submodule: false,
+    ignored: false,
+    children: null,
+    error: null,
+  }))
+}
+
+/** getRepoTree 的 Mock 实现：按（componentId, repoType, path）返回目录直接子项。 */
+export function mockRepoTree(componentId: string, type: RepoType, path = ''): RepoTreeDto {
+  const { repo } = resolveMockRepo(componentId, type)
+  const state = repo.state
+  if (state === 'MISSING') {
+    throw new HostError('E_REPO_NOT_LOCAL', 'Mock：仓库未克隆（MISSING）')
+  }
+  const tree = TREE_BY_REPO[type]
+  const defs = tree[path] ?? null
+  if (!defs) {
+    throw new HostError('E_PATH_INVALID', `Mock：路径不存在 ${path}`)
+  }
+  // 根路径为空串；子路径返回条目 path 为仓根相对路径（不带 repoDir 前缀）
+  return {
+    componentId,
+    repoType: type,
+    repoName: repoName(componentId, type),
+    rootPath: `${MOCK_WORKSPACE_ROOT}\\${repoName(componentId, type)}`,
+    path,
+    branch: repo.branch === '—' ? null : repo.branch,
+    headSha: repo.head ?? null,
+    state,
+    dirtyCount: repo.dirty ?? 0,
+    compareRef: `refs/remotes/origin/${repo.branch}`,
+    fetchedAt: nowIso(),
+    entries: toMockTreeNodes(defs, path),
+    truncated: false,
+    totalEntries: defs.length,
+    error: null,
+  }
+}
+
+// ───────────────────────────── Mock 详情 / 提交 ─────────────────────────────
+
+const COMMIT_MESSAGES = [
+  'feat(control): 增加前馈补偿并更新标定参数',
+  'fix(model): 修正 plant 模型在低速段的积分饱和',
+  'docs: 补充接口约定与信号映射说明',
+  'refactor(app): 收敛初始化流程，拆分配置加载',
+  'test: 补充 MIL 用例 case_02 边界条件',
+  'chore: 同步版本号与变更记录',
+  'feat(sil): 场景 JSON 增加故障注入开关',
+  'perf(control): 降低主循环抖动',
+]
+
+/** getRepoDetail 的 Mock 实现（含最近 5 条提交）。 */
+export function mockRepoDetail(componentId: string, type: RepoType): RepoDetailDto {
+  const { component, repo } = resolveMockRepo(componentId, type)
+  const commits = mockCommits(componentId, type, 0, 5)
+  return {
+    repo: buildRepo(component, repo),
+    component: toComponentDto(component),
+    commits: { total: 128, items: commits.items },
+  }
+}
+
+/** getCommits 的 Mock 实现。 */
+export function mockCommits(
+  componentId: string,
+  type: RepoType,
+  skip = 0,
+  take = 100,
+): { total: number; items: CommitDto[] } {
+  const { repo } = resolveMockRepo(componentId, type)
+  const total = 128
+  const count = Math.max(0, Math.min(take, total - skip))
+  const items: CommitDto[] = Array.from({ length: count }, (_, index) => {
+    const ordinal = skip + index
+    const message = COMMIT_MESSAGES[ordinal % COMMIT_MESSAGES.length]
+    return {
+      sha: `${(ordinal + 1).toString(16).padStart(2, '0')}e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d`,
+      shortSha: `${(ordinal + 1).toString(16).padStart(2, '0')}e8d7c`,
+      message,
+      author: ordinal % 3 === 0 ? 'Trevn' : ordinal % 3 === 1 ? 'Li Wei' : 'Zhang Min',
+      at: new Date(Date.now() - ordinal * 3_600_000).toISOString(),
+      refs: ordinal === 0 && repo.branch !== '—' ? [`HEAD -> ${repo.branch}`, `origin/${repo.branch}`] : [],
+    }
+  })
+  return { total, items }
+}
+
+// ───────────────────────────── Mock 工作区树（文件夹视图） ─────────────────────────────
+
+function toWorkspaceRepoNode(component: MockComponent, repo: MockRepo): WorkspaceNodeDto {
+  return {
+    kind: 'REPO',
+    repoType: repo.type,
+    name: repoName(component.id, repo.type),
+    path: repoName(component.id, repo.type),
+    componentId: component.id,
+    state: repo.state,
+    branch: repo.branch === '—' ? null : repo.branch,
+    ahead: repo.ahead ?? 0,
+    behind: repo.behind ?? 0,
+    dirtyCount: (repo.dirty ?? 0) + (repo.untracked ?? 0),
+    isLocal: repo.state !== 'MISSING',
+    hasChildren: repo.state !== 'MISSING',
+  }
+}
+
+function toWorkspaceComponentNode(component: MockComponent): WorkspaceNodeDto {
+  return {
+    kind: 'COMPONENT',
+    componentId: component.id,
+    name: component.id,
+    path: component.id,
+    state: component.state,
+    severityRank: component.severity,
+    dirtyCount: component.repos.reduce((sum, repo) => sum + (repo.dirty ?? 0) + (repo.untracked ?? 0), 0),
+    mixedBranch: Boolean(component.mixed),
+    branch: component.branch,
+    repos: component.repos.map((repo) => toWorkspaceRepoNode(component, repo)),
+  }
+}
+
+const UNBOUND_DIRS = ['X_SIL_Design', 'X_Legacy_Impl', 'scratch']
+
+function unboundGroup(): WorkspaceNodeDto {
+  return {
+    kind: 'UNBOUND_GROUP',
+    name: '未纳管',
+    path: '__unbound__',
+    count: UNBOUND_DIRS.length,
+    hasChildren: true,
+    children: UNBOUND_DIRS.map((dir) => ({
+      kind: 'DIR',
+      name: dir,
+      path: dir,
+      hasChildren: true,
+    })),
+  }
+}
+
+function physicalEntries(
+  repoDir: string,
+  relPath: string,
+  defs: MockNodeDef[],
+): WorkspaceNodeDto[] {
+  return defs.map((def) => ({
+    kind: def.kind,
+    name: def.name,
+    path: relPath ? `${repoDir}/${relPath}/${def.name}` : `${repoDir}/${def.name}`,
+    hasChildren: def.kind === 'DIR',
+    size: def.kind === 'FILE' ? def.size ?? 1024 : null,
+    mtime: nowIso(),
+    gitStatus: def.status ?? 'NONE',
+    ignored: false,
+    submodule: false,
+  }))
+}
+
+function parseRepoDir(path: string): { componentId: string; type: RepoType; rel: string } | null {
+  const segments = path.split('/')
+  const first = segments[0]
+  const rel = segments.slice(1).join('/')
+  for (const type of REPO_TYPES) {
+    const suffix = `_${type === 'DESIGN' ? 'Design' : type === 'IMPL' ? 'Impl' : type}`
+    if (first.endsWith(suffix)) {
+      return { componentId: first.slice(0, -suffix.length), type, rel }
+    }
+  }
+  return null
+}
+
+/** getWorkspaceTree 的 Mock 实现（根层=组件分组；展开仓/目录=物理条目）。 */
+export function mockWorkspaceTree(path = ''): WorkspaceTreeDto {
+  const base = {
+    root: MOCK_WORKSPACE_ROOT,
+    path,
+    generatedAt: nowIso(),
+    readAt: nowIso(),
+    truncated: false,
+    error: null,
+  }
+  if (!path) {
+    return {
+      ...base,
+      entries: [...MOCK_COMPONENTS.map(toWorkspaceComponentNode), unboundGroup()],
+    }
+  }
+  const parsed = parseRepoDir(path)
+  if (parsed) {
+    const component = findMockComponent(parsed.componentId)
+    if (!component) throw new HostError('E_NOT_FOUND', `Mock：组件不存在 ${parsed.componentId}`)
+    const repo = findMockRepo(parsed.componentId, parsed.type)
+    if (!repo || repo.state === 'MISSING') {
+      throw new HostError('E_REPO_NOT_LOCAL', 'Mock：仓库未克隆（MISSING）')
+    }
+    const tree = TREE_BY_REPO[parsed.type]
+    const defs = tree[parsed.rel] ?? tree[''] ?? []
+    return { ...base, entries: physicalEntries(path.split('/')[0], parsed.rel, defs) }
+  }
+  if (path === '__unbound__') {
+    return { ...base, entries: unboundGroup().children ?? [] }
+  }
+  if (UNBOUND_DIRS.includes(path) || path.includes('/')) {
+    const defs: MockNodeDef[] =
+      path.endsWith('Design')
+        ? DESIGN_TREE['']
+        : path.endsWith('Impl')
+          ? IMPL_TREE['']
+          : [{ name: 'README.md', kind: 'FILE', size: 320 }]
+    return { ...base, entries: physicalEntries(path, '', defs) }
+  }
+  throw new HostError('E_PATH_OUTSIDE_ROOT', `Mock：路径不在工作区内 ${path}`)
+}
+
+// ───────────────────────────── Mock CI / HostInfo / 动作 ─────────────────────────────
+
+/** getCiStatus 的 Mock 实现：ci.enabled=false，全 NONE（CI-10：不参与聚合）。 */
+export function mockCiStatus(componentId: string): CiStatusDto {
+  return {
+    enabled: false,
+    provider: 'mock',
+    fetchedAt: null,
+    latest: [],
+    aggregate: {
+      componentId,
+      byState: { PASS: 0, FAIL: 0, RUNNING: 0, QUEUED: 0, NONE: 4, UNKNOWN: 0 },
+      worstState: 'NONE',
+      dataFreshAt: nowIso(),
+    },
+  }
+}
+
+export function mockHostInfo(): HostInfoDto {
+  return {
+    appVersion: '0.3.0',
+    webView2Version: 'Mock（浏览器）',
+    features: { fileTree: true, workspaceTree: true, openPath: true, repoActions: false, ci: false },
+    limits: { maxTreeEntries: 2000, snapshotTimeoutMs: 45_000 },
+  }
+}
+
+/** openPath 的 Mock 实现：仅返回成功结果，不启动外部程序。 */
+export function mockOpenPath(path: string, mode: 'open' | 'reveal'): OpenPathResultDto {
+  return {
+    opened: true,
+    mode,
+    path,
+    message: mode === 'reveal' ? `已在资源管理器中定位（Mock）：${path}` : `已用默认程序打开（Mock）：${path}`,
+  }
+}
+
+/** runRepoAction 的 Mock 实现：M1 只读，返回 E_NOT_IMPLEMENTED（与 Host 契约一致）。 */
+export function mockRunRepoAction(action: string): never {
+  throw new HostError(
+    'E_NOT_IMPLEMENTED',
+    `M1 为只读模式：${action} 将在 M2 启用（需预检、dry-run/备份、逐仓结果与任务中心）`,
+    { action, writeStage: 'M2' },
+  )
+}

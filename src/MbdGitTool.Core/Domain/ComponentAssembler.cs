@@ -1,3 +1,4 @@
+using System.Globalization;
 using MbdGitTool.Core.Contracts;
 
 namespace MbdGitTool.Core.Domain;
@@ -146,7 +147,9 @@ public static class ComponentAssembler
             Tag: SelectDisplayTag(evaluations),
             MixedBranch: mixedBranch,
             Flags: componentFlags,
-            Repos: evaluations.Select(pair => ToRepoDto(pair.Input, pair.Evaluation)).ToList());
+            Repos: evaluations.Select(pair => ToRepoDto(pair.Input, pair.Evaluation)).ToList(),
+            Incomplete: componentFlags.Contains("incomplete") ? true : null,
+            BindingCause: WireBindingCause(bindingCause));
     }
 
     /// <summary>按 RepoType 固定顺序排序并按类型去重（歧义由 BindingCause 表达，DTO 保持四仓形状）。</summary>
@@ -282,8 +285,16 @@ public static class ComponentAssembler
             : null;
     }
 
-    private static RepoDto ToRepoDto(RepoInput input, RepoEvaluation evaluation) =>
-        new(
+    private static RepoDto ToRepoDto(RepoInput input, RepoEvaluation evaluation)
+    {
+        var localName = string.IsNullOrWhiteSpace(input.Facts.LocalPath)
+            ? null
+            : Path.GetFileName(input.Facts.LocalPath);
+        var tag = evaluation.State == RepoState.DetachedTag && input.Facts.TagsAtHead.Count == 1
+            ? input.Facts.TagsAtHead[0]
+            : null;
+
+        return new RepoDto(
             RepoType: WireRepoType(input.RepoType),
             State: WireRepoState(evaluation.State),
             SubType: WireSubType(evaluation.SubType),
@@ -295,7 +306,25 @@ public static class ComponentAssembler
             UntrackedCount: input.Facts.UntrackedCount,
             IsLocal: input.Facts.Exists,
             LocalPath: input.Facts.LocalPath,
-            Flags: evaluation.Flags.ToWireNames());
+            Flags: evaluation.Flags.ToWireNames(),
+            RepoName: string.IsNullOrWhiteSpace(localName) ? null : localName,
+            Tag: tag,
+            UpstreamRef: input.Facts.UpstreamRef,
+            CompareRef: input.Facts.UpstreamRef,
+            StashCount: input.Facts.Stashed ? 1 : 0,
+            CalcAt: DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+            DataSource: input.Facts.Exists ? "local" : null,
+            IsStale: input.Facts.Stale,
+            ErrorCode: input.Facts.Error is null ? null : "E_SCAN_FAILED");
+    }
+
+    /// <summary>绑定成因 → spec 字符串（INVALID/INCOMPLETE；无则为 null）。</summary>
+    private static string? WireBindingCause(BindingCause cause) => cause switch
+    {
+        BindingCause.InvalidOrUnbound => "INVALID",
+        BindingCause.Incomplete => "INCOMPLETE",
+        _ => null
+    };
 
     /// <summary>单仓主状态 → SRS §7.2 UPPER_SNAKE 名称。</summary>
     public static string WireRepoState(RepoState state) => state switch

@@ -13,6 +13,7 @@ public partial class MainWindow : Window
     private const string VirtualHost = "app.local";
 
     private WebViewBridge? _bridge;
+    private HostCommandRouter? _router;
     private SnapshotService? _snapshots;
 
     public MainWindow()
@@ -42,6 +43,12 @@ public partial class MainWindow : Window
             await Web.EnsureCoreWebView2Async(env);
             HostLog.Info($"webview2 initialized: {env.BrowserVersionString}");
 
+            // 3) 命令路由（新工作台只读 API：树/详情/提交/打开/操作占位/CI 占位/HostInfo）。
+            _router = new HostCommandRouter(
+                config,
+                _snapshots,
+                webView2Version: env.BrowserVersionString);
+
             var uiRoot = Path.Combine(AppContext.BaseDirectory, "ui");
             if (!Directory.Exists(uiRoot) || !File.Exists(Path.Combine(uiRoot, "index.html")))
             {
@@ -58,8 +65,8 @@ public partial class MainWindow : Window
             Web.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
             Web.CoreWebView2.ProcessFailed += OnProcessFailed;
 
-            // 3) UI 桥：WebView2 初始化后挂接，处理 getSnapshot / refresh。
-            _bridge = new WebViewBridge(Web.CoreWebView2, _snapshots);
+            // 3) UI 桥：WebView2 初始化后挂接，路由 getSnapshot/refresh 与工作台只读 API。
+            _bridge = new WebViewBridge(Web.CoreWebView2, _router);
             _bridge.Attach();
 
             Web.Source = new Uri($"https://{VirtualHost}/index.html");
@@ -103,6 +110,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _bridge?.Dispose();
+        _router?.Dispose();
         _snapshots?.Dispose();
         base.OnClosed(e);
     }

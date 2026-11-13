@@ -21,6 +21,10 @@ docs/
 ├─ dev-environment.md          # 本机工具链体检与复现命令
 ├─ vs-workflow.md              # VS 打开/编译/测试/发布命令与验证记录
 ├─ ui-review-m0.md             # M0 界面自检（CDP 驱动、截图、修复记录）\n├─ m1-status.md                # M1-a：本地扫描 + Gitea 只读同步 + 真实看板（含验证/偏差）\n├─ real-gitea-test.md          # 真实 Gitea（RTCRepos）端到端 + 鼠标键盘操作测试
+├─ ui-redesign-spec.md         # v3 工作台 UI 规格（参考图为准）
+├─ ui-redesign-code-plan.md    # v3 API/文件树/路径安全实现方案
+├─ ui-v3-status.md             # UI v3 阶段报告、评审 P0 修复与剩余项
+├─ review-ui-v3.md / review-req-v3.md / review-code-v3.md   # 三路对抗评审
 └─ m0-status.md                # M0 完成状态、运行方式、CI 锚点映射
 artifacts/                     # 发布产物（gitignored）：publish/ + zip
 reqs/                          # 需求工程（唯一需求源 + 评审证据 + 冻结资产）
@@ -57,6 +61,13 @@ dotnet run   --project src\MbdGitTool.Host
 3. 已决策项见 SRS 第 0 章 ADR；未决项见第 15 章（OQ-xx）。
 4. 验收以 `reqs/v0.2/ac-catalog.md` 为权威；执行图以 `v0.2/diagrams.md` 为准；测试夹具用 `v0.2/fixtures/`。
 5. 代码改动遵循 SRS 冻结状态机/枚举/表名；实现机制（进程/IPC/库选型）以 SRS 第 12 章设计建议为准。
+
+## UI v3 工作台（2026-11-14）
+
+- 主界面按用户参考图重构：菜单栏/标题区/左组件卡片/中 2×2 四仓文件树/右信息面板/底部 5 键/状态栏；
+- 新增文件夹视图（工作区树）、四仓文件树懒加载、右侧仓详情/最近提交、CI 10 锚点新落点；
+- 接真实 RTCRepos + 本地工作区；216 单测通过；三路对抗评审 P0 已修（详见 `docs/ui-v3-status.md`）；
+- 当前 M1 只读：底部写操作按钮统一禁用并提示 M2 接入。
 
 ## 当前状态（2026-11-14）
 

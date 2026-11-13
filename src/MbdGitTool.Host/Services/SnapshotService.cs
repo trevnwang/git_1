@@ -26,6 +26,7 @@ public sealed class SnapshotService : IDisposable
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     private SnapshotDto? _current;
+    private SnapshotIndex _index = SnapshotIndex.Empty;
     private bool _disposed;
 
     public SnapshotService(AppConfig config, LocalScanner? scanner = null)
@@ -52,6 +53,9 @@ public sealed class SnapshotService : IDisposable
 
     /// <summary>最近一次快照（可能为 null，首次需 Refresh）。</summary>
     public SnapshotDto? Current => Volatile.Read(ref _current);
+
+    /// <summary>最近一次快照的只读索引（组件/仓/本地路径）；供 getRepoTree/getRepoDetail/getComponentDetail 等复用。</summary>
+    public SnapshotIndex Index => Volatile.Read(ref _index);
 
     /// <summary>读取当前快照；从未刷新过则立即刷新一次（互斥等待时复用已生成的快照，避免重复扫描）。</summary>
     public async Task<SnapshotDto> GetSnapshotAsync(CancellationToken cancellationToken = default)
@@ -93,6 +97,7 @@ public sealed class SnapshotService : IDisposable
     {
         var snapshot = await BuildAsync(cancellationToken).ConfigureAwait(false);
         Volatile.Write(ref _current, snapshot);
+        Volatile.Write(ref _index, SnapshotIndex.Build(snapshot));
         HostLog.Info(
             $"快照完成：source={snapshot.Source} components={snapshot.Components.Count} error={snapshot.Error ?? "<none>"}");
         return snapshot;
@@ -377,20 +382,40 @@ public sealed class SnapshotService : IDisposable
             Path.TrimEndingDirectorySeparator(right),
             StringComparison.OrdinalIgnoreCase);
 
-    private static SnapshotDto CreateSnapshot(
+    private SnapshotDto CreateSnapshot(
         string source,
         string? workspaceRoot,
         string? error,
-        IReadOnlyList<ComponentDto> components) =>
-        new(
+        IReadOnlyList<ComponentDto> components)
+    {
+        var generatedAt = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+        var repoCount = components.Sum(component => component.Repos.Count);
+        var missingRepos = components.Sum(component => component.Repos.Count(repo => !repo.IsLocal));
+
+        return new SnapshotDto(
             Source: source,
             WorkspaceRoot: workspaceRoot,
             Error: error,
-            GeneratedAt: DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
-            Components: components);
+            GeneratedAt: generatedAt,
+            Components: components,
+            Counts: new CountsDto(components.Count, repoCount, missingRepos),
+            Freshness: new FreshnessDto(
+                LocalScanAt: generatedAt,
+                RemoteFetchAt: source == "local+gitea" ? generatedAt : null,
+                LocalStale: false,
+                RemoteStale: source != "local+gitea"),
+            Capabilities: new CapabilitiesDto(
+                FileTree: true,
+                WorkspaceTree: true,
+                OpenPath: true,
+                RepoActions: false,
+                Ci: false),
+            Owner: _config.GiteaOrg,
+            GiteaBaseUrl: _config.GiteaBaseUrl);
+    }
 
     /// <summary>未配置/根目录不可用时的 Mock 快照（Source=mock + Error 说明），保证 UI 七态可渲染。</summary>
-    private static SnapshotDto BuildMock(string error)
+    private SnapshotDto BuildMock(string error)
     {
         var inputs = new List<RepoInput>();
 

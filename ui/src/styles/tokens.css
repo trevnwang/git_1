@@ -238,3 +238,193 @@ kbd { font-family: ui-monospace, Consolas, monospace; border: 1px solid var(--bo
 }
 .toast-enter-active, .toast-leave-active { transition: opacity 160ms var(--ease), transform 160ms var(--ease); }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translate(-50%, 6px); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * v3 工作台：布局 / tint / CI 通道（spec §9.4；只追加，不改既有 --st-* 与主题）
+ * ══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --layout-menu-h: 30px;
+  --layout-title-h: 48px;
+  --layout-actions-h: 52px;
+  --layout-status-h: 28px;
+  --layout-pad-x: 16px;
+  --layout-pad-y: 12px;
+  --layout-gap: 12px;
+  --col-left: minmax(248px, 20%);
+  --col-right: minmax(224px, 18%);
+  --card-h: 76px;
+  --card-h-compact: 60px;
+  --card-pad: 7px;
+  --tree-row-h: 28px;
+  --tree-indent: 14px;
+  --tree-indent-max: 112px;
+  --tree-head-h: 32px;
+  --btn-h: 40px;
+  --field-h: 30px;
+  --chip-h: 20px;
+  --r-panel: 8px;
+  --r-card: 8px;
+  --r-chip: 6px;
+  --r-btn: 6px;
+  --z-sticky: 10;
+  --z-hover: 20;
+  --z-popover: 100;
+  --z-menu: 110;
+  --z-drawer: 200;
+  --z-modal: 210;
+  --z-toast: 300;
+
+  /* 由既有 --st-* 派生（禁止新增 hex） */
+  --tint-success: color-mix(in srgb, var(--st-success-bg) 55%, var(--surface));
+  --tint-warning: color-mix(in srgb, var(--st-warning-bg) 55%, var(--surface));
+  --tint-info: color-mix(in srgb, var(--st-info-bg) 55%, var(--surface));
+  --tint-purple: color-mix(in srgb, var(--st-purple-bg) 55%, var(--surface));
+  --tint-cyan: color-mix(in srgb, var(--st-cyan-bg) 55%, var(--surface));
+  --tint-neutral: color-mix(in srgb, var(--st-neutral-bg) 55%, var(--surface));
+  --tint-danger: color-mix(in srgb, var(--st-danger-bg) 55%, var(--surface));
+  --tint-hatched: var(--surface-2);
+  --badge-change-fg: var(--text);
+  --badge-change-bg: var(--surface-2);
+  --badge-change-bd: var(--border);
+  /* CI 通道 B（独立圆点，永不参与卡片底色） */
+  --ci-pass: var(--st-success-fg);
+  --ci-fail: var(--st-danger-fg);
+  --ci-running: var(--st-info-fg);
+  --ci-idle: var(--st-neutral-bd);
+  --ci-unknown: var(--st-unknown-fg);
+}
+
+@media (max-height: 799px) {
+  :root {
+    --layout-menu-h: 26px;
+    --layout-title-h: 44px;
+    --layout-actions-h: 44px;
+    --layout-status-h: 24px;
+    --layout-pad-y: 8px;
+    --card-h: 60px;
+    --tree-row-h: 26px;
+    --tree-head-h: 30px;
+    --btn-h: 36px;
+  }
+}
+@media (max-width: 1279px) {
+  :root {
+    --layout-pad-x: 8px;
+    --layout-gap: 8px;
+    --col-left: 232px;
+    --col-right: 208px;
+  }
+}
+@media (min-width: 1920px) {
+  :root {
+    --col-left: minmax(280px, 320px);
+    --col-right: minmax(260px, 320px);
+  }
+}
+
+/* 主题切换（默认跟随系统；data-theme 显式覆盖） */
+:root[data-theme="light"] {
+  --st-success-fg: #0f7b4f; --st-success-bg: #e7f5ec; --st-success-bd: #9ccfb8;
+  --st-warning-fg: #8a4b00; --st-warning-bg: #fdf1dc; --st-warning-bd: #e8be84;
+  --st-info-fg: #1d4ed8; --st-info-bg: #e8eefe; --st-info-bd: #aec3f5;
+  --st-purple-fg: #6d28d9; --st-purple-bg: #f3eafe; --st-purple-bd: #c9aef0;
+  --st-cyan-fg: #0f5f73; --st-cyan-bg: #e3f4f7; --st-cyan-bd: #9acfd9;
+  --st-neutral-fg: #374151; --st-neutral-bg: #f1f2f4; --st-neutral-bd: #9ca3af;
+  --st-danger-fg: #b91c1c; --st-danger-bg: #fdecec; --st-danger-bd: #efb4b4;
+  --st-unknown-fg: #4b5563;
+  --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f1f2f4;
+  --border: #e2e5e9; --text: #14161a; --text-2: #4b5563; --rail: #d9dde3; --focus: #2563eb;
+}
+:root[data-theme="dark"] {
+  --st-success-fg: #3dd68c; --st-success-bg: #10301f;
+  --st-warning-fg: #f5b544; --st-warning-bg: #33240b;
+  --st-info-fg: #7aa7ff; --st-info-bg: #0f1e3d;
+  --st-purple-fg: #c4a2ff; --st-purple-bg: #221239;
+  --st-cyan-fg: #5cc8e0; --st-cyan-bg: #0b2a33;
+  --st-neutral-fg: #a7adb8; --st-neutral-bg: #1e2128; --st-neutral-bd: #4b5563;
+  --st-danger-fg: #f87171; --st-danger-bg: #3b1111; --st-danger-bd: #7f1d1d;
+  --st-unknown-fg: #9ca3af;
+  --bg: #14161a; --surface: #1c1f26; --surface-2: #22262e;
+  --border: #2a2e36; --text: #e6e8eb; --text-2: #a7adb8; --rail: #363b45;
+}
+
+/* v3 全局基元（组件内 scoped 样式按需覆盖） */
+html, body, #app { overflow: hidden; }
+body { margin: 0; }
+#app { height: 100%; }
+.app-shell {
+  height: 100%;
+  display: grid;
+  grid-template-rows: var(--layout-menu-h) var(--layout-title-h) minmax(0, 1fr) var(--layout-status-h);
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+.main-area {
+  min-height: 0;
+  min-width: 0;
+  padding: var(--layout-pad-y) var(--layout-pad-x);
+  overflow: hidden;
+}
+.view-root { height: 100%; min-height: 0; min-width: 0; }
+.w-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+}
+.w-panel__header {
+  flex: 0 0 var(--tree-head-h);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.w-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.mono { font-family: ui-monospace, Consolas, monospace; }
+.muted { color: var(--text-2); }
+.truncate { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-btn);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.icon-btn:hover { background: var(--surface-2); color: var(--text); }
+.icon-btn[aria-busy="true"] { opacity: 0.6; cursor: progress; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button:disabled, [aria-disabled="true"] { cursor: not-allowed; }
+* { scrollbar-width: thin; scrollbar-color: var(--rail) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--rail); border-radius: 4px; }
+*::-webkit-scrollbar-track { background: transparent; }
+svg { display: block; }
+
+@media (forced-colors: active) {
+  .w-panel, .state-chip, .ci-badge { border: 1px solid CanvasText; }
+}
