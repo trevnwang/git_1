@@ -1,0 +1,53 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.12405.243
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MbdGitTool.Core", "src\MbdGitTool.Core\MbdGitTool.Core.csproj", "{F2E6E239-4DCF-4407-B4F2-A37730D47A93}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MbdGitTool.Host", "src\MbdGitTool.Host\MbdGitTool.Host.csproj", "{A61CF20A-6C1B-4D78-A553-D148A36B5BB7}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MbdGitTool.Git", "src\MbdGitTool.Git\MbdGitTool.Git.csproj", "{FEF3A231-747D-4DD1-A70E-9CEC8CAC6D09}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MbdGitTool.Core.Tests", "tests\MbdGitTool.Core.Tests\MbdGitTool.Core.Tests.csproj", "{107B25BE-49CC-4163-A1ED-EA36B0FAE8B0}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F2E6E239-4DCF-4407-B4F2-A37730D47A93}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F2E6E239-4DCF-4407-B4F2-A37730D47A93}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F2E6E239-4DCF-4407-B4F2-A37730D47A93}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F2E6E239-4DCF-4407-B4F2-A37730D47A93}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A61CF20A-6C1B-4D78-A553-D148A36B5BB7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A61CF20A-6C1B-4D78-A553-D148A36B5BB7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A61CF20A-6C1B-4D78-A553-D148A36B5BB7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A61CF20A-6C1B-4D78-A553-D148A36B5BB7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FEF3A231-747D-4DD1-A70E-9CEC8CAC6D09}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FEF3A231-747D-4DD1-A70E-9CEC8CAC6D09}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FEF3A231-747D-4DD1-A70E-9CEC8CAC6D09}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FEF3A231-747D-4DD1-A70E-9CEC8CAC6D09}.Release|Any CPU.Build.0 = Release|Any CPU
+		{107B25BE-49CC-4163-A1ED-EA36B0FAE8B0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{107B25BE-49CC-4163-A1ED-EA36B0FAE8B0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{107B25BE-49CC-4163-A1ED-EA36B0FAE8B0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{107B25BE-49CC-4163-A1ED-EA36B0FAE8B0}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{F2E6E239-4DCF-4407-B4F2-A37730D47A93} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{A61CF20A-6C1B-4D78-A553-D148A36B5BB7} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{FEF3A231-747D-4DD1-A70E-9CEC8CAC6D09} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{107B25BE-49CC-4163-A1ED-EA36B0FAE8B0} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {4D3C9F7B-2A6E-4E8B-9C1D-6F0A2B7E5C31}
+	EndGlobalSection
+EndGlobal

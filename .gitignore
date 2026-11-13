@@ -1,0 +1,22 @@
+# .NET
+src/**/bin/
+src/**/obj/
+tests/**/bin/
+tests/**/obj/
+*.user
+
+# Node / Vite
+ui/node_modules/
+ui/dist/
+
+# 发布产物
+artifacts/
+
+# Visual Studio / 本地环境
+.vs/
+*.suo
+*.log
+
+# OS
+Thumbs.db
+.DS_Store
