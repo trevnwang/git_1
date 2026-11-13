@@ -1,12 +1,21 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import {
+  hasHostBridge,
+  normalizeSnapshot,
+  request,
+  toErrorMessage,
+} from './api'
+import type { ComponentDto, RepoDto, SnapshotDto } from './api'
 
-type RepoState = 'SYNCED' | 'BEHIND' | 'AHEAD' | 'DIVERGED' | 'MISSING' | 'EMPTY' | 'DIRTY' | 'DETACHED_TAG' | 'NO_UPSTREAM' | 'UNKNOWN' | 'UNMERGED' | 'IN_PROGRESS' | 'INVALID'
 type CiState = 'PASS' | 'FAIL' | 'RUNNING' | 'QUEUED' | 'NONE' | 'UNKNOWN'
 type RepoType = 'Design' | 'Impl' | 'MIL' | 'SIL'
 type View = 'board' | 'components' | 'ci' | 'tasks' | 'notifications' | 'logs' | 'settings'
 
-type Repo = { type: RepoType; state: RepoState; branch: string; tag?: string; dirty?: boolean }
+type Repo = {
+  type: RepoType; state: string; branch: string; tag?: string; dirty?: boolean
+  headSha?: string; ahead?: number; behind?: number; untrackedCount?: number
+}
 type ComponentRow = {
   id: string; short: string; state: string; rail: string; repos: Repo[]
   branch: string; mixed?: boolean; tag?: string; ci: CiState; fresh: string; severity: number
@@ -57,17 +66,253 @@ const notify = (message: string) => {
   toastTimer = setTimeout(() => { toast.value = '' }, 2400)
 }
 
+// —— Host 快照（M1）：成功则替换数据源；失败 / 无配置（source=mock）→ 保留 Mock ——
+const components = ref<ComponentRow[]>(mockComponents)
+const hostLinked = ref(false)
+const dataSource = ref('mock')
+const workspaceRoot = ref('')
+const snapshotAt = ref('')
+const snapshotError = ref('')
+const snapshotEmpty = ref(false)
+const fallbackReason = ref('')
+const refreshing = ref(false)
+
+// Host 首次 getSnapshot / refresh 会触发真实本地扫描（400 仓约 10–20s），8s 不够：
+// 这两个入口用 45s 宽限并显示「扫描中」，超时保留 Mock 但持续提示 + 自动重试。
+const SNAPSHOT_TIMEOUT_MS = 45_000
+const SNAPSHOT_RETRY_DELAYS_MS = [5_000, 15_000]
+const booting = ref(false)
+const hostFailed = ref(false)
+let retryIndex = 0
+let snapshotRetryTimer: ReturnType<typeof setTimeout> | undefined
+
+const sourceLabel = computed(() => {
+  if (!hostLinked.value) return 'Mock 数据'
+  switch (dataSource.value) {
+    case 'mock': return 'Mock 数据'
+    case 'local': return '本地扫描'
+    case 'local+gitea': return '本地扫描 + Gitea'
+    default: return `Host · ${dataSource.value || '未知数据源'}`
+  }
+})
+const sourceTone = computed(() => {
+  if (!hostLinked.value || dataSource.value === 'mock') return 'src-mock'
+  return dataSource.value === 'local+gitea' ? 'src-gitea' : 'src-local'
+})
+const sourceTitle = computed(() => {
+  if (!hostLinked.value) return fallbackReason.value || '未连接 Host，展示内置 Mock 数据'
+  const lines = [`数据源：${dataSource.value || '未声明'}`]
+  if (workspaceRoot.value) lines.push(`工作区：${workspaceRoot.value}`)
+  if (snapshotAt.value) lines.push(`快照时间：${snapshotAt.value}`)
+  if (snapshotError.value) lines.push(`错误：${snapshotError.value}`)
+  if (fallbackReason.value) lines.push(fallbackReason.value)
+  return lines.join('\n')
+})
+const snapshotFresh = computed(() => snapshotAt.value ? `Host 快照 · ${formatStamp(snapshotAt.value)}` : '')
+const freshnessText = computed(() => hostLinked.value ? (snapshotFresh.value || 'Host 快照') : '刷新：4s 前（Mock）')
+const titleFreshness = computed(() => hostLinked.value ? (snapshotFresh.value || 'Host 快照') : '数据新鲜度：本地 4s · 远程 2min（Mock）')
+const scopeSummary = computed(() => {
+  if (!hostLinked.value) return '组织 MBD_Org · 1,007 组件 / 4,028 仓（Mock）'
+  if (snapshotEmpty.value) return 'Host 快照为空（0 组件）· 展示内置 Mock'
+  const repoCount = components.value.reduce((sum, component) => sum + component.repos.length, 0)
+  return `${components.value.length} 组件 / ${repoCount} 仓（Host 快照）`
+})
+const componentsNotice = computed(() => {
+  if (snapshotEmpty.value) return 'Host 快照返回 0 个组件，当前展示内置 Mock 数据；点击“刷新”可重试。'
+  if (hostFailed.value) return `${fallbackReason.value}；可点击“刷新”重试。`
+  if (hostLinked.value && dataSource.value !== 'mock') {
+    return `数据来自 Host 快照（${sourceLabel.value}）；写操作将在 M2 接入。点击行可回到看板并选中该组件。`
+  }
+  return 'M0：本页展示组件结构；真实 Gitea 数据与状态计算将在 M1 接入。点击行可回到看板并选中该组件。'
+})
+
+// 状态字符串 → CSS class（聚合态 / 单仓态统一映射；未命中一律小写，与 tokens.css 对齐）
+const STATE_TONES: Record<string, string> = {
+  // §7.4 组件聚合态
+  OP_PARTIAL_FAILED: 'partial',
+  BINDING_ERROR: 'binding',
+  TAG_DRIFT: 'tagdrift',
+  BLOCKED_LOCAL: 'blocked',
+  MIXED_BRANCH: 'mixed',
+  NEW_BRANCH: 'newbranch',
+  DETACHED: 'detached',
+  EMPTY: 'empty',
+  // §7.2 单仓主状态的特殊落点
+  DETACHED_TAG: 'detached',
+  DETACHED_COMMIT: 'detached',
+  UNMERGED: 'blocked',
+  IN_PROGRESS: 'blocked',
+  NO_UPSTREAM: 'newbranch',
+  INVALID: 'binding',
+}
+const REPO_TYPE_LABELS: Record<string, RepoType> = { DESIGN: 'Design', IMPL: 'Impl', MIL: 'MIL', SIL: 'SIL' }
+
+function chipClass(state: string) {
+  return STATE_TONES[state] ?? (state.toLowerCase() || 'unknown')
+}
+function formatStamp(value: string): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+function repoHasChanges(repo: RepoDto): boolean {
+  const flags = repo.flags.map(flag => flag.toUpperCase())
+  return repo.dirtyCount > 0 || repo.untrackedCount > 0 || flags.some(flag => flag.includes('DIRTY') || flag.includes('UNTRACKED'))
+}
+function mapRepo(repo: RepoDto): Repo | null {
+  const type = REPO_TYPE_LABELS[repo.repoType.toUpperCase()]
+  if (!type) return null // 契约只有 4 类；其它类型不纳入组件仓 chip（未绑定仓走独立清单）
+  return {
+    type,
+    state: repo.state,
+    branch: repo.branch ?? '—',
+    dirty: repoHasChanges(repo),
+    headSha: repo.headSha ?? undefined,
+    ahead: repo.ahead,
+    behind: repo.behind,
+    untrackedCount: repo.untrackedCount,
+  }
+}
+function mapComponent(component: ComponentDto, generatedAt: string): ComponentRow {
+  const state = component.aggregateState || 'UNKNOWN'
+  return {
+    id: component.componentId,
+    short: component.componentId,
+    state,
+    rail: chipClass(state),
+    repos: component.repos.map(mapRepo).filter((repo): repo is Repo => repo !== null),
+    branch: component.branch ?? '—',
+    mixed: component.mixedBranch || undefined,
+    tag: component.tag ?? undefined,
+    ci: 'NONE', // CI 独立通道：v1 统一 NONE，永不参与组件聚合（D-002 / CI-10）
+    fresh: `Host 快照 · ${formatStamp(generatedAt)}`,
+    severity: component.severityRank,
+  }
+}
+function applySnapshot(snapshot: SnapshotDto): string {
+  hostLinked.value = true
+  dataSource.value = snapshot.source
+  workspaceRoot.value = snapshot.workspaceRoot ?? ''
+  snapshotAt.value = snapshot.generatedAt
+  snapshotError.value = snapshot.error ?? ''
+  fallbackReason.value = ''
+  const next = snapshot.components.map(component => mapComponent(component, snapshot.generatedAt))
+  if (next.length === 0) {
+    // 空快照不整页闪空：保留内置 Mock，并明确告知
+    snapshotEmpty.value = true
+    return snapshot.error && snapshot.source !== 'mock'
+      ? `Host 快照告警：${snapshot.error}`
+      : 'Host 快照返回 0 个组件，暂保留内置 Mock 展示'
+  }
+  snapshotEmpty.value = false
+  components.value = next
+  if (!next.some(row => row.id === selectedId.value)) selectedId.value = next[0].id
+  const current = next.find(row => row.id === selectedId.value) ?? next[0]
+  if (!current.repos.some(repo => repo.type === selectedRepo.value) && current.repos.length > 0) {
+    selectedRepo.value = current.repos[0].type
+  }
+  return snapshot.error && snapshot.source !== 'mock' ? `Host 快照告警：${snapshot.error}` : ''
+}
+
+function applyInitialSnapshot(snapshot: SnapshotDto) {
+  retryIndex = 0
+  hostFailed.value = false
+  const notice = applySnapshot(snapshot)
+  if (snapshot.source === 'mock') {
+    fallbackReason.value = `Host 未配置工作区（source=mock）${snapshot.error ? `：${snapshot.error}` : ''}，展示 Mock 数据`
+    notify(snapshot.error ? `Host 数据源为 Mock：${snapshot.error}` : 'Host 未配置工作区（source=mock），展示 Mock 数据')
+  } else if (notice) {
+    notify(notice)
+  } else {
+    notify(`已连接 Host · ${sourceLabel.value}`)
+  }
+}
+
+function handleInitialFailure(error: unknown) {
+  const reason = toErrorMessage(error)
+  hostFailed.value = true
+  fallbackReason.value = `读取 Host 快照失败：${reason}（当前展示内置 Mock 数据）`
+  if (retryIndex < SNAPSHOT_RETRY_DELAYS_MS.length) {
+    const delay = SNAPSHOT_RETRY_DELAYS_MS[retryIndex]
+    retryIndex += 1
+    notify(`Host 快照尚未就绪（${reason}），${Math.round(delay / 1000)}s 后自动重试`)
+    snapshotRetryTimer = setTimeout(() => { void loadInitialSnapshot() }, delay)
+  } else {
+    notify(`读取 Host 快照失败：${reason}，已回退 Mock；可点击“刷新”重试`)
+  }
+}
+
+async function loadInitialSnapshot() {
+  if (booting.value) return
+  booting.value = true
+  try {
+    const snapshot = normalizeSnapshot(await request<unknown>('getSnapshot', SNAPSHOT_TIMEOUT_MS))
+    if (!snapshot) {
+      handleInitialFailure(new Error('Host 返回的快照格式无法识别'))
+      return
+    }
+    applyInitialSnapshot(snapshot)
+  } catch (error) {
+    handleInitialFailure(error)
+  } finally {
+    booting.value = false
+  }
+}
+
+async function refreshNow() {
+  if (refreshing.value || booting.value) return
+  if (snapshotRetryTimer !== undefined) {
+    clearTimeout(snapshotRetryTimer)
+    snapshotRetryTimer = undefined
+  }
+  retryIndex = 0
+  refreshing.value = true
+  notify('正在重新扫描本地仓库…（大工作区约 10–20s）')
+  try {
+    const reply = normalizeSnapshot(await request<unknown>('refresh', SNAPSHOT_TIMEOUT_MS))
+    // refresh 也可能只回 ack（无快照载荷），此时再取一次 getSnapshot
+    const snapshot = reply ?? normalizeSnapshot(await request<unknown>('getSnapshot', SNAPSHOT_TIMEOUT_MS))
+    if (snapshot) {
+      hostFailed.value = false
+      const notice = applySnapshot(snapshot)
+      notify(notice || `已刷新 · ${sourceLabel.value}`)
+    } else {
+      notify('刷新已提交，但 Host 未返回可识别快照')
+    }
+  } catch (error) {
+    notify(`刷新失败：${toErrorMessage(error)}`)
+  } finally {
+    refreshing.value = false
+  }
+}
+
+onMounted(async () => {
+  if (!hasHostBridge()) {
+    fallbackReason.value = '当前不在 WebView2 宿主中（浏览器 dev），展示内置 Mock 数据'
+    notify(fallbackReason.value)
+    return
+  }
+  notify('正在连接 Host 并扫描本地仓库…（首次可能 10–20s）')
+  await loadInitialSnapshot()
+})
+
+onBeforeUnmount(() => {
+  if (snapshotRetryTimer !== undefined) clearTimeout(snapshotRetryTimer)
+})
+
 const unread = computed(() => mockNotifications.value.filter(n => !n.read).length)
 const filteredLogs = computed(() => logLevel.value === '全部' ? mockLogs : mockLogs.filter(l => l.level === logLevel.value))
-const selected = computed(() => mockComponents.find(c => c.id === selectedId.value) ?? mockComponents[0])
+const selected = computed<ComponentRow>(() => components.value.find(c => c.id === selectedId.value) ?? components.value.at(0) ?? mockComponents[0])
 const rows = computed(() => {
   const q = search.value.trim().toLowerCase()
   const list = q
-    ? mockComponents.filter(c => c.id.toLowerCase().includes(q) || c.repos.some(r => r.branch.toLowerCase().includes(q)))
-    : mockComponents
+    ? components.value.filter(c => c.id.toLowerCase().includes(q) || c.repos.some(r => r.branch.toLowerCase().includes(q)))
+    : components.value
   return [...list].sort((a, b) => a.severity - b.severity || a.id.localeCompare(b.id))
 })
-const selectedRepoRow = computed(() => selected.value.repos.find(r => r.type === selectedRepo.value)!)
+const selectedRepoRow = computed<Repo | undefined>(() => selected.value.repos.find(r => r.type === selectedRepo.value))
 
 const settingTab = ref('general')
 const settings = [
@@ -89,7 +334,6 @@ const navItems: { key: View; label: string; icon: string; badge?: 'unread' }[] =
   { key: 'settings', label: '设置', icon: '⚙' }
 ]
 
-function chipClass(state: string) { return state.toLowerCase() }
 function ciLabel(ci: CiState) {
   return ({ PASS: 'CI 通过', FAIL: 'CI 失败', RUNNING: 'CI 运行中', QUEUED: 'CI 排队', NONE: '无 CI', UNKNOWN: 'CI 未知' } as Record<CiState, string>)[ci]
 }
@@ -102,10 +346,14 @@ function openComponent(id: string) { selectedId.value = id; view.value = 'board'
   <div class="app">
     <header class="titlebar">
       <span class="brand">MBD Git Tool</span>
-      <span class="pill">v0.2.1 · M0</span>
-      <span class="meta">组织 MBD_Org · 1,007 组件 / 4,028 仓</span>
+      <span class="pill">v0.2.1 · M1</span>
+      <span v-if="booting" class="pill src-local">扫描中…</span>
+      <span class="pill" :class="sourceTone" data-testid="snapshot-source" :title="sourceTitle">{{ sourceLabel }}</span>
+      <span class="meta">{{ scopeSummary }}</span>
+      <span v-if="workspaceRoot" class="meta ws" :title="workspaceRoot">工作区：{{ workspaceRoot }}</span>
+      <span v-if="snapshotError && dataSource !== 'mock'" class="pill src-warn" :title="snapshotError">快照告警</span>
       <span class="spacer" />
-      <span class="meta">数据新鲜度：本地 4s · 远程 2min</span>
+      <span class="meta">{{ titleFreshness }}</span>
     </header>
 
     <nav class="rail" aria-label="主导航">
@@ -124,8 +372,12 @@ function openComponent(id: string) { selectedId.value = id; view.value = 'board'
       <template v-if="view === 'board'">
         <div class="page-head">
           <h1>组件看板</h1>
-          <span class="sub">异常优先排序 · 共 7 个示例组件（M0 Mock）</span>
+          <span class="sub">异常优先排序 · {{ components.length }} 个组件 · {{ sourceLabel }}</span>
         </div>
+
+        <div v-if="booting" class="notice">正在连接 Host 并扫描本地仓库…（首次约 10–20s，超大工作区更久）</div>
+        <div v-else-if="hostFailed" class="notice notice-warn">{{ fallbackReason }}；将自动重试，也可点击“刷新”。</div>
+        <div v-if="snapshotEmpty" class="notice">Host 快照返回 0 个组件（工作区可能为空或首扫未完成），当前展示内置 Mock 数据；点击“刷新”可重试。</div>
 
         <div class="toolbar">
           <input type="search" v-model="search" placeholder="搜索组件 / 仓库 / 分支 / Tag（Ctrl+K）" />
@@ -133,7 +385,10 @@ function openComponent(id: string) { selectedId.value = id; view.value = 'board'
           <select aria-label="仓类型" @change="notify('筛选将在 M1 接入真实数据后启用')"><option>全部仓类型</option><option>Design</option><option>Impl</option><option>MIL</option><option>SIL</option></select>
           <select data-testid="ci-facet" disabled title="CI 集成将在后续版本开放"><option>CI 状态（即将支持）</option></select>
           <div class="seg"><button class="active">表格</button><button @click="notify('卡片视图将在 M1 接入')">卡片</button></div>
-          <span class="fresh">刷新：4s 前</span>
+          <button class="btn" data-testid="snapshot-refresh" :disabled="refreshing || booting"
+                  :title="booting ? '正在扫描本地仓库…' : (hostLinked ? '从 Host 重新获取快照（触发本地重扫，大工作区约 10–20s）' : '未连接 Host（当前为 Mock 数据）')"
+                  @click="refreshNow">{{ booting ? '扫描中…' : refreshing ? '刷新中…' : '刷新' }}</button>
+          <span class="fresh">{{ freshnessText }}</span>
         </div>
 
         <div class="grid2">
@@ -197,11 +452,18 @@ function openComponent(id: string) { selectedId.value = id; view.value = 'board'
               <button v-for="t in (['Design','Impl','MIL','SIL'] as RepoType[])" :key="t" :class="{ active: selectedRepo === t }" @click="selectedRepo = t">{{ t }}</button>
               <button data-testid="ci-tab" title="CI 集成将在后续版本开放" @click="notify('单仓 CI Tab 为 v1 占位，M3 后接入')">CI</button>
             </div>
-            <div class="panel" style="box-shadow:none">
+            <div v-if="selectedRepoRow" class="panel" style="box-shadow:none">
               <div class="field"><label>主状态</label><div><span class="chip t" :class="chipClass(selectedRepoRow.state)">{{ selectedRepoRow.state }}</span></div></div>
               <div class="field"><label>当前分支</label><div>{{ selectedRepoRow.branch }}</div></div>
-              <div class="field"><label>HEAD</label><div class="dir">3f9a2c1（示例）</div></div>
-              <div class="field"><label>未提交改动</label><div>{{ selectedRepoRow.dirty ? '有（●）' : '无' }}</div></div>
+              <div class="field"><label>HEAD</label><div class="dir">{{ selectedRepoRow.headSha ? selectedRepoRow.headSha.slice(0, 7) : '—' }}</div></div>
+              <div class="field"><label>未提交改动</label><div>{{ selectedRepoRow.dirty ? '有（●）' : '无' }}<span v-if="selectedRepoRow.untrackedCount" class="dir"> · 未跟踪 {{ selectedRepoRow.untrackedCount }}</span></div></div>
+              <div v-if="selectedRepoRow.ahead !== undefined || selectedRepoRow.behind !== undefined" class="field">
+                <label>ahead / behind</label>
+                <div class="dir">↑ {{ selectedRepoRow.ahead ?? 0 }} / ↓ {{ selectedRepoRow.behind ?? 0 }}（相对 compare_ref）</div>
+              </div>
+            </div>
+            <div v-else class="panel" style="box-shadow:none">
+              <div class="hint">该生命周期仓库未出现在 Host 快照中（缺仓 / 未扫描），无法展示单仓详情。</div>
             </div>
             <div class="panel" style="box-shadow:none;margin-top:12px" data-testid="ci-notif-category">
               <h2>通知</h2>
@@ -213,12 +475,12 @@ function openComponent(id: string) { selectedId.value = id; view.value = 'board'
 
       <!-- 组件列表 -->
       <template v-else-if="view === 'components'">
-        <div class="page-head"><h1>组件列表</h1><span class="sub">组件视角聚合 · {{ mockComponents.length }} 个 Mock 组件</span></div>
-        <div class="notice">M0：本页展示组件结构；真实 Gitea 数据与状态计算将在 M1 接入。点击行可回到看板并选中该组件。</div>
+        <div class="page-head"><h1>组件列表</h1><span class="sub">组件视角聚合 · {{ components.length }} 个组件（{{ hostLinked ? sourceLabel : '内置 Mock' }}）</span></div>
+        <div class="notice">{{ componentsNotice }}</div>
         <table class="table">
           <thead><tr><th>组件 ID</th><th>聚合状态</th><th>4 仓</th><th>分支 / Tag</th><th>CI</th><th>新鲜度</th></tr></thead>
           <tbody>
-            <tr v-for="c in mockComponents" :key="c.id" style="cursor:pointer" @click="openComponent(c.id)">
+            <tr v-for="c in components" :key="c.id" style="cursor:pointer" @click="openComponent(c.id)">
               <td><div class="comp"><span class="railbar" :class="c.rail" /><span class="name">{{ c.short }}</span></div></td>
               <td><span class="chip t" :class="chipClass(c.state)">{{ c.state }}</span></td>
               <td><div class="chips"><span v-for="r in c.repos" :key="r.type" class="chip" :class="chipClass(r.state)">{{ r.type[0] }}</span></div></td>
@@ -323,7 +585,7 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe(CI_UP
 
           <div v-else-if="settingTab === 'workspace'" class="panel">
             <h2>工作区</h2>
-            <div class="field"><label>本地根目录</label><input disabled value="D:\\Work\\MBD（示例）" /></div>
+            <div class="field"><label>本地根目录</label><input disabled :value="workspaceRoot || '（Host 未返回工作区根目录）'" /></div>
             <div class="field"><label>扫描频率</label><input disabled value="指纹 15s / 深扫变化触发" /></div>
             <div class="hint">M1 接入真实目录扫描与首扫三阶段进度。</div>
           </div>
@@ -364,9 +626,9 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe(CI_UP
     </main>
 
     <footer class="statusbar">
-      <span class="seg"><span class="dot" />进程健康 Host/GitWorker</span>
+      <span class="seg"><span class="dot" :class="hostLinked ? '' : 'off'" />进程健康 Host/GitWorker</span>
       <span class="seg"><span class="dot warn" />RemoteSync 同步中</span>
-      <span class="seg">本地 4s 前 · 远程 2min 前</span>
+      <span class="seg">{{ hostLinked ? (snapshotFresh || 'Host 快照') : '本地 4s 前 · 远程 2min 前（Mock）' }}</span>
       <span class="spacer" />
       <span class="seg">任务队列 {{ taskCount }}</span>
       <span class="seg" data-testid="ci-queue"><span class="ci-dot none" />CI 队列 0</span>
@@ -379,3 +641,20 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe(CI_UP
     </transition>
   </div>
 </template>
+
+<style scoped>
+.titlebar .ws {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.titlebar .meta { white-space: nowrap; }
+.pill.src-mock { color: var(--st-neutral-fg); background: var(--st-neutral-bg); border-color: var(--st-neutral-bd); }
+.pill.src-local { color: var(--st-info-fg); background: var(--st-info-bg); border-color: var(--st-info-bd); }
+.pill.src-gitea { color: var(--st-success-fg); background: var(--st-success-bg); border-color: var(--st-success-bd); }
+.pill.src-warn { color: var(--st-warning-fg); background: var(--st-warning-bg); border-color: var(--st-warning-bd); }
+.notice.notice-warn { border-color: var(--st-warning-bd); background: var(--st-warning-bg); color: var(--st-warning-fg); }
+.toolbar button:disabled { opacity: 0.55; cursor: default; }
+.tabs button:disabled { opacity: 0.55; cursor: default; }
+</style>

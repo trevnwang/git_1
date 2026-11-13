@@ -20,7 +20,7 @@ ui/                            # Vue 3 + TS + Vite：App Shell / 看板 Mock / C
 docs/
 ├─ dev-environment.md          # 本机工具链体检与复现命令
 ├─ vs-workflow.md              # VS 打开/编译/测试/发布命令与验证记录
-├─ ui-review-m0.md             # M0 界面自检（CDP 驱动、截图、修复记录）
+├─ ui-review-m0.md             # M0 界面自检（CDP 驱动、截图、修复记录）\n├─ m1-status.md                # M1-a：本地扫描 + Gitea 只读同步 + 真实看板（含验证/偏差）
 └─ m0-status.md                # M0 完成状态、运行方式、CI 锚点映射
 artifacts/                     # 发布产物（gitignored）：publish/ + zip
 reqs/                          # 需求工程（唯一需求源 + 评审证据 + 冻结资产）
@@ -63,7 +63,7 @@ dotnet run   --project src\MbdGitTool.Host
 - **需求**：草案经 6 路对抗式评审判定不可直接开发（167 条发现）；已重建 SRS **v0.2.1**，第二轮冻结复评判定 **☑ 有条件进入 M0**（C1–C5 已关闭，C6 错误码全表为 M0 出口条件）。
 - **M0 骨架已完成**：根级 VS 解决方案（.NET 10.0.404 固定）、领域聚合纯函数 + 10 个单测、WPF+WebView2 宿主、Vue App Shell（看板 Mock / 10 个 CI 锚点 / 状态栏）、VS 编译+测试+发布链路。
 - **验证**：`devenv.com` 4/4 成功；VS MSBuild 0 warning/0 error；vstest 10/10；Release 发布产物 `navigation success=True`；zip 位于 `artifacts/`。
-- **下一步**：M1（Gitea 同步 + 本地扫描 + 真实状态计算 + 看板接真数据 + 首启三阶段），详见 [m0-status.md](docs/m0-status.md) §5。
+- **M1-a 已完成**：本地扫描 + Gitea 只读同步 + 真实状态计算 + 看板接真数据（71 测试、CDP 真机验证通过），详见 [m1-status.md](docs/m1-status.md)。\n- **下一步 M1-b**：远程 refs/fetch、三阶段首扫进度、GitWorker 管道、未绑定仓 UI、Gitea 退避。
 - 待用户确认：容量口径、常驻形态、远程 SLO、Gitea 配额等，见 `requirements.md` 第 15 章（均非阻塞）。
 
 ## 提交约定（Conventional Commits）
