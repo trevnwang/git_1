@@ -1,0 +1,190 @@
+{
+  "schema_version": "1.0",
+  "purpose": "附录 C 状态矩阵夹具的期望值静态副本（与 state-matrix.ps1 内定义一致，供表驱动测试直接比对）",
+  "source": "SRS v0.2.1（reqs/requirements.md）§7.2（14 主状态）/§7.3（11 flag）/§7.4（15 聚合态；MISSING=3 先于 BLOCKED_LOCAL=4）/§8.1（字段）+ 附录 C；reqs/review/02-git-domain.md §2 表 A/表 B/表 C；对齐 reqs/review/07-freeze-review.md C-03",
+  "notes": [
+    "expected_primary_state 为附录 C 的 fixture 级主状态；对多仓混合 fixture 取四仓中优先级最高者（F-PARTIAL 为组件级覆盖态，无单仓主状态，故为 null）。",
+    "NO_UPSTREAM 三子型统一使用 SRS 7.2 名称：LOCAL_ONLY / UNSET_BUT_EXISTS / UPSTREAM_GONE（附录 C 简写 LOCAL/UNSET/GONE）。",
+    "expected_repos 为四仓逐仓期望主状态，供测试逐仓断言；组件聚合见 expected_component_aggregate。",
+    "expected_flags 仅列出 SRS 7.3 定义的 flag；附录 C 的 tag_present 不是 7.3 flag，未收录。",
+    "组件聚合优先级以 SRS v0.2.1 §7.4 为准（MISSING=3 / BLOCKED_LOCAL=4）；F-MISSING+BLOCKED 是顺序锁定夹具，期望组件 MISSING。severity_rank 是独立维度，不在本文件断言。"
+  ],
+  "component_default": "CF325F_ChanganSigProcgBascFct",
+  "fixtures": {
+    "F-SYNCED": {
+      "expected_primary_state": "SYNCED",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "SYNCED",
+      "expected_repos": { "Design": "SYNCED", "Impl": "SYNCED", "MIL": "SYNCED", "SIL": "SYNCED" }
+    },
+    "F-BEHIND": {
+      "expected_primary_state": "BEHIND",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "BEHIND",
+      "expected_repos": { "Design": "BEHIND", "Impl": "BEHIND", "MIL": "BEHIND", "SIL": "BEHIND" }
+    },
+    "F-AHEAD": {
+      "expected_primary_state": "AHEAD",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "AHEAD",
+      "expected_repos": { "Design": "AHEAD", "Impl": "AHEAD", "MIL": "AHEAD", "SIL": "AHEAD" }
+    },
+    "F-DIVERGED": {
+      "expected_primary_state": "DIVERGED",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "DIVERGED",
+      "expected_repos": { "Design": "DIVERGED", "Impl": "DIVERGED", "MIL": "DIVERGED", "SIL": "DIVERGED" }
+    },
+    "F-DIRTY": {
+      "expected_primary_state": "DIRTY",
+      "expected_sub_type": null,
+      "expected_flags": ["dirty_tracked"],
+      "expected_component_aggregate": "DIRTY",
+      "expected_repos": { "Design": "DIRTY", "Impl": "DIRTY", "MIL": "DIRTY", "SIL": "DIRTY" }
+    },
+    "F-NO_UPSTREAM-LOCAL": {
+      "expected_primary_state": "NO_UPSTREAM",
+      "expected_sub_type": "LOCAL_ONLY",
+      "expected_flags": [],
+      "expected_component_aggregate": "NEW_BRANCH",
+      "expected_repos": { "Design": "NO_UPSTREAM", "Impl": "NO_UPSTREAM", "MIL": "NO_UPSTREAM", "SIL": "NO_UPSTREAM" }
+    },
+    "F-NO_UPSTREAM-UNSET": {
+      "expected_primary_state": "NO_UPSTREAM",
+      "expected_sub_type": "UNSET_BUT_EXISTS",
+      "expected_flags": [],
+      "expected_component_aggregate": "NEW_BRANCH",
+      "expected_repos": { "Design": "NO_UPSTREAM", "Impl": "NO_UPSTREAM", "MIL": "NO_UPSTREAM", "SIL": "NO_UPSTREAM" }
+    },
+    "F-NO_UPSTREAM-GONE": {
+      "expected_primary_state": "NO_UPSTREAM",
+      "expected_sub_type": "UPSTREAM_GONE",
+      "expected_flags": [],
+      "expected_component_aggregate": "NEW_BRANCH",
+      "expected_repos": { "Design": "NO_UPSTREAM", "Impl": "NO_UPSTREAM", "MIL": "NO_UPSTREAM", "SIL": "NO_UPSTREAM" }
+    },
+    "F-DETACHED-TAG": {
+      "expected_primary_state": "DETACHED_TAG",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "DETACHED",
+      "expected_repos": { "Design": "DETACHED_TAG", "Impl": "DETACHED_TAG", "MIL": "DETACHED_TAG", "SIL": "DETACHED_TAG" }
+    },
+    "F-DETACHED-COMMIT": {
+      "expected_primary_state": "DETACHED_COMMIT",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "DETACHED",
+      "expected_repos": { "Design": "DETACHED_COMMIT", "Impl": "DETACHED_COMMIT", "MIL": "DETACHED_COMMIT", "SIL": "DETACHED_COMMIT" }
+    },
+    "F-UNMERGED": {
+      "expected_primary_state": "UNMERGED",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "BLOCKED_LOCAL",
+      "expected_repos": { "Design": "UNMERGED", "Impl": "UNMERGED", "MIL": "UNMERGED", "SIL": "UNMERGED" }
+    },
+    "F-IN_PROGRESS": {
+      "expected_primary_state": "IN_PROGRESS",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "BLOCKED_LOCAL",
+      "expected_repos": { "Design": "IN_PROGRESS", "Impl": "IN_PROGRESS", "MIL": "IN_PROGRESS", "SIL": "IN_PROGRESS" }
+    },
+    "F-EMPTY": {
+      "expected_primary_state": "EMPTY",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "EMPTY",
+      "expected_repos": { "Design": "EMPTY", "Impl": "EMPTY", "MIL": "EMPTY", "SIL": "EMPTY" }
+    },
+    "F-INVALID-NOTREPO": {
+      "expected_primary_state": "INVALID",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "BINDING_ERROR",
+      "expected_repos": { "Design": "INVALID", "Impl": "SYNCED", "MIL": "SYNCED", "SIL": "SYNCED" }
+    },
+    "F-INVALID-REMOTE": {
+      "expected_primary_state": "INVALID",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "BINDING_ERROR",
+      "expected_repos": { "Design": "INVALID", "Impl": "SYNCED", "MIL": "SYNCED", "SIL": "SYNCED" }
+    },
+    "F-MISSING": {
+      "expected_primary_state": "MISSING",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "MISSING",
+      "expected_repos": { "Design": "MISSING", "Impl": "SYNCED", "MIL": "SYNCED", "SIL": "SYNCED" }
+    },
+    "F-MISSING+BLOCKED": {
+      "expected_primary_state": "MISSING",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "MISSING",
+      "expected_repos": { "Design": "MISSING", "Impl": "UNMERGED", "MIL": "SYNCED", "SIL": "SYNCED" }
+    },
+    "F-UNKNOWN": {
+      "expected_primary_state": "UNKNOWN",
+      "expected_sub_type": null,
+      "expected_flags": ["stale"],
+      "expected_component_aggregate": "UNKNOWN",
+      "expected_repos": { "Design": "UNKNOWN", "Impl": "UNKNOWN", "MIL": "UNKNOWN", "SIL": "UNKNOWN" }
+    },
+    "F-DETACHED+MIXED": {
+      "expected_primary_state": "DETACHED_TAG",
+      "expected_sub_type": null,
+      "expected_flags": ["mixed_branch"],
+      "expected_component_aggregate": "DETACHED",
+      "expected_repos": { "Design": "DETACHED_TAG", "Impl": "DETACHED_TAG", "MIL": "SYNCED", "SIL": "SYNCED" }
+    },
+    "F-TAG_DRIFT": {
+      "expected_primary_state": "DETACHED_TAG",
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "TAG_DRIFT",
+      "expected_repos": { "Design": "DETACHED_TAG", "Impl": "DETACHED_TAG", "MIL": "DETACHED_TAG", "SIL": "SYNCED" }
+    },
+    "F-PARTIAL": {
+      "expected_primary_state": null,
+      "expected_sub_type": null,
+      "expected_flags": [],
+      "expected_component_aggregate": "OP_PARTIAL_FAILED",
+      "expected_repos": { "Design": "SYNCED", "Impl": "MISSING", "MIL": "SYNCED", "SIL": "MISSING" }
+    },
+    "F-LFS-MISSING": {
+      "expected_primary_state": "SYNCED",
+      "expected_sub_type": null,
+      "expected_flags": ["lfs_missing"],
+      "expected_component_aggregate": "SYNCED",
+      "expected_repos": { "Design": "SYNCED", "Impl": "SYNCED", "MIL": "SYNCED", "SIL": "SYNCED" }
+    },
+    "F-BUSY": {
+      "expected_primary_state": "SYNCED",
+      "expected_sub_type": null,
+      "expected_flags": ["busy"],
+      "expected_component_aggregate": "SYNCED",
+      "expected_repos": { "Design": "SYNCED", "Impl": "SYNCED", "MIL": "SYNCED", "SIL": "SYNCED" }
+    },
+    "F-REMOTE-GONE": {
+      "expected_primary_state": "UNKNOWN",
+      "expected_sub_type": null,
+      "expected_flags": ["remote_gone"],
+      "expected_component_aggregate": "UNKNOWN",
+      "expected_repos": { "Design": "UNKNOWN", "Impl": "UNKNOWN", "MIL": "UNKNOWN", "SIL": "UNKNOWN" }
+    },
+    "F-TAG-MOVED": {
+      "expected_primary_state": "SYNCED",
+      "expected_sub_type": null,
+      "expected_flags": ["tag_moved"],
+      "expected_component_aggregate": "TAG_DRIFT",
+      "expected_repos": { "Design": "SYNCED", "Impl": "SYNCED", "MIL": "SYNCED", "SIL": "SYNCED" }
+    }
+  }
+}

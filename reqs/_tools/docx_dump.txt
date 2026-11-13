@@ -1,0 +1,163 @@
+== title: 
+== author: Apache POI
+== created: 2026-11-13 13:27:00+00:00
+== modified: 2026-11-13 13:46:00+00:00
+== revision: 14
+
+[Normal] MBD组件全生命周期Git工具
+[Normal] MBD组件全生命周期Git
+[Normal] 一、HLR 高阶需求文档（High-Level Requirements）
+[Normal] 1. 产品定位
+[Normal] 本软件为 Windows 桌面客户端，面向Model-Based Design汽车嵌入式组件开发场景。
+[Normal] 核心解决行业痛点：
+[Normal [list]] 业务以「组件」Component为单位管理，Git以4000+独立仓库存储，以下称Repo（Repository），天然割裂
+[Normal [list]] 一个Component = 4个固定生命周期Repo（Design / Impl / MIL / SIL），如Component CF123A_ShortName 有四个Repo： CF123A_ShortName_Design， CF123A_ShortName_Impl, CF123A_ShortName_MIL, CF123A_ShortName_SIL。
+[Normal [list]] 传统Git工具只能按仓库管理，无法实现组件级批量操作、版本联动、状态聚合等
+[Normal] 本工具目标：
+[List Paragraph [list]] 屏蔽4000个底层Git仓库，让用户完全以【业务组件】视角做开发管理、版本管理
+[List Paragraph [list]] 以【业务组件】视角做CI管理、基线管理。
+[Normal] 2. 整体系统架构（高层）
+[Normal [list]] 前端
+[Normal] 纯网页级动画、卡片、状态看板、无需任何QT呆板界面。
+[Normal [list]] 后端
+[Normal] 多独立常驻后台进程、隔离职责、高并发、不卡UI。
+[Normal [list]] 本地结构化数据库
+[Normal] 存储远程Git元数据、本地状态、对比结果等。
+[Normal [list]] 组件双数据源驱动
+[Normal [list]] 远程：Gitea组织API + CI流水线API
+[Normal [list]] 本地：本机真实Git仓库文件状态
+[Normal] 3. 四大核心高阶能力
+[Normal] 能力1：组件级Git聚合管理（核心基石）
+[Normal [list]] 自动识别组件四仓绑定关系（统一前缀+固定四类后缀）
+[Normal [list]] 支持组件级批量操作：批量Clone、批量Checkout、批量切换Tag、批量Pull、批量删除
+[Normal [list]] 支持单仓库独立Commit/Push，不强制四仓统一提交
+[Normal] 能力2：全自动组件版本状态感知（无需人工沟通）
+[Normal] 自动计算每个组件整体状态：
+[Normal [list]] 本地版本落后远程
+[Normal [list]] 本地版本超前远程（本人开发中）
+[Normal [list]] 远程本地分叉（存在冲突需Merge/Rebase）
+[Normal [list]] 本地缺失组件仓库
+[Normal] 全程自动探测、自动刷新、可视化展示。
+[Normal] 能力3：CI流水线状态联动
+[Normal] 自动绑定每一次Commit对应的CI结果：
+[Normal [list]] CI Building（进行中）
+[Normal [list]] CI Pass（通过）
+[Normal [list]] CI Fail（失败）
+[Normal] 无需查看邮件，客户端实时预警。
+[Normal] 4. 高层业务规则（不可改动）
+[Normal [list]] 组件定义永久固定：1组件 = Design + Impl + MIL + SIL 四仓
+[Normal [list]] Git组织仓库命名全局唯一，无需程序校验前缀合法性
+[Normal [list]] 所有自动化判断以「远程Git真实数据 + 本地真实Git数据」双为准
+[Normal [list]] 工具操作 + 开发者手动Git操作 全部可被系统兜底识别
+[Normal] 5. 高层非功能需求
+[Normal [list]] UI必须网页级炫酷动效、卡片化、状态色标化
+[Normal [list]] UI全程丝滑，所有耗时操作后台进程执行，不阻塞前端
+[Normal [list]] 支持上千仓库元数据管理、百级本地组件实时监控
+[Normal [list]] 状态刷新秒级感知
+[Normal] 二、LLR 低阶详细需求文档（Low-Level Requirements）
+[Normal] （超细颗粒度、进程拆分、数据表结构、逻辑规则、前端交互全覆盖）
+[Normal] 第一部分：后端架构设计（多独立单职责常驻进程）
+[Normal] 所有进程完全解耦、独立运行、互不阻塞、异常自恢复
+[Normal] 进程1：远程Git全量元数据同步进程（低频全量同步）
+[Normal] 职责
+[Normal] 唯一负责：拉取 Git组织下 所有4000+仓库 的全局元数据
+[Normal] 不读取本地文件、不做对比、不操作本地Git
+[Normal] 同步内容
+[Normal [list]] 所有仓库名称、归属组件前缀
+[Normal [list]] 所有分支列表
+[Normal [list]] 所有Tag列表 & Tag对应CommitHash
+[Normal [list]] 所有分支最新CommitHash
+[Normal [list]] 仓库创建/更新时间
+[Normal] 执行策略
+[Normal [list]] 执行间隔：6小时一次全量同步
+[Normal [list]] 超时机制：单次同步120s超时
+[Normal [list]] 失败策略：自动重试2次，失败写入日志，不影响其他进程
+[Normal [list]] 增量优化：仅更新变更仓库，不重复写入未变动仓库
+[Normal] 落地输出
+[Normal] 写入数据表：git_remote_meta
+[Normal] 
+[Normal] 进程2：本地组件增量状态轮询进程（高频监控）
+[Normal] 职责
+[Normal] 唯一负责：只监控本机已克隆的组件（100+量级，一般不会有人下载全量下载4000个仓库到本地）
+[Normal] 读取本地真实Git仓库状态 + 调取CI API
+[Normal] 采集内容
+[Normal [list]] 本地当前分支
+[Normal [list]] 本地当前最新CommitHash
+[Normal [list]] 本地所有未推送Commit列表
+[Normal [list]] 当前Commit对应CI流水线状态（Pending / Pass / Fail）
+[Normal] 执行策略
+[Normal [list]] 执行间隔：30秒/次
+[Normal [list]] 只遍历本机存在的组件目录
+[Normal [list]] 不访问远程全部仓库，性能极高
+[Normal] 落地输出
+[Normal] 写入数据表：git_local_cache
+[Normal] 
+[Normal] 进程3：远近版本智能对比计算进程（核心算法进程）
+[Normal] 职责
+[Normal] 唯一负责：状态计算、差异判定、冲突判定
+[Normal] 读取：远程元数据表 + 本地缓存表
+[Normal] 输出五大标准状态（组件单仓级别）
+[Normal [list]] 本地正常同步（完全一致）
+[Normal [list]] 本地落后远程（需要Pull更新）
+[Normal [list]] 本地超前远程（本人正在开发未推送）
+[Normal [list]] 远程本地分叉冲突（双方并行开发，需Merge/Rebase）
+[Normal [list]] 本地仓库缺失（本机无该组件对应阶段仓库）
+[Normal] 组件整体聚合规则
+[Normal] 一个组件整体状态 = 四仓状态合并展示
+[Normal] 只要任一仓库异常，组件整体标异常高亮
+[Normal] 执行策略
+[Normal [list]] 执行间隔：10秒/次
+[Normal [list]] 纯内存比对，无IO阻塞
+[Normal] 落地输出
+[Normal] 写入数据表：component_status
+[Normal] 
+[Normal] 第二部分：数据库表结构设计（极简五表架构）
+[Normal] 表1：git_remote_meta（远程全局仓库元数据表）
+[Normal [list]] component_prefix：组件前缀
+[Normal [list]] repo_type：仓库类型（design/impl/mil/sil）
+[Normal [list]] latest_commit：远程最新CommitHash
+[Normal [list]] branch_list：所有分支
+[Normal [list]] tag_list：所有版本Tag
+[Normal [list]] update_time：远程更新时间
+[Normal] 表2：git_local_cache（本地真实状态缓存表）
+[Normal [list]] local_commit：本地最新Commit
+[Normal [list]] local_branch：本地当前分支
+[Normal [list]] unpush_commit_count：本地未推送提交数
+[Normal [list]] ci_status：当前CI状态
+[Normal [list]] scan_time：扫描时间
+[Normal] 表3：component_status（组件最终状态表）
+[Normal [list]] repo_status：五大状态枚举
+[Normal [list]] is_error：是否异常
+[Normal [list]] error_msg：异常说明
+[Normal [list]] component_full_status：组件整体汇总状态
+[Normal] 
+[Normal] 第三部分：前端WebView2详细低阶需求
+[Normal] 页面1：组件总览看板页
+[Normal] 视觉风格
+[Normal] 网页级炫酷卡片、渐变、动效、hover高亮、状态色标
+[Normal] 卡片状态色标体系
+[Normal [list]] 绿色：完全同步正常
+[Normal [list]] 黄色：本地落后需更新
+[Normal [list]] 蓝色：本地超前（自主开发中）
+[Normal [list]] 橙色：分叉冲突待处理
+[Normal [list]] 红色：CI失败 / 仓库缺失异常
+[Normal] 组件操作功能（组件级批量）
+[Normal [list]] 输入组件前缀 → 一键批量Clone四仓
+[Normal [list]] 输入Tag版本 → 四仓批量切换Tag
+[Normal [list]] 组件批量Pull、批量Checkout
+[Normal [list]] 组件一键整体删除（本地四仓全部清空）
+[Normal] 单仓精细操作
+[Normal] 支持对四仓任意单仓：Commit / Push / Pull / Reset
+[Normal] 
+[Normal] 第四部分：兜底容错低阶规则（重要）
+[Normal [list]] 开发者手动使用外部Git工具提交代码
+[Normal] → 进程2轮询自动感知，完全兜底，不依赖本工具操作
+[Normal [list]] 远程他人更新版本、打Tag、合代码
+[Normal] → 进程1全局同步自动抓取
+[Normal [list]] 任意进程崩溃自动重启，不影响UI
+[Normal [list]] 所有状态变更留痕日志，可回溯排查
+[Normal] 
+[Normal] 第五部分：技术栈
+[Normal [list]] 后端：C# .NET 常驻多进程架构
+[Normal [list]] 前端：未定
+[Normal [list]] 本地数据库：高性能嵌入式数据库（替代笨重Postgres、优于SQLite）
