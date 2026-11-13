@@ -65,3 +65,11 @@ dotnet run   --project src\MbdGitTool.Host
 - **验证**：`devenv.com` 4/4 成功；VS MSBuild 0 warning/0 error；vstest 10/10；Release 发布产物 `navigation success=True`；zip 位于 `artifacts/`。
 - **下一步**：M1（Gitea 同步 + 本地扫描 + 真实状态计算 + 看板接真数据 + 首启三阶段），详见 [m0-status.md](docs/m0-status.md) §5。
 - 待用户确认：容量口径、常驻形态、远程 SLO、Gitea 配额等，见 `requirements.md` 第 15 章（均非阻塞）。
+
+## 提交约定（Conventional Commits）
+
+- 每完成一个里程碑/可交付阶段提交一笔：`feat(m1): ...`、`fix(ui): ...`、`docs(reqs): ...`、`chore: ...`；
+- 提交信息正文写：改了什么 / 为什么 / 验证方式（build/test/手工验证）；
+- 里程碑提交同时打 tag：`m0-baseline`、`m1-baseline`…，便于回滚；
+- 需求变更单独提交（`docs(reqs): ...`），与代码提交分离；
+- `artifacts/`、`bin/obj`、`node_modules`、`ui/dist`、`.vs/` 不入库。
