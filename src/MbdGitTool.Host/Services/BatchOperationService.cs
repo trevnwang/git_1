@@ -416,6 +416,153 @@ public sealed partial class BatchOperationService
             null);
     }
 
+    // ---------------------------------------------------------------- REPAIR / RECLONE
+
+    /// <summary>AC-REPO-08 / AC-OP-05：非 git 目录修复或 origin 不匹配时 Re-clone。</summary>
+    public async Task<BatchItemResult> RepairAsync(
+        RepoRef? repo,
+        string componentId,
+        string repoType,
+        StoredJobArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        if (_paths is null) return Failed(BridgeErrorCodes.WorkspaceUnset, "未配置工作区根目录，无法 REPAIR");
+        if (!arguments.Confirm) return Failed(BridgeErrorCodes.ConfirmRequired, "REPAIR 需要确认");
+        if (repo?.Repo.LocalPath is not { Length: > 0 } rawPath)
+            return Failed(BridgeErrorCodes.PathInvalid, "REPAIR 需要本地目录路径");
+        var path = PathPolicy.TryCanonicalize(rawPath);
+        if (path is null || !Directory.Exists(path)) return Failed(BridgeErrorCodes.PathInvalid, "REPAIR 目标目录不存在");
+        if (Directory.Exists(Path.Combine(path, ".git"))) return Failed(BridgeErrorCodes.ActionNotAllowed, "目录已是 git 仓库，不能 REPAIR");
+
+        var repoName = RepoNameFor(repo, componentId, repoType);
+        var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        var backupDir = Path.Combine(_paths.Root, TrashDirectoryName, stamp, repoName + ".repair-backup");
+        var moved = new List<(string Source, string Target)>();
+        try
+        {
+            Directory.CreateDirectory(backupDir);
+            foreach (var file in Directory.EnumerateFiles(path))
+            {
+                var target = Path.Combine(backupDir, Path.GetFileName(file));
+                File.Move(file, target);
+                moved.Add((file, target));
+            }
+            foreach (var dir in Directory.EnumerateDirectories(path))
+            {
+                var target = Path.Combine(backupDir, Path.GetFileName(dir));
+                MoveDirectory(dir, target);
+                moved.Add((dir, target));
+            }
+
+            var urlFailure = PrepareCloneUrl(repoName, out var url, out var environment);
+            if (urlFailure is not null) throw new InvalidOperationException(urlFailure.Message);
+
+            var init = await _git.RunAsync(path, new[] { "init", "-q" }, cancellationToken, WriteTimeout).ConfigureAwait(false);
+            if (!init.Success) throw new InvalidOperationException("git init 失败");
+            var remote = await _git.RunAsync(path, new[] { "remote", "add", "origin", url }, cancellationToken, WriteTimeout).ConfigureAwait(false);
+            if (!remote.Success) throw new InvalidOperationException("设置 origin 失败");
+            var fetch = await _git.RunAsync(path, new[] { "fetch", "origin" }, cancellationToken, NetworkTimeout, environment).ConfigureAwait(false);
+            if (!fetch.Success) throw new InvalidOperationException("fetch 失败");
+            var branch = string.IsNullOrWhiteSpace(repo?.Repo.Branch) ? "main" : repo!.Repo.Branch!;
+            var checkout = await _git.RunAsync(path, new[] { "checkout", "-q", "-B", branch, "origin/" + branch }, cancellationToken, WriteTimeout).ConfigureAwait(false);
+            if (!checkout.Success) throw new InvalidOperationException("checkout 失败");
+
+            var head = await ReadHeadAsync(path, cancellationToken).ConfigureAwait(false);
+            return new BatchItemResult(JobItemStates.Ok, null,
+                $"REPAIR 完成：{repoName}；原内容已备份到 {TrashDirectoryName}/{stamp}/{repoName}.repair-backup（30 天）", head, head, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            foreach (var (source, target) in moved)
+            {
+                try
+                {
+                    if (File.Exists(target)) File.Move(target, source);
+                    else if (Directory.Exists(target)) MoveDirectory(target, source);
+                }
+                catch (Exception rollbackEx) when (rollbackEx is IOException or UnauthorizedAccessException)
+                {
+                    HostLog.Warn($"REPAIR 回滚失败（{rollbackEx.GetType().Name}）");
+                }
+            }
+            return Failed(BridgeErrorCodes.RepairFailed, $"REPAIR 失败并已回滚（{ex.GetType().Name}）：{ex.Message}");
+        }
+        finally
+        {
+            try { if (Directory.Exists(backupDir) && !Directory.EnumerateFileSystemEntries(backupDir).Any()) Directory.Delete(backupDir); }
+            catch (IOException) { /* ignore */ }
+        }
+    }
+
+    /// <summary>AC-REPO-08：先备份原目录到 .trash，再 clone；失败自动移回。</summary>
+    public async Task<BatchItemResult> RecloneAsync(
+        RepoRef? repo,
+        string componentId,
+        string repoType,
+        StoredJobArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        if (_paths is null) return Failed(BridgeErrorCodes.WorkspaceUnset, "未配置工作区根目录，无法 RECLONE");
+        if (!arguments.Confirm) return Failed(BridgeErrorCodes.ConfirmRequired, "RECLONE 需要确认");
+        if (!MatchesTypedConfirm(arguments.ConfirmText, componentId))
+            return Skip(BridgeErrorCodes.ConfirmRequired, $"RECLONE 需输入组件 ID「{componentId.Trim()}」强确认");
+        if (repo?.Repo.LocalPath is not { Length: > 0 } rawPath) return Failed(BridgeErrorCodes.PathInvalid, "RECLONE 需要本地目录");
+        var path = PathPolicy.TryCanonicalize(rawPath);
+        if (path is null || !Directory.Exists(path)) return Failed(BridgeErrorCodes.PathInvalid, "RECLONE 目标不存在");
+
+        var status = await _git.RunAsync(path, new[] { "status", "--porcelain", "--untracked-files=all" }, cancellationToken).ConfigureAwait(false);
+        if (!status.Success || status.Stdout.Trim().Length > 0)
+            return Failed(BridgeErrorCodes.DirtyWorktree, "RECLONE 前工作区必须 clean（含 untracked）");
+        var unpushed = await CountUnpushedAsync(path, cancellationToken).ConfigureAwait(false);
+        if (unpushed is > 0) return Failed(BridgeErrorCodes.ActionNotAllowed, "存在未推送提交，RECLONE 拒绝（先发布/备份）");
+        if (await HasStashAsync(path, cancellationToken).ConfigureAwait(false)) return Failed(BridgeErrorCodes.ActionNotAllowed, "存在 stash，RECLONE 拒绝");
+
+        var repoName = RepoNameFor(repo, componentId, repoType);
+        var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        var trash = Path.Combine(_paths.Root, TrashDirectoryName, stamp, repoName);
+        Directory.CreateDirectory(Path.GetDirectoryName(trash)!);
+        try
+        {
+            MoveDirectory(path, trash);
+            var urlFailure = PrepareCloneUrl(repoName, out var url, out var environment);
+            if (urlFailure is not null) throw new InvalidOperationException(urlFailure.Message);
+            var clone = await _git.RunAsync(_paths.Root, new[] { "clone", "-q", "--", url, path }, cancellationToken, NetworkTimeout, environment).ConfigureAwait(false);
+            if (!clone.Success) throw new InvalidOperationException("clone 失败");
+            var head = await ReadHeadAsync(path, cancellationToken).ConfigureAwait(false);
+            return new BatchItemResult(JobItemStates.Ok, null,
+                $"RECLONE 完成：{repoName}；原目录备份在 {TrashDirectoryName}/{stamp}/{repoName}（30 天）", head, head, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            try
+            {
+                if (!Directory.Exists(path) && Directory.Exists(trash)) MoveDirectory(trash, path);
+            }
+            catch (Exception rollbackEx) when (rollbackEx is IOException or UnauthorizedAccessException)
+            {
+                HostLog.Warn($"RECLONE 回滚失败（{rollbackEx.GetType().Name}）");
+            }
+            return Failed(BridgeErrorCodes.RecloneFailed, $"RECLONE 失败并已回滚：{ex.Message}");
+        }
+    }
+
+    private BridgeError? PrepareCloneUrl(
+        string repoName,
+        out string url,
+        out IReadOnlyDictionary<string, string>? environment)
+    {
+        url = string.Empty;
+        environment = null;
+        var baseUrl = _config.GiteaBaseUrl?.Trim().TrimEnd('/');
+        var org = _config.GiteaOrg?.Trim();
+        if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(org))
+            return new BridgeError(BridgeErrorCodes.GiteaConfigInvalid, "未配置 Gitea baseUrl/org");
+        var credentialFailure = _actions.TryBuildCloneCredentialEnvironment(out var env);
+        if (credentialFailure is not null) return credentialFailure.Error ?? new BridgeError(BridgeErrorCodes.GiteaConfigInvalid, "凭据配置失败");
+        environment = env;
+        url = baseUrl + "/" + org + "/" + repoName + ".git";
+        return null;
+    }
     // ---------------------------------------------------------------- DELETE
 
     /// <summary>

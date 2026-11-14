@@ -49,14 +49,14 @@ public sealed class JobEngine : IDisposable
     /// <summary>允许的批量 kind（SRS §8.1 job.kind CHECK 子集；REPAIR 等修复类不在本轮实现）。</summary>
     private static readonly string[] KindWhitelist =
     {
-        "FETCH", "PULL", "CHKOUT", "COMMIT", "PUSH", "SYNC", "CLONE", "DELETE", "RESTORE", "CREATE", "TAG"
+        "FETCH", "PULL", "CHKOUT", "COMMIT", "PUSH", "SYNC", "CLONE", "DELETE", "RESTORE", "CREATE", "TAG", "REPAIR", "RECLONE"
     };
 
     /// <summary>单仓五键（复用 <see cref="RepoActionService"/> 的矩阵/确认/工具链）。</summary>
     private static readonly string[] RepoActionKinds = { "FETCH", "PULL", "CHKOUT", "COMMIT", "PUSH" };
 
     /// <summary>必须 <c>args.confirm=true</c> 才执行的“强写”kind（批量入口 UI 二次确认 + Host 门禁双保险）。</summary>
-    private static readonly string[] ConfirmRequiredKinds = { "COMMIT", "PUSH", "SYNC", "DELETE", "RESTORE", "CREATE", "TAG" };
+    private static readonly string[] ConfirmRequiredKinds = { "COMMIT", "PUSH", "SYNC", "DELETE", "RESTORE", "CREATE", "TAG", "REPAIR", "RECLONE" };
 
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
@@ -794,6 +794,8 @@ public sealed class JobEngine : IDisposable
                 "CREATE" => await _batch.CreateBranchAsync(repo, item.RepoType, arguments, cancellationToken)
                     .ConfigureAwait(false),
                 "TAG" => await _batch.TagAsync(repo, item.RepoType, arguments, cancellationToken).ConfigureAwait(false),
+                "REPAIR" => await _batch.RepairAsync(repo, item.ComponentId, item.RepoType, arguments, cancellationToken).ConfigureAwait(false),
+                "RECLONE" => await _batch.RecloneAsync(repo, item.ComponentId, item.RepoType, arguments, cancellationToken).ConfigureAwait(false),
                 _ => new BatchItemResult(
                     JobItemStates.Failed,
                     BridgeErrorCodes.InvalidArgument,
