@@ -1237,6 +1237,75 @@ public sealed partial class BatchOperationService
             baseline.Success ? baselineRef : null);
     }
 
+    /// <summary>AC-REPO-10：DETACHED（tag/commit）基于当前 HEAD 建分支并检出。</summary>
+    public async Task<BatchItemResult> FixDetachedAsync(
+        RepoRef? repo,
+        string repoType,
+        StoredJobArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        var local = ResolveLocalRepo(repo, repoType, "FIX_DETACHED");
+        if (local.Result is not null) return local.Result;
+        var branch = arguments.Branch;
+        if (string.IsNullOrWhiteSpace(branch) || !IsSafeRefSegment(branch))
+            return Failed(BridgeErrorCodes.InvalidArgument, "分支名非法");
+        var current = await _git.RunAsync(local.Path!, new[] { "rev-parse", "--abbrev-ref", "HEAD" }, cancellationToken).ConfigureAwait(false);
+        if (!current.Success || !string.Equals(current.TrimmedStdout, "HEAD", StringComparison.Ordinal))
+            return Skip(BridgeErrorCodes.ActionNotAllowed, "当前不是 detached HEAD，跳过");
+        var head = await ReadHeadAsync(local.Path!, cancellationToken).ConfigureAwait(false);
+        if (head is null) return Failed(BridgeErrorCodes.ActionNotAllowed, "无 HEAD 无法建分支");
+        var create = await _git.RunAsync(local.Path!, new[] { "switch", "-c", branch }, cancellationToken, WriteTimeout).ConfigureAwait(false);
+        if (!create.Success) return MapGitFailure("FIX_DETACHED", create, cancellationToken);
+        return new BatchItemResult(JobItemStates.Ok, null, $"已基于当前 HEAD 建分支并检出：{branch}", head, head, null);
+    }
+
+    /// <summary>AC-REPO-09：NO_UPSTREAM 三子型修复（PUBLISH / SET_UPSTREAM / CLEAR_UPSTREAM）。</summary>
+    public async Task<BatchItemResult> FixUpstreamAsync(
+        RepoRef? repo,
+        string repoType,
+        StoredJobArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        var local = ResolveLocalRepo(repo, repoType, "FIX_UPSTREAM");
+        if (local.Result is not null) return local.Result;
+        var branchResult = await _git.RunAsync(local.Path!, new[] { "rev-parse", "--abbrev-ref", "HEAD" }, cancellationToken).ConfigureAwait(false);
+        var branch = branchResult.TrimmedStdout;
+        if (!branchResult.Success || branch == "HEAD" || !IsSafeRefSegment(branch))
+            return Failed(BridgeErrorCodes.ActionNotAllowed, "当前不是分支状态，无法修复 upstream");
+        var mode = (arguments.Mode ?? "SET_UPSTREAM").ToUpperInvariant();
+        var preHead = await ReadHeadAsync(local.Path!, cancellationToken).ConfigureAwait(false);
+
+        if (mode == "CLEAR_UPSTREAM")
+        {
+            var clear = await _git.RunAsync(local.Path!, new[] { "branch", "--unset-upstream", branch }, cancellationToken, WriteTimeout).ConfigureAwait(false);
+            return clear.Success
+                ? new BatchItemResult(JobItemStates.Ok, null, $"已清除 {branch} 的 upstream", preHead, preHead, null)
+                : MapGitFailure("FIX_UPSTREAM", clear, cancellationToken);
+        }
+
+        if (mode == "PUBLISH")
+        {
+            var (failure, env) = await _actions.PrepareCredentialEnvironmentAsync(local.Path!, "FIX_UPSTREAM", cancellationToken).ConfigureAwait(false);
+            if (failure is not null) return Failed(failure.Error?.Code ?? BridgeErrorCodes.Internal, failure.Error?.Message ?? "凭据校验失败");
+            var push = await _git.RunAsync(local.Path!, new[] { "push", "-u", "origin", branch }, cancellationToken, NetworkTimeout, env).ConfigureAwait(false);
+            return push.Success
+                ? new BatchItemResult(JobItemStates.Ok, null, $"已发布分支并建立 upstream：origin/{branch}", preHead, preHead, null)
+                : MapGitFailure("FIX_UPSTREAM", push, cancellationToken);
+        }
+
+        if (mode == "SET_UPSTREAM")
+        {
+            var remote = await _git.RunAsync(local.Path!, new[] { "rev-parse", "--verify", "--quiet", "refs/remotes/origin/" + branch }, cancellationToken).ConfigureAwait(false);
+            if (!remote.Success || remote.TrimmedStdout.Length == 0)
+                return Failed(BridgeErrorCodes.RefNotFound, $"远端不存在 origin/{branch}，请先 PUBLISH");
+            var set = await _git.RunAsync(local.Path!, new[] { "branch", "--set-upstream-to", "origin/" + branch, branch }, cancellationToken, WriteTimeout).ConfigureAwait(false);
+            return set.Success
+                ? new BatchItemResult(JobItemStates.Ok, null, $"已设置 upstream：origin/{branch}", preHead, preHead, null)
+                : MapGitFailure("FIX_UPSTREAM", set, cancellationToken);
+        }
+
+        return Failed(BridgeErrorCodes.InvalidArgument, "mode 必须是 PUBLISH/SET_UPSTREAM/CLEAR_UPSTREAM");
+    }
     /// <summary>
     /// TAG = 切 Tag（FR-OP-04）：四仓检出同一 Tag 为 detached。
     /// <para>① <c>fetch --force origin tag &lt;tag&gt;</c>（禁止 <c>--prune-tags</c>）；远端不存在 → SKIPPED 并报 TAG_DRIFT；</para>

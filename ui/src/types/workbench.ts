@@ -32,6 +32,7 @@ export const REPO_TYPES: readonly RepoType[] = ['DESIGN', 'IMPL', 'MIL', 'SIL']
 export const REPO_ACTIONS: readonly RepoAction[] = ['PULL', 'FETCH', 'CHKOUT', 'COMMIT', 'PUSH']
 
 export interface RepoVm {
+  subType?: string | null
   repoType: RepoType
   repoName: string
   state: string

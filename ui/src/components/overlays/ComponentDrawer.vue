@@ -34,6 +34,13 @@ const ciState = computed(() => component.value?.ci ?? 'NONE')
 // ── M2b-2 备份 ref（按组件/仓） ──
 const backup = computed(() => state.backupRefs)
 const repairableRepos = computed(() => (component.value?.repos ?? []).filter(repo => repo.state === 'INVALID' || repo.state === 'MISSING'))
+const noUpstreamRepos = computed(() => (component.value?.repos ?? []).filter(repo => repo.state === 'NO_UPSTREAM'))
+function onDetachedBranch(repoType: string): void {
+  const branch = window.prompt('基于当前 HEAD 新建并检出的分支名：', 'baseline/v1.0')
+  if (!branch) return
+  void w.fixRepo(openId.value, repoType, 'FIX_DETACHED', undefined, branch)
+}
+const detachedRepos = computed(() => (component.value?.repos ?? []).filter(repo => repo.state === 'DETACHED'))
 const backupRepoType = computed<RepoType>(() => {
   const value = (backup.value.componentId === openId.value ? backup.value.repoType : state.focusedRepoType) as RepoType
   return (REPO_TYPES as readonly string[]).includes(value) ? value : 'IMPL'
@@ -203,6 +210,23 @@ function trapTab(event: KeyboardEvent): void {
             </div>
           </section>
 
+          <section v-if="noUpstreamRepos.length > 0" class="section" data-testid="upstream-fix-section">
+            <div class="section-title">修复 upstream</div>
+            <div v-for="repo in noUpstreamRepos" :key="repo.repoType" class="management-row">
+              <span class="mono">{{ repo.repoType }} · {{ repo.subType ?? 'NO_UPSTREAM' }}</span>
+              <button v-if="repo.subType === 'UNSET_BUT_EXISTS'" type="button" class="drawer-btn" @click="w.fixRepo(openId, repo.repoType, 'FIX_UPSTREAM', 'SET_UPSTREAM')">设置 upstream</button>
+              <button v-else type="button" class="drawer-btn" @click="w.fixRepo(openId, repo.repoType, 'FIX_UPSTREAM', 'PUBLISH')">发布分支</button>
+              <button v-if="repo.subType === 'UPSTREAM_GONE'" type="button" class="drawer-btn" @click="w.fixRepo(openId, repo.repoType, 'FIX_UPSTREAM', 'CLEAR_UPSTREAM')">清除 upstream</button>
+            </div>
+          </section>
+
+          <section v-if="detachedRepos.length > 0" class="section" data-testid="detached-fix-section">
+            <div class="section-title">Detached HEAD 建分支</div>
+            <div v-for="repo in detachedRepos" :key="repo.repoType" class="management-row">
+              <span class="mono">{{ repo.repoType }} · {{ repo.headSha ? repo.headSha.slice(0, 8) : 'detached' }}</span>
+              <button type="button" class="drawer-btn" data-testid="detached-branch-btn" @click="onDetachedBranch(repo.repoType)">基于当前 HEAD 建分支…</button>
+            </div>
+          </section>
           <section v-if="repairableRepos.length > 0" class="section" data-testid="repair-section">
             <div class="section-title">修复</div>
             <p class="hint">INVALID/MISSING 仓可 Repair（非 git 目录）或 Re-clone（先备份到 .trash）。</p>

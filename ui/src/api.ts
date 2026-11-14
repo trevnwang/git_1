@@ -1889,6 +1889,9 @@ export const api = {
   async getComponentManagement(): Promise<{ items: Array<{ componentId: string; displayName?: string | null; isManaged: boolean; isDeleted: boolean; updatedAt?: string }> }> {
     return (await request<unknown>('getComponentManagement', {})) as { items: Array<{ componentId: string; displayName?: string | null; isManaged: boolean; isDeleted: boolean; updatedAt?: string }> }
   },
+  async undoCreate(jobId: string): Promise<unknown> {
+    return await request<unknown>('undoCreate', { jobId })
+  },
   async getDeletePending(): Promise<{ items: Array<{ componentId: string; repoType: string; repoName: string; errorCode: string; createdAt: string }> }> {
     return (await request<unknown>('getDeletePending', {})) as { items: Array<{ componentId: string; repoType: string; repoName: string; errorCode: string; createdAt: string }> }
   },

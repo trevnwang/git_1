@@ -329,6 +329,13 @@ function onRetry(job: JobVm): void {
                 @click.stop="w.toggleJobExpanded(job.id)"
               >{{ isExpanded(job.id) ? '收起逐仓结果' : `展开逐仓结果（${job.items.length}）` }}</button>
               <button
+                v-if="!job.active && job.kind === 'CREATE' && (job.state === 'SUCCESS' || job.state === 'PARTIAL')"
+                type="button"
+                class="task-link"
+                data-testid="task-undo-create"
+                title="删除本作业创建且未移动的本地分支；远端零写"
+                @click.stop="w.undoCreate(job.id)"
+              >撤销创建的分支</button>              <button
                 v-if="!job.active && retryableCount(job) > 0"
                 type="button"
                 class="task-link"

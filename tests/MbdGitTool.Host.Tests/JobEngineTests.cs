@@ -1788,6 +1788,53 @@ public sealed class JobEngineTests
         }
     }
     [Fact]
+    public async Task FixDetached_CreatesAndChecksOutBranchFromHead()
+    {
+        using var fixture = BatchWorkspace.Create("CF218A_Det_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        var clone = fixture.Clones["CF218A_Det_IMPL"];
+        TestGit.Run(clone, "checkout", "-q", "--detach", "HEAD");
+        var head = TestGit.Capture(clone, "rev-parse", "HEAD");
+        Assert.Equal("HEAD", TestGit.Capture(clone, "rev-parse", "--abbrev-ref", "HEAD"));
+        var batch = new BatchOperationService(config, new RepoActionService(config: config), paths: new PathPolicy(fixture.Root));
+        var repoRef = MakeRepoRef("CF218A_Det", "IMPL", clone, "DETACHED", head);
+        var args = new StoredJobArguments("baseline/v1.0", null, null, true, false, false, false, false, false, null, null, false, null);
+        var result = await batch.FixDetachedAsync(repoRef, "IMPL", args, CancellationToken.None);
+        Assert.True(result.State == JobItemStates.Ok, result.ErrorCode + ":" + result.Message);
+        Assert.Equal(head, TestGit.Capture(clone, "rev-parse", "refs/heads/baseline/v1.0"));
+        Assert.Equal("baseline/v1.0", TestGit.Capture(clone, "rev-parse", "--abbrev-ref", "HEAD"));
+    }
+
+    [Fact]
+    public async Task FixUpstream_SupportsLocalOnlyUnsetAndGone()
+    {
+        using var fixture = BatchWorkspace.Create("CF219A_Up_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        var clone = fixture.Clones["CF219A_Up_IMPL"];
+        var bare = fixture.Bares["CF219A_Up_IMPL"];
+        var batch = new BatchOperationService(config, new RepoActionService(config: config), paths: new PathPolicy(fixture.Root));
+        var repoRef = MakeRepoRef("CF219A_Up", "IMPL", clone, "NO_UPSTREAM", TestGit.Capture(clone, "rev-parse", "HEAD"));
+
+        // LOCAL_ONLY：发布本地分支。
+        TestGit.Run(clone, "switch", "-q", "-c", "feature/local");
+        TestGit.Run(clone, "commit", "-q", "--allow-empty", "-m", "local");
+        var publish = await batch.FixUpstreamAsync(repoRef, "IMPL", new StoredJobArguments(null, null, null, true, false, false, false, false, false, null, null, false, "PUBLISH"), CancellationToken.None);
+        Assert.True(publish.State == JobItemStates.Ok, publish.ErrorCode + ":" + publish.Message);
+        Assert.False(string.IsNullOrWhiteSpace(TestGit.Capture(bare, "rev-parse", "refs/heads/feature/local")));
+        Assert.Equal("origin", TestGit.Capture(clone, "config", "--get", "branch.feature/local.remote"));
+
+        // UNSET_BUT_EXISTS：远程存在但未设 tracking。
+        TestGit.Run(clone, "branch", "--unset-upstream", "feature/local");
+        var set = await batch.FixUpstreamAsync(repoRef, "IMPL", new StoredJobArguments(null, null, null, true, false, false, false, false, false, null, null, false, "SET_UPSTREAM"), CancellationToken.None);
+        Assert.True(set.State == JobItemStates.Ok, set.ErrorCode + ":" + set.Message);
+        Assert.Equal("origin", TestGit.Capture(clone, "config", "--get", "branch.feature/local.remote"));
+
+        // UPSTREAM_GONE：远程删掉后清除 upstream。
+        TestGit.Run(bare, "update-ref", "-d", "refs/heads/feature/local");
+        var clear = await batch.FixUpstreamAsync(repoRef, "IMPL", new StoredJobArguments(null, null, null, true, false, false, false, false, false, null, null, false, "CLEAR_UPSTREAM"), CancellationToken.None);
+        Assert.True(clear.State == JobItemStates.Ok, clear.ErrorCode + ":" + clear.Message);
+    }
+    [Fact]
     public async Task Repair_NonGitDirectory_BacksUpAndInitsFromRemote()
     {
         using var remotes = new TempWorkspace();

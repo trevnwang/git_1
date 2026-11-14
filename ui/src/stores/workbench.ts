@@ -2886,6 +2886,29 @@ async function cancelDeletePending(componentId: string): Promise<void> {
     notify(`取消失败：${toErrorMessage(error)}`, 'error')
   }
 }
+async function fixRepo(componentId: string, repoType: string, kind: 'FIX_UPSTREAM' | 'FIX_DETACHED', mode?: 'PUBLISH' | 'SET_UPSTREAM' | 'CLEAR_UPSTREAM', branch?: string): Promise<void> {
+  try {
+    const result = await api.runBatch({
+      kind,
+      componentIds: [componentId],
+      repoTypes: [repoType],
+      args: { confirm: true, mode, branch },
+    })
+    notify(`已提交 ${kind} · job ${result.jobId.slice(0, 12)}…`, 'info')
+    await refresh()
+  } catch (error) {
+    notify(`${kind} 失败：${toErrorMessage(error)}`, 'error')
+  }
+}
+async function undoCreate(jobId: string): Promise<void> {
+  try {
+    await api.undoCreate(jobId)
+    notify(`已撤销 CREATE 作业 ${jobId.slice(0, 12)}… 创建的分支`, 'success')
+    await refresh()
+  } catch (error) {
+    notify(`撤销失败：${toErrorMessage(error)}`, 'error')
+  }
+}
 async function repairRepo(componentId: string, repoType: string, mode: 'REPAIR' | 'RECLONE'): Promise<void> {
   try {
     const result = await api.runBatch({
@@ -3713,6 +3736,8 @@ export interface WorkbenchStore {
   cancelDeletePending: typeof cancelDeletePending
   bindComponent: typeof bindComponent
   repairRepo: typeof repairRepo
+  fixRepo: typeof fixRepo
+  undoCreate: typeof undoCreate
   unbindComponent: typeof unbindComponent
   requestRestoreBackupRef: typeof requestRestoreBackupRef
   executeRestoreBackupRef: typeof executeRestoreBackupRef
@@ -3842,6 +3867,8 @@ export const workbench: WorkbenchStore = {
   cancelDeletePending,
   bindComponent,
   repairRepo,
+  fixRepo,
+  undoCreate,
   unbindComponent,
   requestRestoreBackupRef,
   executeRestoreBackupRef,
