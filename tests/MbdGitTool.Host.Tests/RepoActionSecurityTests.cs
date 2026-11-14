@@ -768,6 +768,49 @@ public sealed class RepoActionSecurityTests
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
+    [Fact]
+    public async Task Router_ExternalHeadChange_RejectsAllWritesBeforeAnyAction()
+    {
+        using var fixture = GitRemoteFixture.Create();
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+
+        var snapshot = await DispatchAsync(router, "getSnapshot", null);
+        Assert.True(snapshot.Ok, snapshot.Error?.Code);
+        var head0 = GitRemoteFixture.Head(fixture.CloneB);
+        var remote0 = GitRemoteFixture.Head(fixture.BarePath);
+
+        // 用户点击前外部工具已改变 HEAD（扫描快照仍为 H0）。
+        File.WriteAllText(Path.Combine(fixture.CloneB, "external.txt"), "external");
+        TestGit.CommitAll(fixture.CloneB, "external change");
+        var external = GitRemoteFixture.Head(fixture.CloneB);
+        Assert.NotEqual(head0, external);
+
+        var actions = new (string Action, object? Args)[]
+        {
+            ("PULL", null),
+            ("CHKOUT", new { branch = "main", confirm = true }),
+            ("COMMIT", new { message = "should not commit", confirm = true }),
+            ("PUSH", new { confirm = true })
+        };
+
+        foreach (var (action, args) in actions)
+        {
+            var result = await DispatchAsync(
+                router,
+                "runRepoAction",
+                new { componentId = "CF100A_Demo", repoType = "IMPL", action, args });
+
+            Assert.False(result.Ok, action);
+            Assert.Equal(BridgeErrorCodes.ConcurrentChange, result.Error!.Code);
+            Assert.Contains("snapshotHead", result.Error.Details!.Keys);
+            Assert.Contains("currentHead", result.Error.Details.Keys);
+            Assert.Equal(external, GitRemoteFixture.Head(fixture.CloneB));
+            Assert.Equal(remote0, GitRemoteFixture.Head(fixture.BarePath));
+        }
+    }
+
     private static RunRepoActionParams Params(string action, object? args = null)
     {
         IReadOnlyDictionary<string, JsonElement>? dictionary = null;

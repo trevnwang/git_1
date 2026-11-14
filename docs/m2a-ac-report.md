@@ -18,7 +18,7 @@
 | 7 | AC-UI-13 焦点闭环 | ✅ | ConfirmDialog 初始焦点在框内、Tab 不逃逸、ESC 归还；ComponentDrawer 关闭回触发卡片；确认条焦点循环 |
 | 8 | AC-UI-15 M2b 边界 | ✅ | 批量条/卡片右键/菜单/任务中心统一 `M2b 未接入（批量/作业/审计）`，点击 0 写（代码 + CDP 自测） |
 | 9 | AC-SAFE-14 凭据作用域 | ✅ | Gate 安全复评 7 场景 PASS；origin/pushurl 不匹配 `E_CREDENTIAL_SCOPE` 且 0 网络；配置缺失 fail-closed；http 未显式允许 `E_GITEA_INSECURE_HTTP`；URL 作用域 header 仅 canonical base 收到 PAT；token 不出现在 argv/日志/响应 |
-| 10 | AC-SAFE-15 read-through + CAS | ✅ | `runRepoAction` 已改为写前 `_snapshots.RefreshAsync`（不再用缓存）；CAS 实测四动作 `E_CONCURRENT_CHANGE` 零改动；测试 `RepoActionSecurityTests` 覆盖 |
+| 10 | AC-SAFE-15 read-through + CAS | ✅ | 写前 `RefreshAsync`；**桥层**保留 refresh 前“用户请求快照 HEAD”作为 CAS 基线（`_deliveredIndex`），外部改 HEAD 后四动作均 `E_CONCURRENT_CHANGE`、本地/远端 refs 零改动（`Router_ExternalHeadChange_RejectsAllWritesBeforeAnyAction`）；成功后刷新基线，下一步动作不被误拒 |
 | 11 | AC-SAFE-16 ignored 保护 | ✅ | CHKOUT/PULL 使用 `--no-overwrite-ignore`；ignored 文件不被覆盖，拒绝返回 `E_WORKTREE_OVERWRITE`（安全 Gate 实测） |
 | 12 | AC-SAFE-17 ref 校验 | ✅ | 不存在 ref `E_REF_NOT_FOUND`；`+main` 拒绝；PULL 显式 branch≠当前分支 `E_INVALID_ARGUMENT`（新增测试 `Pull_ExplicitBranchDifferentFromCurrent_IsRejectedWithoutChanges`） |
 | 13 | AC-OP-33 审计-lite | ✅ | `OperationAuditService` 每次动作写 JSONL（`%LOCALAPPDATA%\MbdGitTool\audit\operations.jsonl`）：ts/action/componentId/repoType/state/preHead/postHead/ok/errorCode/durationMs；真实动作证据见文件末尾两行；单测 `OperationAuditServiceTests` 覆盖成功/失败/无 token |
@@ -29,7 +29,7 @@
 - 审计 JSONL（尾行）：
   - `{"ts":"...07:08:07Z","action":"FETCH","componentId":"RTCT_Demo","repoType":"DESIGN","state":"SYNCED",...,"ok":true,"durationMs":704}`
   - 前一行 COMMIT/PUSH 各一条（成功）。
-- 单测：`vstest` **271/271**（Core 71 + Host 200）；构建 0 warning/0 error。
+- 单测：`vstest` **272/272**（Core 71 + Host 201）；构建 0 warning/0 error。
 - Gate 安全复评：`docs/review-m2-gate-security.md` 6/6 通过 + N-1 本轮已修。
 - Gate UX 复评：`docs/review-m2-gate-ux.md` 的 5 个 Gate-P0（单源矩阵/审计/M2b/AC 定义/状态栏）本轮已逐项修；待最终复评。
 

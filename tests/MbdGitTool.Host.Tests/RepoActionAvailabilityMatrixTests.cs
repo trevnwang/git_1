@@ -47,6 +47,13 @@ public sealed class RepoActionAvailabilityMatrixTests
 
     private static string FindFixture()
     {
+        // 优先使用 csproj Content 复制到输出目录的夹具（普通/--artifacts-path 构建均可）。
+        var copied = Path.Combine(AppContext.BaseDirectory, "fixtures", "m2-matrix.json");
+        if (File.Exists(copied))
+        {
+            return copied;
+        }
+
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {

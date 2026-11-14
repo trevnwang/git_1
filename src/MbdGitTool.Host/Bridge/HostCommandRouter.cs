@@ -62,6 +62,7 @@ public sealed class HostCommandRouter : IDisposable
     private readonly OpenPathService? _openPath;
     private readonly SemaphoreSlim _ioGate = new(4, 4);
     private readonly CancellationTokenSource _lifetime = new();
+    private volatile SnapshotIndex? _deliveredIndex;
     private bool _disposed;
 
     public HostCommandRouter(
@@ -220,11 +221,17 @@ public sealed class HostCommandRouter : IDisposable
         switch (method)
         {
             case "getSnapshot":
-                return CommandResult.Success(await _snapshots.GetSnapshotAsync(cancellationToken).ConfigureAwait(false));
+            {
+                var snapshot = await _snapshots.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+                // 记录“用户实际看到的快照”，写操作 CAS 以它为基线（AC-SAFE-15）。
+                _deliveredIndex = _snapshots.Index;
+                return CommandResult.Success(snapshot);
+            }
 
             case "refresh":
             {
                 var snapshot = await _snapshots.RefreshAsync(cancellationToken).ConfigureAwait(false);
+                _deliveredIndex = _snapshots.Index;
                 InvalidateCaches();
                 return CommandResult.Success(snapshot);
             }
@@ -247,11 +254,61 @@ public sealed class HostCommandRouter : IDisposable
 
             case "runRepoAction":
             {
-                // AC-SAFE-15：写前 read-through 重扫（拒绝复用旧快照），CAS 以刷新后的 HEAD 为基准。
-                await _snapshots.RefreshAsync(cancellationToken).ConfigureAwait(false);
                 var parsed = ParseParams<RunRepoActionParams>(parameters);
                 var requestId = Guid.NewGuid().ToString("N");
                 var actor = Environment.UserName;
+
+                // AC-SAFE-15：先保留“用户请求所依据快照”的 HEAD 作为 CAS 基线，再做写前 read-through。
+                var requestIndex = _deliveredIndex ?? _snapshots.Index;
+                var hasRequestHead = TryGetRepoHead(
+                    requestIndex,
+                    parsed.ComponentId,
+                    parsed.RepoType,
+                    out var requestHead,
+                    out _);
+
+                await _snapshots.RefreshAsync(cancellationToken).ConfigureAwait(false);
+
+                if (hasRequestHead)
+                {
+                    var hasRefreshedHead = TryGetRepoHead(
+                        _snapshots.Index,
+                        parsed.ComponentId,
+                        parsed.RepoType,
+                        out var refreshedHead,
+                        out var refreshedState);
+
+                    // 外部工具在用户点击后改变 HEAD（或仓消失）：零写、审计 1 行、E_CONCURRENT_CHANGE。
+                    if (!hasRefreshedHead
+                        || !string.Equals(requestHead, refreshedHead, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _audit.Record(
+                            parsed.Action,
+                            parsed.ComponentId,
+                            parsed.RepoType,
+                            refreshedState ?? "UNKNOWN",
+                            requestHead,
+                            refreshedHead,
+                            ok: false,
+                            errorCode: BridgeErrorCodes.ConcurrentChange,
+                            durationMs: 0,
+                            actor: actor,
+                            requestId: requestId);
+
+                        return CommandResult.Failure(
+                            BridgeErrorCodes.ConcurrentChange,
+                            "仓库状态在用户操作后发生变化（HEAD 已改变）；请刷新后重试",
+                            new Dictionary<string, object?>
+                            {
+                                ["action"] = parsed.Action,
+                                ["componentId"] = parsed.ComponentId,
+                                ["repoType"] = parsed.RepoType,
+                                ["snapshotHead"] = requestHead,
+                                ["currentHead"] = refreshedHead,
+                                ["requestId"] = requestId
+                            });
+                    }
+                }
 
                 // M2：真实单仓操作（异步执行，不走 _ioGate，避免长任务占满 FS/git 并发闸）。
                 // G-P0-2 / AC-OP-33：动作返回前写审计-lite（成功/失败/异常都写 1 行，不含 token/output）。
@@ -271,8 +328,10 @@ public sealed class HostCommandRouter : IDisposable
                 // M2 P1-2：写操作成功后失效快照缓存/派生缓存，下一次请求按现有 refresh 机制重建（CAS 才能拿到新 HEAD）。
                 if (result.Ok)
                 {
-                    _snapshots.Invalidate();
                     InvalidateCaches();
+                    // 成功后重建快照并把它作为下一次动作的“已交付基线”，避免紧接着的下一动作被 CAS 误拒。
+                    await _snapshots.RefreshAsync(cancellationToken).ConfigureAwait(false);
+                    _deliveredIndex = _snapshots.Index;
                 }
 
                 return result;
@@ -414,6 +473,25 @@ public sealed class HostCommandRouter : IDisposable
         }
 
         return null;
+    }
+
+    private static bool TryGetRepoHead(
+        SnapshotIndex index,
+        string? componentId,
+        string? repoType,
+        out string? head,
+        out string? state)
+    {
+        head = null;
+        state = null;
+        if (!index.TryGetRepo(componentId, repoType, out var repo))
+        {
+            return false;
+        }
+
+        head = string.IsNullOrWhiteSpace(repo.Repo.HeadSha) ? null : repo.Repo.HeadSha;
+        state = repo.Repo.State;
+        return true;
     }
 
     private static CommandResult? TryGetLocalRepoPath(
