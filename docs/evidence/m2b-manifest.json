@@ -1,60 +1,206 @@
 {
-  "commit": "f940375",
-  "generatedAt": "2026-11-14T23:03:54.928Z",
+  "commit": "83477c1",
+  "generatedAt": "2026-11-14T23:28:45.055Z",
   "suite": [
     {
       "name": "cdp-m2a-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2a-selfcheck.mjs",
-      "startedAt": "2026-11-14T23:02:44.289Z",
-      "finishedAt": "2026-11-14T23:02:47.991Z",
+      "startedAt": "2026-11-14T23:27:25.618Z",
+      "finishedAt": "2026-11-14T23:27:29.324Z",
       "result": "PASS"
     },
     {
       "name": "cdp-m2b1-fix-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2b1-fix-selfcheck.mjs",
-      "startedAt": "2026-11-14T23:02:47.991Z",
-      "finishedAt": "2026-11-14T23:03:10.651Z",
+      "startedAt": "2026-11-14T23:27:29.324Z",
+      "finishedAt": "2026-11-14T23:28:00.090Z",
       "result": "PASS"
     },
     {
       "name": "cdp-m2b2-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2b2-selfcheck.mjs",
-      "startedAt": "2026-11-14T23:03:10.651Z",
-      "finishedAt": "2026-11-14T23:03:42.170Z",
+      "startedAt": "2026-11-14T23:28:00.090Z",
+      "finishedAt": "2026-11-14T23:28:32.296Z",
       "result": "PASS"
     },
     {
       "name": "cdp-m2b2-realhost-check.mjs",
       "command": "node ui/scripts/cdp-m2b2-realhost-check.mjs",
-      "startedAt": "2026-11-14T23:03:42.218Z",
-      "finishedAt": "2026-11-14T23:03:54.871Z",
+      "startedAt": "2026-11-14T23:28:32.334Z",
+      "finishedAt": "2026-11-14T23:28:44.999Z",
       "result": "PASS"
     }
   ],
   "checks": [
     {
-      "ac": "cdp-m2a-selfcheck.mjs",
+      "ac": "AC-OP-06",
       "status": "PASS",
-      "evidence": "artifacts/cdp-m2a-selfcheck/result.json",
-      "detail": null
+      "suite": "cdp-m2a-selfcheck.mjs"
     },
     {
-      "ac": "cdp-m2b1-fix-selfcheck.mjs",
+      "ac": "AC-OP-07",
       "status": "PASS",
-      "evidence": "artifacts/cdp-m2b1-fix-selfcheck/result.json",
-      "detail": null
+      "suite": "cdp-m2a-selfcheck.mjs"
     },
     {
-      "ac": "cdp-m2b2-selfcheck.mjs",
+      "ac": "AC-OP-08",
       "status": "PASS",
-      "evidence": "artifacts/cdp-m2b2-selfcheck/result.json",
-      "detail": null
+      "suite": "cdp-m2a-selfcheck.mjs"
     },
     {
-      "ac": "cdp-m2b2-realhost-check.mjs",
+      "ac": "AC-OP-09",
       "status": "PASS",
-      "evidence": "artifacts/cdp-m2b2-realhost-check/result.json",
-      "detail": null
+      "suite": "cdp-m2a-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-10",
+      "status": "PASS",
+      "suite": "cdp-m2a-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-15",
+      "status": "PASS",
+      "suite": "cdp-m2a-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-16",
+      "status": "PASS",
+      "suite": "cdp-m2a-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-17",
+      "status": "PASS",
+      "suite": "cdp-m2a-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-20",
+      "status": "PASS",
+      "suite": "cdp-m2a-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-21",
+      "status": "PASS",
+      "suite": "cdp-m2a-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-22",
+      "status": "PASS",
+      "suite": "cdp-m2a-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-28",
+      "status": "PASS",
+      "suite": "cdp-m2a-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-29",
+      "status": "PASS",
+      "suite": "cdp-m2a-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-33",
+      "status": "PASS",
+      "suite": "cdp-m2a-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-03",
+      "status": "PASS",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-24",
+      "status": "PASS",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-26",
+      "status": "PASS",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-27",
+      "status": "PASS",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-34",
+      "status": "PASS",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-35",
+      "status": "PASS",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-22",
+      "status": "PASS",
+      "suite": "cdp-m2b2-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-23",
+      "status": "PASS",
+      "suite": "cdp-m2b2-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-25",
+      "status": "PASS",
+      "suite": "cdp-m2b2-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-28",
+      "status": "PASS",
+      "suite": "cdp-m2b2-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-30",
+      "status": "PASS",
+      "suite": "cdp-m2b2-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-UI-10c",
+      "status": "PASS",
+      "suite": "cdp-m2b2-selfcheck.mjs"
+    },
+    {
+      "ac": "AC-OP-01",
+      "status": "PASS",
+      "suite": "cdp-m2b2-realhost-check.mjs"
+    },
+    {
+      "ac": "AC-OP-02",
+      "status": "PASS",
+      "suite": "cdp-m2b2-realhost-check.mjs"
+    },
+    {
+      "ac": "AC-OP-04",
+      "status": "PASS",
+      "suite": "cdp-m2b2-realhost-check.mjs"
+    },
+    {
+      "ac": "AC-OP-05",
+      "status": "PASS",
+      "suite": "cdp-m2b2-realhost-check.mjs"
+    },
+    {
+      "ac": "AC-OP-31",
+      "status": "PASS",
+      "suite": "cdp-m2b2-realhost-check.mjs"
+    },
+    {
+      "ac": "AC-OP-32",
+      "status": "PASS",
+      "suite": "cdp-m2b2-realhost-check.mjs"
+    },
+    {
+      "ac": "AC-OP-34",
+      "status": "PASS",
+      "suite": "cdp-m2b2-realhost-check.mjs"
+    },
+    {
+      "ac": "AC-SAFE-13",
+      "status": "PASS",
+      "suite": "cdp-m2b2-realhost-check.mjs"
     }
   ],
   "note": "SKIP 不计入 COVERED；AC 逐条证据见 docs/m2b-ac-op-gap.md"
