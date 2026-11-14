@@ -1,5 +1,9 @@
 # M2 单仓操作阶段报告（2026-11-14）
 
+> **Gate 状态（2026-11-14 13:25）：三路对抗评审完成，结论「不通过」；`m2-ops` tag 已撤销，本文件不代表已签收。**
+> 评审报告：`docs/review-m2-code.md`（P0=1/P1=8）、`docs/review-m2-req.md`（P0=12/P1=10）、`docs/review-m2-ux-fixcheck.md`（P0 闭环 2/8，新 P0=1）。
+> 需先修安全 P0（PAT origin 绑定）、确认条/PUSH 确认、焦点、tooltip 错误码、CHKOUT 数据源等并复评通过后才能打 tag。
+
 > 阶段：S6（PULL / FETCH / CHKOUT / COMMIT / PUSH 从 M1 只读升级为真实可用）
 > 验证环境：真实 Gitea `RTCRepos` + 本地工作区 `artifacts/real-test/workspace`（15 仓，真实提交/推送）。
 
