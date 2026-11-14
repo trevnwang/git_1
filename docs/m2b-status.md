@@ -59,4 +59,4 @@
 | 保留清理 | 启动后台 + `cleanupRetention`：`.trash` 30 天 / backup refs 30 天 / 审计 90 天；实测计数 0（无超期） |
 | 测试 | 337/337；Debug/Release 0 warning |
 
-> M2b-2a 阶段 Gate：**通过（阶段 tag）**；P0 闭环，P1-2/P1-4 依据 ADR D-026 书面延后 M2b-2b；337/337 测试，M2b-2 自检 53/53。\n> 待 M2b-2b：journal/reconcile、离线降级完整行为、备份分支身份/恢复 UI 全链路、审计回填/历史污染清理、AC-OP 全量证据。
+> M2b-2a 阶段 Gate：**通过（阶段 tag）**；P0 闭环，P1-2/P1-4 依据 ADR D-026 书面延后 M2b-2b；337/337 测试，M2b-2 自检 53/53。\n> 待 M2b-2b：journal/reconcile、离线降级完整行为、备份分支身份/恢复 UI 全链路、审计回填/历史污染清理、AC-OP 全量证据。\n> 签收补充（`docs/review-m2b2-signoff.md`）：`cdp-m2b2-realhost-check.mjs` 未随 9db68f9 更新/重跑，依 Gate 报告书面延后 M2b-2b；真实审计当前 528 行（含历史测试污染，测试隔离后 528→528 无新增，生产口径以 JSONL/清理后重建为准）。
