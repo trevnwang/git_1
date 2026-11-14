@@ -12,6 +12,7 @@ const logLevel = ref('全部')
 const kind = computed(() => state.overlays.modal)
 const hostInfo = computed(() => state.hostInfo ?? mockHostInfo())
 const management = computed(() => state.management)
+const deletePending = computed(() => state.deletePending)
 const managementView = ref<'active' | 'removed'>('active')
 const managementItems = computed(() => management.value.items.filter(item =>
   managementView.value === 'removed' ? item.isDeleted || !item.isManaged : item.isManaged && !item.isDeleted,
@@ -414,6 +415,14 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_U
       <!-- 未绑定仓库 -->
       <div v-else-if="kind === 'components'" class="modal-body" data-testid="components-modal">
         <div class="section-title">组件管理</div>
+        <p v-if="deletePending.length > 0" class="fallback-note">待处理删除：{{ deletePending.length }} 项（文件占用，未移入 .trash）</p>
+        <ul v-if="deletePending.length > 0" class="management-list" data-testid="delete-pending-list">
+          <li v-for="item in deletePending" :key="item.repoName" class="management-row">
+            <span class="mono truncate">{{ item.componentId }}/{{ item.repoType }}</span>
+            <span class="muted">{{ item.errorCode }}</span>
+            <button type="button" class="btn" data-testid="delete-pending-cancel" @click="w.cancelDeletePending(item.componentId)">取消待处理</button>
+          </li>
+        </ul>
         <p class="hint">纳入时只读校验 Gitea 四仓；移出默认“停止管理”（保留本地目录），本地删除需输入组件 ID。</p>
         <div class="form">
           <label class="form-label">纳入组件</label>

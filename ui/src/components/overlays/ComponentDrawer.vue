@@ -33,6 +33,7 @@ const ciState = computed(() => component.value?.ci ?? 'NONE')
 
 // ── M2b-2 备份 ref（按组件/仓） ──
 const backup = computed(() => state.backupRefs)
+const repairableRepos = computed(() => (component.value?.repos ?? []).filter(repo => repo.state === 'INVALID' || repo.state === 'MISSING'))
 const backupRepoType = computed<RepoType>(() => {
   const value = (backup.value.componentId === openId.value ? backup.value.repoType : state.focusedRepoType) as RepoType
   return (REPO_TYPES as readonly string[]).includes(value) ? value : 'IMPL'
@@ -202,6 +203,15 @@ function trapTab(event: KeyboardEvent): void {
             </div>
           </section>
 
+          <section v-if="repairableRepos.length > 0" class="section" data-testid="repair-section">
+            <div class="section-title">修复</div>
+            <p class="hint">INVALID/MISSING 仓可 Repair（非 git 目录）或 Re-clone（先备份到 .trash）。</p>
+            <div v-for="repo in repairableRepos" :key="repo.repoType" class="management-row">
+              <span class="mono">{{ repo.repoType }} · {{ repo.state }}</span>
+              <button type="button" class="drawer-btn" data-testid="repair-btn" @click="w.repairRepo(openId, repo.repoType, 'REPAIR')">Repair</button>
+              <button type="button" class="drawer-btn" data-testid="reclone-btn" @click="w.repairRepo(openId, repo.repoType, 'RECLONE')">Re-clone…</button>
+            </div>
+          </section>
           <section class="section">
             <div class="section-title">
               备份 ref

@@ -1889,6 +1889,12 @@ export const api = {
   async getComponentManagement(): Promise<{ items: Array<{ componentId: string; displayName?: string | null; isManaged: boolean; isDeleted: boolean; updatedAt?: string }> }> {
     return (await request<unknown>('getComponentManagement', {})) as { items: Array<{ componentId: string; displayName?: string | null; isManaged: boolean; isDeleted: boolean; updatedAt?: string }> }
   },
+  async getDeletePending(): Promise<{ items: Array<{ componentId: string; repoType: string; repoName: string; errorCode: string; createdAt: string }> }> {
+    return (await request<unknown>('getDeletePending', {})) as { items: Array<{ componentId: string; repoType: string; repoName: string; errorCode: string; createdAt: string }> }
+  },
+  async cancelDeletePending(componentId: string): Promise<{ componentId: string; removed: number }> {
+    return (await request<unknown>('cancelDeletePending', { componentId })) as { componentId: string; removed: number }
+  },
   // ── M2b-2 备份 ref 恢复（按组件/仓列出 SYNC 备份 ref，确认后恢复） ──
   /** 按组件（可选仓类型）读取可恢复的备份 ref（契约 `{componentId,repoType?}` → `{refs}`）。 */
   async getBackupRefs(params: BackupRefsParams): Promise<BackupRefsDto> {

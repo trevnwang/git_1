@@ -191,6 +191,7 @@ interface WorkbenchState {
     exportError: string
   }
   // ── M2b-2 备份 ref 恢复 ──
+  deletePending: Array<{ componentId: string; repoType: string; repoName: string; errorCode: string; createdAt: string }>
   management: {
     status: 'idle' | 'loading' | 'ready' | 'error'
     items: Array<{ componentId: string; displayName: string; isManaged: boolean; isDeleted: boolean; updatedAt: string }>
@@ -420,6 +421,7 @@ const state = reactive<WorkbenchState>({
     lastExport: null,
     exportError: '',
   },
+  deletePending: [],
   management: { status: 'idle', items: [], error: '' },
   backupRefs: {
     status: 'idle',
@@ -679,7 +681,7 @@ function openModal(kind: ModalKind): void {
   if (kind === 'ci' && state.hostLinked && !state.mockFallback) void refreshCi()
   // 「日志与诊断」内嵌操作审计：打开时按当前过滤条件重新拉取（Host 未实现时显示不可用态，不伪造数据）。
   if (kind === 'logs') void refreshOperationLog(true)
-  if (kind === 'components') void loadComponentManagement()
+  if (kind === 'components') { void loadComponentManagement(); void loadDeletePending() }
 }
 
 function closeModal(): void {
@@ -2865,6 +2867,39 @@ async function loadComponentManagement(): Promise<void> {
   }
 }
 
+async function loadDeletePending(): Promise<void> {
+  try {
+    if (!hasHostBridge() || state.mockFallback) { state.deletePending = []; return }
+    const data = await api.getDeletePending()
+    state.deletePending = data.items ?? []
+  } catch {
+    state.deletePending = []
+  }
+}
+
+async function cancelDeletePending(componentId: string): Promise<void> {
+  try {
+    await api.cancelDeletePending(componentId)
+    notify(`已取消 ${componentId} 的待处理删除`, 'info')
+    await loadDeletePending()
+  } catch (error) {
+    notify(`取消失败：${toErrorMessage(error)}`, 'error')
+  }
+}
+async function repairRepo(componentId: string, repoType: string, mode: 'REPAIR' | 'RECLONE'): Promise<void> {
+  try {
+    const result = await api.runBatch({
+      kind: mode,
+      componentIds: [componentId],
+      repoTypes: [repoType],
+      args: { confirm: true, confirmText: componentId },
+    })
+    notify(`已提交 ${mode} · job ${result.jobId.slice(0, 12)}…`, 'info')
+    await refresh()
+  } catch (error) {
+    notify(`${mode} 失败：${toErrorMessage(error)}`, 'error')
+  }
+}
 async function bindComponent(componentId: string, displayName?: string): Promise<void> {
   const id = componentId.trim()
   if (!id) return
@@ -3674,7 +3709,10 @@ export interface WorkbenchStore {
   openAuditExportDir: typeof openAuditExportDir
   loadBackupRefs: typeof loadBackupRefs
   loadComponentManagement: typeof loadComponentManagement
+  loadDeletePending: typeof loadDeletePending
+  cancelDeletePending: typeof cancelDeletePending
   bindComponent: typeof bindComponent
+  repairRepo: typeof repairRepo
   unbindComponent: typeof unbindComponent
   requestRestoreBackupRef: typeof requestRestoreBackupRef
   executeRestoreBackupRef: typeof executeRestoreBackupRef
@@ -3800,7 +3838,10 @@ export const workbench: WorkbenchStore = {
   openAuditExportDir,
   loadBackupRefs,
   loadComponentManagement,
+  loadDeletePending,
+  cancelDeletePending,
   bindComponent,
+  repairRepo,
   unbindComponent,
   requestRestoreBackupRef,
   executeRestoreBackupRef,
