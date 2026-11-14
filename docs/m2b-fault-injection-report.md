@@ -28,14 +28,14 @@
 - AC-SAFE-01/02（确认前零写/预览）：已有 Q/A 单测与自检，**PASS**；
 - AC-SAFE-03（typed confirm）：DELETE/SYNC/DIVERGED 用例 **PASS**；
 - AC-SAFE-04（删除仅本地/远端零写）：DELETE 单测断言无远端操作，但缺 `G-WIRE-GIT` 记录，**PARTIAL**；
-- AC-SAFE-05/06/07（脱敏/诊断/转储）：日志脱敏单测存在；转储默认关闭已写规格，真实崩溃转储未演练，**PARTIAL**；
+- AC-SAFE-05/06（转储/诊断包）：默认关闭/脱敏实现，真实转储未演练，**PARTIAL**；\n- AC-SAFE-07（脱敏）：日志/argv 单测+安全记录，**COVERED**；
 - AC-SAFE-08/09（journal/reconcile）：单测 + 真机 NOT_APPLIED；**AFTER_WRITE/UNKNOWN_GAP**；
 - AC-SAFE-10/11（危险扩展名/路径穿越）：已有单测；**PARTIAL**（未纳入本报告注入矩阵）；
-- AC-SAFE-12/13（既有仓 token/header-only）：header-only 由安全单测覆盖；抓包/argv 三件套未生成，**PARTIAL**。
+- AC-SAFE-12/13（既有仓 token/header-only）：header-only 安全单测 + `docs/evidence/security/{gwire.jsonl,argv.txt,remotes.txt}` 归档，**COVERED**（无 token/Authorization）。
 
 ## 3. 结论
 
-**故障注入矩阵注入点已全部 PASS**；AC-SAFE 逐条证据/归档仍需收口（本报告不替代 AC-SAFE 签收）。剩余：
+**故障注入矩阵注入点已全部 PASS**；G-WIRE 记录/argv/remotes 已归档到 `docs/evidence/security/`。AC-SAFE 逐条签收仍需 final Gate：
 
 1. ~~补 `GIT_NET_404/TIMEOUT`、`GIT_SLOW` 专项，实现 `CRASH_*`~~（已完成）；
 2. 实现 `G-WIRE-REST`/`G-WIRE-GIT` 并生成安全证据三件套；

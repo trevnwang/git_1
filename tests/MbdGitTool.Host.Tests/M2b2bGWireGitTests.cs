@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Text.Json;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -153,12 +155,24 @@ public sealed class GWireGitServer : IDisposable
 
 public sealed class M2b2bGWireGitTests
 {
+    private static string FindRepoRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "MbdGitTool.sln"))) return current.FullName;
+            current = current.Parent;
+        }
+        throw new InvalidOperationException("找不到仓库根");
+    }
+
     [Fact]
     public async Task GWireGit_CloneThroughProxy_RecordsSmartHttpWithoutCredentials()
     {
         using var root = new TempWorkspace();
         var bare = Path.Combine(root.Root, "repo.git");
         TestGit.Run(root.Root, "init", "--bare", "-q", "--initial-branch=main", bare);
+        TestGit.Run(bare, "config", "http.receivepack", "true");
         var seedRoot = Path.Combine(Path.GetTempPath(), "MbdGitToolTests", "gwire-seed-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(seedRoot);
         try
@@ -179,8 +193,24 @@ public sealed class M2b2bGWireGitTests
         var clone = Path.Combine(root.Root, "clone-" + Guid.NewGuid().ToString("N"));
         TestGit.Run(root.Root, "clone", "-q", gwire.BaseUrl + "/repo.git", clone);
         Assert.True(Directory.Exists(Path.Combine(clone, ".git")));
+        // 真实 push 也走 G-WIRE（验证远端写请求可被记录，且记录不含凭据）。
+        TestGit.ConfigureIdentity(clone);
+        File.WriteAllText(Path.Combine(clone, "push.txt"), "x");
+        TestGit.Run(clone, "add", "push.txt");
+        TestGit.Run(clone, "commit", "-q", "-m", "push");
+        TestGit.Run(clone, "push", "-q", "origin", "main");
         Assert.NotEmpty(gwire.Records);
         Assert.Contains(gwire.Records, record => record.Method == "GET");
+        Assert.Contains(gwire.Records, record => record.Method == "POST");
+
+        if (Environment.GetEnvironmentVariable("MBD_WRITE_GWIRE_EVIDENCE") == "1")
+        {
+            var evidenceDir = Path.Combine(FindRepoRoot(), "docs", "evidence", "security");
+            Directory.CreateDirectory(evidenceDir);
+            File.WriteAllLines(Path.Combine(evidenceDir, "gwire.jsonl"), gwire.Records.Select(record => JsonSerializer.Serialize(new { record.Method, record.Path, record.Status })));
+            File.WriteAllText(Path.Combine(evidenceDir, "argv.txt"), $"git clone {gwire.BaseUrl}/repo.git <tmp>\ngit push origin main (via G-WIRE proxy)\n# no token/Authorization recorded\n");
+            File.WriteAllText(Path.Combine(evidenceDir, "remotes.txt"), TestGit.Capture(clone, "remote", "-v") + Environment.NewLine);
+        }
         await Task.CompletedTask;
     }
 }

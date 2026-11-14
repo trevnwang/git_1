@@ -1,0 +1,4 @@
+{"Method":"GET","Path":"/repo.git/info/refs","Status":200}
+{"Method":"POST","Path":"/repo.git/git-upload-pack","Status":200}
+{"Method":"GET","Path":"/repo.git/info/refs","Status":200}
+{"Method":"POST","Path":"/repo.git/git-receive-pack","Status":200}
