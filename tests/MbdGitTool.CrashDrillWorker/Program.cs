@@ -20,9 +20,9 @@ var mode = args.Length > 4 ? args[4] : "after";
 var journal = new OperationJournal(journalDir);
 journal.Begin("CRASH_DRILL", "CF900_Crash", "IMPL", preHead, repoPath, "drill-job", "drill-job:1");
 
-File.WriteAllText(marker, "ready");
 if (mode == "before")
 {
+    File.WriteAllText(marker, "ready");
     Thread.Sleep(TimeSpan.FromMinutes(5));
 }
 
