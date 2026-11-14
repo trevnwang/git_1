@@ -1,7 +1,7 @@
 # M2b AC-OP 全量证据矩阵（截至 m2b-2b / 2026-11-14）
 
 > 用途：M2b final 的逐条验收台账。状态：**COVERED**=有自动化/真实证据；**PARTIAL**=有实现/部分用例但缺 AC 指定断言；**GAP**=未实现或无从验证。
-> 当前结论：**M2b 未完成**；`m2b-2b` 只是阶段 tag。测试基线 407/407；真机 reconcile NOT_APPLIED 已验证；故障注入报告见 `docs/m2b-fault-injection-report.md`（未通过）。证据来源：`tests/MbdGitTool.Host.Tests`、`ui/scripts/cdp-*.mjs`、`docs/m2b*.md`。
+> 当前结论：**M2b 未完成**；`m2b-2b` 只是阶段 tag。测试基线 413/413；真机 reconcile NOT_APPLIED 已验证；故障注入报告见 `docs/m2b-fault-injection-report.md`（未通过）。证据来源：`tests/MbdGitTool.Host.Tests`、`ui/scripts/cdp-*.mjs`、`docs/m2b*.md`。
 
 | AC | 主题 | 状态 | 现有证据 | 缺口/下一步 |
 |---|---|---|---|---|
@@ -15,10 +15,10 @@
 | AC-OP-08 | 批量 Fetch 成功/失败逐仓 | COVERED | `RunBatch_Fetch_...`、任务中心 realhost | — |
 | AC-OP-09 | 批量 Checkout 5 前置态 | PARTIAL | 支持远端分支建跟踪分支；`RunBatch_Checkout_Branch_Succeeds_AndDirtyRepoBlocked` 覆盖成功+dirty 阻断 | 5 态（SYNCED/BEHIND/DIRTY/DETACHED/UNMERGED）逐用例 |
 | AC-OP-10 | Checkout dirty 阻断/stash | COVERED | `Checkout_WithStash...`、`Checkout_Dirty...` | 批量口径 |
-| AC-OP-11 | 切 Tag 四仓成功/detached/baseline | COVERED | 检出语义 + `RunBatch_Tag_FourRepos_MixedWritesFourBaselineRows`：3 检出/1 跳过、4 行 baseline、tag_object_sha≠commit | UI baseline 展示（可选） |
-| AC-OP-12 | 缺 Tag：3 检出+1 跳过+TAG_DRIFT | COVERED | 四仓混合测试：3 OK/1 SKIPPED、SIL 行 `tag_present=0`、commit=NULL | 组件 TAG_DRIFT 聚合断言（可选） |
+| AC-OP-11 | 切 Tag 四仓成功/detached/baseline | **DEFERRED（D-029）** | 检出语义 + `RunBatch_Tag_FourRepos_MixedWritesFourBaselineRows`：3 检出/1 跳过、4 行 baseline、tag_object_sha≠commit | UI baseline 展示（可选） |
+| AC-OP-12 | 缺 Tag：3 检出+1 跳过+TAG_DRIFT | **DEFERRED（D-029）** | 四仓混合测试：3 OK/1 SKIPPED、SIL 行 `tag_present=0`、commit=NULL | 组件 TAG_DRIFT 聚合断言（可选） |
 | AC-OP-13 | Tag 被移动 fetch --force + 告警 | PARTIAL | 已实现 `fetch --force origin tag`、旧/新 SHA 比较并输出 tag_moved | 专项移动 tag 用例 |
-| AC-OP-14 | annotated tag `^{commit}`/tag_present | COVERED | annotated 测试 + 四仓测试断言 tag_object_sha≠commit_sha、tag_present=1 | — |
+| AC-OP-14 | annotated tag `^{commit}`/tag_present | **DEFERRED（D-029）** | annotated 测试 + 四仓测试断言 tag_object_sha≠commit_sha、tag_present=1 | — |
 | AC-OP-15 | SYNC BEHIND/DIRTY：备份→stash→确认→reset | COVERED | `RunBatch_Sync_Diverged...`、`DryRun_Sync...` | LFS pull 未覆盖 |
 | AC-OP-16 | SYNC DIVERGED 丢失清单/typed confirm/可恢复 | COVERED | `SyncPreview_Diverged_ShowsLossListFields`：未推送 commit 列表/untracked 列表/stash 条数/影响仓；typed confirm、备份 ref 恢复已有用例 | 四仓聚合展示（当前逐仓 message） |
 | AC-OP-17 | SYNC 跳过表 UNMERGED/IN_PROGRESS/… | COVERED | `Sync_Preflight_MatrixBlockedStates...`、单源矩阵 | — |

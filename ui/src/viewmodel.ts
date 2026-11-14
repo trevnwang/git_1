@@ -828,10 +828,10 @@ export const BATCH_ACTIONS: readonly BatchActionDef[] = [
   },
   {
     kind: 'TAG',
-    label: '批量 Tag',
+    label: '批量 Tag（暂不开放）',
     icon: '⚑',
-    title: 'Tag：四仓打同名 Tag（需输入 Tag 名称；可选 dryRun）→ 任务中心',
-    implemented: true,
+    title: '暂不开放：各版本 Tag 仓集合不同（1.0 四仓 / 2.0 缺 MIL / 3.0 缺 MIL+SIL），不按“四仓同 Tag”实现；D-029',
+    implemented: false,
   },
   {
     kind: 'RESTORE',

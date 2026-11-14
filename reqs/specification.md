@@ -1,4 +1,4 @@
-# MBD 组件全生命周期 Git 工具 — 规格说明书（Specification v0.4（frozen））
+# MBD 组件全生命周期 Git 工具 — 规格说明书（Specification v0.4.1（Tag 暂定））
 
 > **单一需求源。** 本文件合并原 SRS 与 AC Catalog；所有实现、测试、评审、验收引用本文件。`reqs/adr/*` 是阶段性决策记录，不是需求源。
 > 评审规则：每次需求评审**只评审本文件**；评审通过并冻结后才进入开发。M2b 增量已作为本文件 §16（M2b Delta）待评审；通过后冻结，不另建需求文件。
@@ -10,9 +10,9 @@
 | 项目 | 内容 |
 |---|---|
 | 文档 ID | MBD-GIT-SRS |
-| 版本 | **v0.4（frozen，2026-11-15）** |
+| 版本 | **v0.4.1（2026-11-15，Tag 暂定修订；v0.4 冻结基线 + D-029）** |
 | 日期 | 2026-11-14 |
-| 状态 | **v0.4 已冻结**（三路需求评审 PASS，2026-11-15）。M2 拆分（D-025）继续有效：M2a 已独立签收，M2b 未完成；M2 总出口 = M2a ∧ M2b。评审通过并冻结后进入 M2b 增量开发 |
+| 状态 | **v0.4 已冻结**；v0.4.1 按用户决策将批量切 Tag 暂定（D-029），不参与 M2b 验收。M2 拆分（D-025）继续有效：M2a 已独立签收，M2b 未完成；M2 总出口 = M2a ∧ M2b。评审通过并冻结后进入 M2b 增量开发 |
 | 替代 | v0.3.1-r2；历史原稿已删除 |
 | 权威级别 | **本文件 > 任何口头/聊天记录 > ADR 阶段说明**；**UI 视觉冲突时：用户参考图 > 本文件 §11** |
 
@@ -32,7 +32,7 @@
 | v0.3 | 2026-11-14 | **UI 以用户参考图为准重构**：重写 §11 主界面为工作台（菜单栏 / 标题区 / 左侧组件卡片列表 / 中间 2×2 四仓文件树 / 右侧选中仓信息面板 / 底部 PULL·FETCH·CHKOUT·COMMIT·PUSH 按钮条 / 状态栏），新增 §11.5 文件夹视图、§11.6 批量入口、§11.0.1 冲突裁决；旧看板表格 + 侧栏 + App Shell 左侧导航**废弃**，表格视图降级 v1.1（v1 入口不存在）；新增 §9.13–9.17 六组 32 条 FR 与 §13.1.1 的 AC-UI-01…AC-UI-14；10 个 CI 锚点全部给出新落点（10/10，CI 仍不参与聚合/卡片底色）；更新 §3 范围与 M0/M1/M2/M3 里程碑、§13 追溯矩阵、§10 性能/离线措辞、附录 D 设置键 | 用户参考图 `docs/images/reference/main-ui-reference.png` + `docs/ui-redesign-plan.md` + ADR D-022…D-024 |
 | v0.3.1 | 2026-11-14 | **M2 拆分为 M2a 单仓安全交付 / M2b 批量·作业·审计（D-025）**：§3.3 M2 行拆为 M2a/M2b（出口标准与依赖）；§9.16/§9.17 标注 M2a 范围（取消/job/任务中心/仅重试失败项归 M2b）；§7.6 冻结按钮语义（DIVERGED Pull=❌、`—` 按禁用断言、EMPTY 首推归 M2b）；§13.1.1 修订 AC-UI-08/09/10 并新增 AC-UI-10a（COMMIT 确认条）/AC-UI-10b（PUSH 确认条）/AC-UI-10c（取消·job，M2b）/AC-UI-15（M2b 边界提示）；新增 §13.1.2 AC-SAFE-14（凭据作用域）/15（CAS）/16（ignored）/17（ref 校验）与 AC-OP-33（审计-lite）；§13.4 追溯矩阵与门禁更新。**当前状态：M2a 待复评，不写“已通过”** | `reqs/adr/D-025-m2a-m2b.md` + `docs/review-m2-req.md`（RQ-01…RQ-08/P0 清单）+ `docs/review-m2-code.md`（P0-1/P1-1/2/3）+ `docs/review-m2-ux-fixcheck.md`（NP0-1） |
 | v0.3.1-r2 | 2026-11-14 | **M2a 出口 AC 定义与证据物补齐（Gate G-P0-4 回写；不放宽任何安全要求）**：新增 **§13.1.2**——AC-UI-10a/10b/10c/15、AC-SAFE-14…17、AC-OP-33 的完整 Given/When/Then 与可测断言、M2a 出口 13 条口径、单源矩阵夹具 `reqs/fixtures/m2-matrix.json`（**Host 单测 + CDP 共用，禁止第三份手写期望**）、tooltip 冻结格式改 `原因 [E_*] → 替代动作`、COMMIT「对话框→确认条→执行」两步口径；§13.1.1 修正 AC-UI-08/09/10 拆分引用；§13.4 补 FR-ACT/FR-SAFE/FR-OPS 追溯行与 M2a 门禁注；新增 `docs/m2a-ac-report.md`（证据模板）与 `ui/scripts/cdp-m2a-selfcheck.mjs`（旧 `cdp-m2-selfcheck.mjs` 作废）。**状态仍为 M2a 待复评（修复中），不写“已通过”** | `docs/review-m2-gate-ux.md` §4.2/§4.4/G-P0-4 + `docs/review-m2-gate-security.md`（N-1/N-2）+ `reqs/adr/D-025-m2a-m2b.md` §2.2/§3/§5 |
-| v0.4（frozen） | 2026-11-15 | **需求单源化**：SRS + AC Catalog + 追溯/错误码附录合并为 specification.md；删除历史 review/archive/_tools/v0.2/docx/drawio；新增 §16 M2b 增量（组件管理/DELETE_PENDING/Repair/Re-clone/baseline/CREATE 撤销/故障注入/测试门禁/DoD）；按三路评审 P0 修订 | 用户要求：单文件评审；docs/review-spec-*.md |
+| v0.4.1 | 2026-11-15 | **切 Tag 暂定（D-029）**：AC-OP-11…14 与 Tag baseline 不参与 M2b 验收/实现计划；已有后端保留、UI 禁用；M2b 出口改为 AC-OP-01…10、15…35 | 用户决策：各版本 Tag 仓集合不同 |\n| v0.4（frozen） | 2026-11-15 | **需求单源化**：SRS + AC Catalog + 追溯/错误码附录合并为 specification.md；删除历史 review/archive/_tools/v0.2/docx/drawio；新增 §16 M2b 增量（组件管理/DELETE_PENDING/Repair/Re-clone/baseline/CREATE 撤销/故障注入/测试门禁/DoD）；按三路评审 P0 修订 | 用户要求：单文件评审；docs/review-spec-*.md |
 
 **已确认决策（ADR）**
 
@@ -142,7 +142,7 @@
 | M0 骨架与冻结 | **新工作台骨架（参考图 7 区域：菜单栏/标题区/组件卡片列表/2×2 四仓文件树/右侧信息面板/底部按钮条/状态栏）+ 文件夹视图骨架 + 视图切换 + 设计 token（§11.2）+ 10 个 CI 占位锚点（新落点）+ Mock 数据 + 假 Gitea**；底部 5 按钮**禁用占位**（D-024）；状态矩阵夹具（附录 C）、AC 全量冻结、测试资产（图集语义已并入 §7/§8/§11）（Gitea 单二进制 fixture/`IClock`/基准脚本） | 工作台骨架可跑；**CDP 布局断言：7 区域存在且顺序正确、1440/1280 无页面级横向溢出、CI 锚点 10/10 命中**；AC 追溯矩阵 100% 覆盖 FR（含 AC-UI-01…14）；夹具清单签收 |
 | M1 只读闭环 | 配置/认证、远程同步、本地发现、状态计算、**工作台接真数据（组件卡片/四仓文件树/文件夹视图/右侧信息面板/状态栏）+ 详情抽屉 + 三阶段首扫与就绪重判**；底部 5 按钮**全部只读禁用**并提供禁用理由（D-024）；文件树/文件夹视图只读可展开、双击打开 | 附录 C 状态矩阵全绿；工作台首屏 P95 ≤1.5s（NFR-PERF-02/09）；**AC-UI-01/03/04/05/06/07/09/11/12/13/14 通过**（布局、文件树、文件夹视图、视图切换、M1 只读边界、信息面板、CI 锚点、二级入口、旧布局废弃） |
 | M2a 单仓安全交付 | **底部单仓按钮条 PULL/FETCH/CHKOUT/COMMIT(staged-only)/PUSH 真实 Host 接入**（PULL `--ff-only`、COMMIT staged-only/message 1–200、PUSH 禁 force 且 `NO_UPSTREAM` 走“发布分支并建 upstream”确认；EMPTY 首推归 M2b，M2a 构建按空仓无提交禁用；CHKOUT 选择器来自 `remote_ref` + 搜索 + `stash -u` 选项）+ **安全四件**（凭据作用域、写前 read-through+CAS、ignored 文件保护、ref 校验）+ **COMMIT/PUSH ≤48px 确认条**（含 `Alt+5` 同路径）+ **焦点闭环** + **tooltip 三段式与 Host 单源 14 态矩阵** + **操作审计一条（audit-lite）** + **真实数据验收**；批量/任务中心入口明示“M2b 未接入” | **M2a 出口 AC 全绿（共 13 条）**：`AC-UI-08`（单源矩阵+tooltip）、`AC-UI-09`（阶段门禁）、`AC-UI-10`（前置/失败/进行中/回写）、`AC-UI-10a`（COMMIT 确认条）、`AC-UI-10b`（PUSH 确认条）、`AC-UI-11`、`AC-UI-13`（焦点复验）、`AC-UI-15`（M2b 边界）、`AC-SAFE-14/15/16/17`、`AC-OP-33`；评审 P0 闭环（`docs/review-m2-req.md` P0-01…P0-05/P0-08/P0-11、`docs/review-m2-code.md` P0-1/P1-1/P1-2/P1-3、`docs/review-m2-ux-fixcheck.md` NP0-1）；CDP+Host+fixture 可自动复跑；**不得声称 FR-ACT-05/06 全量通过**（取消/job/任务中心归 M2b） | 依赖 M1 出口通过；依赖 `reqs/adr/D-025-m2a-m2b.md` 冻结的口径与夹具 `reqs/fixtures/m2-matrix.json` |
-| M2b 批量/作业/审计 | 批量 Clone/Pull/Checkout/Tag/SYNC/Delete/Restore/Create + 受控 SYNC 备份 ref + `.trash` 恢复 + 任务中心（`job`/`JOB_UPDATED`/`jobId`/取消/仅重试失败项/持久化）+ 审计完整表（查询/导出/≥90 天）+ 写前 journal + 崩溃 reconcile + FR-REPO-05 其余修复类（Repair/Re-clone、detached 建分支、EMPTY 首推建 upstream）+ 离线降级 | 写操作 AC 通过（`AC-OP-01…AC-OP-35`、`AC-REPO-01…AC-REPO-11`、`AC-SAFE-01…AC-SAFE-13`、`AC-UI-10c`、`AC-UI-16`）；故障注入报告通过；14 态矩阵在 M2b 构建复验；**M2 总出口 = M2a ∧ M2b，缺一不得宣称 M2 交付** | 依赖 M2a 出口通过（矩阵单源/审计链路/错误码体系是 M2b 前置） |
+| M2b 批量/作业/审计 | 批量 Clone/Pull/Checkout/Tag/SYNC/Delete/Restore/Create + 受控 SYNC 备份 ref + `.trash` 恢复 + 任务中心（`job`/`JOB_UPDATED`/`jobId`/取消/仅重试失败项/持久化）+ 审计完整表（查询/导出/≥90 天）+ 写前 journal + 崩溃 reconcile + FR-REPO-05 其余修复类（Repair/Re-clone、detached 建分支、EMPTY 首推建 upstream）+ 离线降级 | 写操作 AC 通过（`AC-OP-01…10、AC-OP-15…35`、`AC-REPO-01…AC-REPO-11`、`AC-SAFE-01…AC-SAFE-13`、`AC-UI-10c`、`AC-UI-16`；`AC-OP-11…14` 按 D-029 暂定不参与）；故障注入报告通过；14 态矩阵在 M2b 构建复验；**M2 总出口 = M2a ∧ M2b，缺一不得宣称 M2 交付** | 依赖 M2a 出口通过（矩阵单源/审计链路/错误码体系是 M2b 前置） |
 | M3 收口 | 通知/日志/诊断/设置、性能与可用性、打包、验收 | **AC 基线冻结版本全绿**；P0 缺陷清零；§7/§8/§11 与需求/代码追溯一致 |
 
 > **M2a/M2b 拆分口径（D-025，v0.3.1）**：
@@ -1211,7 +1211,7 @@ interface ICiProvider {
 | FR-STA | AC-STA-01…AC-STA-15；跨域 AC-SCAN-09、AC-DETAIL-02、AC-OP-11/12 | — |
 | FR-BOARD | AC-BOARD-01…AC-BOARD-16（**表格相关断言由 AC-UI-02 取代**）；跨域 AC-STA-08、**AC-UI-01/02/07** | 旧表格默认视图断言标记作废（D-023） |
 | FR-DETAIL | AC-DETAIL-01…AC-DETAIL-09；跨域 AC-SAFE-10、**AC-UI-03/04/11/13** | 详情抽屉化由 AC-UI-11/13 覆盖 |
-| FR-OP | AC-OP-01…AC-OP-35；跨域 AC-SYNC-05/14、AC-SCAN-06、AC-OPS-04 | — |
+| FR-OP | AC-OP-01…10、AC-OP-15…35；跨域 AC-SYNC-05/14、AC-SCAN-06、AC-OPS-04（AC-OP-11…14 按 D-029 暂定） | — |
 | FR-REPO | AC-REPO-01…AC-REPO-11；跨域 AC-OP-05、**AC-UI-08/10** | 底部按钮为单仓操作 v1 入口 |
 | FR-SAFE | AC-SAFE-01…AC-SAFE-17（**v0.3.1 新增 AC-SAFE-14 凭据作用域 / 15 CAS / 16 ignored / 17 ref 校验，定义见 §13.1.2，M2a 出口**）；跨域 AC-OP-16/20/26、AC-CFG-06、AC-DETAIL-06/07、AC-OPS-06、**AC-UI-04** | M2a 出口=AC-SAFE-14…17；AC-SAFE-01…13 归 M2b 出口，不得混记 |
 | FR-OPS | AC-OPS-01…AC-OPS-17；跨域 AC-SAFE-06、**AC-UI-13**（二级入口）、**AC-UI-01**（状态栏模板）、**AC-OP-33**（v0.3.1 新增审计-lite，定义见 §13.1.2，M2a 出口） | M2a 只要求“一次操作一条最小列审计”；查询/导出/90 天保留归 M2b |
@@ -1486,7 +1486,7 @@ interface ICiProvider {
 - **审计**：action=`REPAIR`/`RECLONE`，含 pre/post HEAD 与结果；失败零改动（按上述回滚）。
 - **验收**：AC-OP-05 目标存在不覆盖/转 Repair 提示；AC-REPO-08 两场景 + 失败回滚。
 
-## 16.4 Tag 与 baseline_snapshot（FR-OP-04 / AC-OP-11、12、13、14）
+## 16.4 Tag 与 baseline_snapshot（暂定：D-029，不参与 M2b 验收）
 
 - TAG = 检出同一 Tag，规则见 AC-OP-11…14。
 - **写入规则（唯一口径）**：每次 TAG job 对组件固定写 **4 行** `baseline_snapshot`：
@@ -1543,7 +1543,7 @@ interface ICiProvider {
 **证据 manifest 固定路径/schema**：`docs/evidence/m2b-manifest.json`，字段 `{commit,generatedAt,suite:{name,command,startedAt,finishedAt,result:PASS|FAIL|SKIP,artifact},checks:[{ac,status:COVERED|PARTIAL|GAP,evidence}]}`；CI/本机 runner 生成。
 
 **DoD（全部满足才可打 `m2b` / 宣称 M2 成立）**：
-1. Annex A 中 AC-OP-01…35、AC-REPO-01…11、AC-SAFE-01…13、AC-UI-10c、AC-UI-16 全部 `COVERED`（`PARTIAL`/`GAP` 不计）；新增 §16 行为对应 AC（AC-OP-31/32、AC-OP-23、AC-OP-25、AC-OP-11…14、AC-OP-05/AC-REPO-08、AC-OP-34/35）同；
+1. Annex A 中 AC-OP-01…10、AC-OP-15…35、AC-REPO-01…11、AC-SAFE-01…13、AC-UI-10c、AC-UI-16 全部 `COVERED`（`PARTIAL`/`GAP` 不计；`AC-OP-11…14` 按 D-029 暂定不参与）；新增 §16 行为对应 AC（AC-OP-31/32、AC-OP-23、AC-OP-25、AC-OP-05/AC-REPO-08、AC-OP-34/35）同；
 2. 14 态×5 键矩阵在 M2b 构建复验：消费者=`RepoActionAvailabilityMatrixTests` + `ui/scripts/cdp-m2a-selfcheck.mjs`；命令=`vstest ... --Tests:RepoActionAvailabilityMatrix` + `node ui/scripts/cdp-m2a-selfcheck.mjs`；`reqs/fixtures/m2-matrix.json` 与 Host/UI 一致；
 3. `docs/m2b-fault-injection-report.md` 通过（§16.6），无 P0/P1 安全缺陷；
 4. 测试：单元/集成全绿（当前 397/397 基线）；L1 证据必跑；至少一份 L2/hermetic 真实 Gitea 证据归档；SKIP 不计 COVERED；
@@ -2413,7 +2413,7 @@ AC-<域>-<NN>[.<子字母>]
 - **Then**：① 默认阻断：仓 HEAD 与文件内容不变、无 stash 产生；② stash 选项：切换成功，`stash list` 新增 1 条，切换后工作区干净；③ untracked 文件按选择处理（默认保留）；④ UI 明确显示 stash 名称与恢复入口；⑤ 结果写 `job_item.message` 与审计。
 - **关联 NFR/OQ**：FR-OP-03；—
 
-#### AC-OP-11 · 切 Tag：四仓同 Tag 成功、detached 检出、写 `baseline_snapshot`
+#### AC-OP-11 · 切 Tag：四仓同 Tag 成功、detached 检出、写 `baseline_snapshot` 〔暂定：D-029，不参与 M2b 验收/实现计划〕
 - **覆盖 FR**：FR-OP-04、FR-STA-06
 - **测试层级/依赖**：E2E（`G-E2E` 四仓均打 `v1.0`）
 - **Given**：4 仓均有轻量 tag `v1.0`（指向各自 commit `cD/cI/cM/cS`）。
@@ -2421,7 +2421,7 @@ AC-<域>-<NN>[.<子字母>]
 - **Then**：① 4 仓 `HEAD` 分离（`git status` 显示 detached）且 `git tag --points-at HEAD` 含 `v1.0`；② `repo_status.main_status=DETACHED_TAG`（4 仓）；③ `baseline_snapshot` 写入 4 行 `(component_id,'v1.0',repo_type)`，`commit_sha` 分别为 `cD/cI/cM/cS`、`tag_present=1`；④ 组件 `aggregate_status=DETACHED`（按 §7.4，无 TAG_DRIFT 时）；⑤ 任务中心逐仓结果与 tag 一致。
 - **关联 NFR/OQ**：FR-OP-04（旧 AC-10 仅映射见 §1.4）；—
 
-#### AC-OP-12 · 切 Tag 缺 Tag：3 仓检出 + 1 仓跳过报告 + `TAG_DRIFT`
+#### AC-OP-12 · 切 Tag 缺 Tag：3 仓检出 + 1 仓跳过报告 + `TAG_DRIFT` 〔暂定：D-029，不参与 M2b 验收/实现计划〕
 - **覆盖 FR**：FR-OP-04、FR-STA-06
 - **测试层级/依赖**：E2E（`F-TAG_DRIFT` 口径）
 - **Given**：4 仓均存在；仅 3 仓（Design/Impl/MIL）有 tag `v1.0`；SIL 仓在默认分支上、无 `v1.0`（`main_status=SYNCED`）。
@@ -2429,7 +2429,7 @@ AC-<域>-<NN>[.<子字母>]
 - **Then**：① 3 仓 `DETACHED_TAG`，1 仓（SIL）不做 detached 检出、`job_item` 记“缺 Tag 跳过”（`state=SKIPPED`，SRS §8.1 合法值，不置失败也不置成功检出）；② 组件 `aggregate_status=TAG_DRIFT`（TAG_DRIFT 优先于 SYNCED；附录 C `F-TAG_DRIFT` 已冻结第 4 仓为 `SYNCED` 而非 MISSING，R-03 关闭）；③ `baseline_snapshot` **固定写 4 行**：SIL 行 `tag_present=0`、`commit_sha=NULL`、`tag_object_sha=NULL`；其余 3 行 `tag_present=1`；写入在 TAG job 收口事务中完成；④ 组件详情逐仓展示 tag 对照，缺 tag 仓显示“无”；⑤ 不产生远端 tag 创建/推送。
 - **关联 NFR/OQ**：FR-OP-04、FR-STA-06；R-03 已关闭（附录 C `F-TAG_DRIFT` 第 4 仓固定 SYNCED）
 
-#### AC-OP-13 · Tag 被移动：`fetch --force` 更新 + `tag_moved` 告警 + 禁 `--prune-tags`
+#### AC-OP-13 · Tag 被移动：`fetch --force` 更新 + `tag_moved` 告警 + 禁 `--prune-tags` 〔暂定：D-029，不参与 M2b 验收/实现计划〕
 - **覆盖 FR**：FR-OP-04
 - **测试层级/依赖**：E2E（`F-TAG-MOVED`、`G-E2E` 移动 tag）
 - **Given**：本地 tag `v1.0`→`c1`；远程同名 tag 被删除重建指向 `c2`。
@@ -2437,7 +2437,7 @@ AC-<域>-<NN>[.<子字母>]
 - **Then**：① 工具以 `fetch --force`（禁止 `--prune-tags`）更新本地 tag 到 `c2`（断言 `git rev-parse v1.0`=`c2`）；② `repo_status.flags_json` 含 `tag_moved`，UI 警告“tag 被移动”；③ 组件 `aggregate_status=TAG_DRIFT`；④ `baseline_snapshot` 按 §8.1 PK `(component_id,tag,repo_type)` **覆盖同键行为新 commit**；旧值必须记录在 `operation_log`（action=TAG，before/after 含旧/新 SHA），不要求 baseline 表保留多版本行；⑤ 其他 tag 未被 prune（本地多余 tag 仍在）。
 - **关联 NFR/OQ**：FR-OP-04、§7.3；—
 
-#### AC-OP-14 · annotated tag `^{commit}` 解引用与 `tag_present`
+#### AC-OP-14 · annotated tag `^{commit}` 解引用与 `tag_present` 〔暂定：D-029，不参与 M2b 验收/实现计划〕
 - **覆盖 FR**：FR-OP-04
 - **测试层级/依赖**：UT + E2E（annotated tag 夹具）
 - **Given**：annotated tag `v2.0`（tag 对象 sha ≠ commit sha `c3`）；轻量 tag `v1.0`→`c2`。
