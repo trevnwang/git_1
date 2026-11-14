@@ -94,7 +94,7 @@ dotnet test MbdGitTool.sln --artifacts-path "$env:TEMP\m2final-artifacts-exact-<
 
 ## 3. AC-SAFE-15：写前 read-through 重扫 —— **FAIL（阻断）**
 
-AC-SAFE-15（`reqs/requirements.md:1138-1144`）Then② 明文要求：**动作前 read-through 重扫成立：`local_state.scan_at` 单调前进（T1>T0）且矩阵判定基于动作前状态（非 TTL 旧快照）；非 HEAD 变化（dirty/upstream/remote）同样在动作前被重算捕获并给出对应拒绝码，不得仅以动作内部 git 报错兜底**；并注明“实现偏差须在 `docs/m2a-ac-report.md` 显式记录，**不得据此放宽本 AC**”。
+AC-SAFE-15（`reqs/specification.md:1138-1144`）Then② 明文要求：**动作前 read-through 重扫成立：`local_state.scan_at` 单调前进（T1>T0）且矩阵判定基于动作前状态（非 TTL 旧快照）；非 HEAD 变化（dirty/upstream/remote）同样在动作前被重算捕获并给出对应拒绝码，不得仅以动作内部 git 报错兜底**；并注明“实现偏差须在 `docs/m2a-ac-report.md` 显式记录，**不得据此放宽本 AC**”。
 
 ### 3.1 静态核对：`runRepoAction` 没有写前 refresh
 - `HostCommandRouter.cs:248-271`：`case "runRepoAction"` 仅 `await EnsureSnapshotAsync(...)`（`:250`）→ `_actions.RunAsync(parsed, _snapshots.Index, ...)`（`:255-261`）。
@@ -132,7 +132,7 @@ AC-SAFE-15（`reqs/requirements.md:1138-1144`）Then② 明文要求：**动作�
 
 ## 4. AC-OP-33：审计-lite —— **FAIL（部分，字段缺失；其余 PASS）**
 
-AC-OP-33（`reqs/requirements.md:1162-1168`）：每次动作**恰 1 行**；最小语义字段含 **`ts/actor/componentId/repoType/action/before_head/after_head/result/error_code/request_id`**；成功与失败都写；重启可查、同一 `request_id` 不产生 0/多行；不含 token。
+AC-OP-33（`reqs/specification.md:1162-1168`）：每次动作**恰 1 行**；最小语义字段含 **`ts/actor/componentId/repoType/action/before_head/after_head/result/error_code/request_id`**；成功与失败都写；重启可查、同一 `request_id` 不产生 0/多行；不含 token。
 
 ### 4.1 实现与字段核对
 - 落点：`%LOCALAPPDATA%\MbdGitTool\audit\operations.jsonl`（`OperationAuditService.DefaultFilePath`）；JSONL audit-lite。SRS 允许“以实现落点为准”，M2b 再做完整 `operation_log` 查询/导出/90 天保留 —— 落点形态可接受。
@@ -181,7 +181,7 @@ AC-OP-33（`reqs/requirements.md:1162-1168`）：每次动作**恰 1 行**；最
 | P1-3 ref 校验（不存在 ref 不假成功） | **PASS（未回退）** | `rev-parse --verify`（`:644-669`）、分支名 `-`/`+` 拒绝（`:1502-1538`）未改；`Checkout_NonExistentBranch/Tag…` 通过 |
 | P1-6 stderr 摘要（关键行而非首行） | **PASS（未回退）** | `SummarizeGitError`（`:1217-1249`）、`IsPushRejected`（`:1205-1212`）未改；`Push_Rejected_ReturnsPushRejectedWithKeyStderrLine`、`PushRejected_SummaryContainsRejectedReasonNotOnlyFirstLine` 通过 |
 | 新增防御：COMMIT/PUSH 确认冻结、EMPTY.PUSH 禁用 | **PASS** | `RepoActionService.cs:74`（`EMPTY="NYCYN"`）、`:119-123`（`RequiresConfirm = cell=='C' ∨ COMMIT/PUSH`）、`:287-300`（未 `confirm=true` → `E_CONFIRM_REQUIRED`）；`CommitAndPush_WithoutConfirm_AreRejectedByFrozenConfirmFlag`、`GetAvailability_Synced_CommitAndPushRequireConfirm…` 通过。**这补上了“绕过 UI 直接调桥写”的防御层**（G-P0-1 安全相关部分） |
-| 单源矩阵夹具 ↔ Host 代码 | 代码/夹具逐格一致（14 态×5 键，`enabled/requiresConfirm` 比对 mismatches=0）；但见 P2-3 | `reqs/v0.2/fixtures/m2-matrix.json` 与 `RepoActionService.Matrix` 比对脚本 |
+| 单源矩阵夹具 ↔ Host 代码 | 代码/夹具逐格一致（14 态×5 键，`enabled/requiresConfirm` 比对 mismatches=0）；但见 P2-3 | `reqs/fixtures/m2-matrix.json` 与 `RepoActionService.Matrix` 比对脚本 |
 
 ---
 
@@ -207,8 +207,8 @@ AC-OP-33（`reqs/requirements.md:1162-1168`）：每次动作**恰 1 行**；最
 `RepoActionGitTests.cs:84-103` 未创建真实 `feature` 分支、未断言拒绝前无 fetch/argv；建议按 AC-SAFE-17④ 的 Given/Then 强化（本轮独立夹具已覆盖行为）。
 
 ### P2-2【P2】（安全相关旁证）AC-UI-08 单源矩阵的“Host 单测与 CDP 共用夹具”未落实、夹具状态自相矛盾
-- `tests/MbdGitTool.Host.Tests/RepoActionAndComponentDetailTests.cs:19-36` 仍手写 `ExpectedMatrix`（第三份期望）；`reqs/v0.2/fixtures/m2-matrix.json` 仅被 `ui/scripts/cdp-m2a-selfcheck.mjs` 读取。
-- 夹具 `status` 仍为 `SINGLE_SOURCE_PENDING_CODE_ALIGNMENT`，`freezeNotes` 仍写“截至 1afa014 Host 仍 requiresConfirm=false、UI 仍持第二套矩阵、EMPTY.PUSH 仍启用；对齐完成并复跑后才可改状态”——与本提交实际状态矛盾（`reqs/v0.2/fixtures/m2-matrix.json:16` 与 freezeNotes）。
+- `tests/MbdGitTool.Host.Tests/RepoActionAndComponentDetailTests.cs:19-36` 仍手写 `ExpectedMatrix`（第三份期望）；`reqs/fixtures/m2-matrix.json` 仅被 `ui/scripts/cdp-m2a-selfcheck.mjs` 读取。
+- 夹具 `status` 仍为 `SINGLE_SOURCE_PENDING_CODE_ALIGNMENT`，`freezeNotes` 仍写“截至 1afa014 Host 仍 requiresConfirm=false、UI 仍持第二套矩阵、EMPTY.PUSH 仍启用；对齐完成并复跑后才可改状态”——与本提交实际状态矛盾（`reqs/fixtures/m2-matrix.json:16` 与 freezeNotes）。
 - 归 UX Gate 最终裁决；本报告仅记录安全相关部分（Host `RequiresConfirm` 已正确，防绕过确认的 Host 侧门禁已生效）。
 
 ### P2-3【P2】验收报告/提交信息的小偏差
@@ -224,7 +224,7 @@ AC-OP-33（`reqs/requirements.md:1162-1168`）：每次动作**恰 1 行**；最
 ### 7.1 结论
 **M2a Gate 不通过；提交 `9d7afd0` 不建议打 `m2a` tag。**
 - `AC-SAFE-15`（read-through ②）未绿且报告不实（R-1）；`AC-OP-33` 字段不全（R-2）；测试非 hermetic 污染真实审计（R-3）。
-- M2a 出口要求“13 条 AC 全绿 + 每条可复跑证据”（`reqs/requirements.md:1218`，ADR §5 三件证据缺一不可），当前不满足；按 D-025，**不得**打 `m2-ops` 或宣称“M2 交付完成”。
+- M2a 出口要求“13 条 AC 全绿 + 每条可复跑证据”（`reqs/specification.md:1218`，ADR §5 三件证据缺一不可），当前不满足；按 D-025，**不得**打 `m2-ops` 或宣称“M2 交付完成”。
 - 本报告不覆盖 AC-UI-08/09/10/10a/10b/11/13/15 的 UI/CDP 行为面（由并行 UX Gate 负责），但 §6 P2-2 的矩阵单源问题会同时影响 AC-UI-08 证据。
 
 ### 7.2 必须修项（按优先级）
@@ -236,7 +236,7 @@ AC-OP-33（`reqs/requirements.md:1162-1168`）：每次动作**恰 1 行**；最
 ### 7.3 修复后的 tag 口径
 - 形成**新提交**（不要在工作区脏状态下打 tag；评测时工作区有并行未提交修改，且不属于 `9d7afd0`），重新跑全量（≥265）与独立安全夹具；
 - tag 建议 `m2a`（仅 M2a 单仓安全交付），**不得**打 `m2-ops`；
-- 三件证据（`docs/m2a-ac-report.md`、`reqs/v0.2/fixtures/m2-matrix.json`、`ui/scripts/cdp-m2a-selfcheck.mjs`）须与实际代码一致，并由独立 Gate 复评签字后才能宣布“M2a 通过”。
+- 三件证据（`docs/m2a-ac-report.md`、`reqs/fixtures/m2-matrix.json`、`ui/scripts/cdp-m2a-selfcheck.mjs`）须与实际代码一致，并由独立 Gate 复评签字后才能宣布“M2a 通过”。
 
 ---
 

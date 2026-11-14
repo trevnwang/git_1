@@ -7,7 +7,7 @@
 |---|---|
 | 评审对象 | `1371f51c1080022cd72c59dd08a385003cba95b3`（`feat(m2b2a): SQLite operation_log, export, backup refs restore, EMPTY first push, retention`，2026-11-14 18:13:44 +0800），未打 tag |
 | 评审范围 | M2b-2a 的 UX / 需求符合度：审计查看过滤分页导出、备份 ref 列表/恢复、EMPTY 首推、离线提示、M2b-2 缺口与 AC 证据 |
-| 输入 | `docs/m2b-status.md`；`ui/src/components/overlays/{ModalHost,ComponentDrawer}.vue`；`ui/src/stores/workbench.ts`；SRS `reqs/requirements.md` §7.6 / §9.7 FR-OP-09/11 / §13.1.2 AC-OP-33、`reqs/v0.2/ac-catalog.md` AC-OP-30/31/32；ADR `reqs/adr/D-025-m2a-m2b.md`；参考 `artifacts/ui-review/m2b2-api-verify.mjs`、`artifacts/ui-review/m2b2-ui-verify.mjs` |
+| 输入 | `docs/m2b-status.md`；`ui/src/components/overlays/{ModalHost,ComponentDrawer}.vue`；`ui/src/stores/workbench.ts`；SRS `reqs/specification.md` §7.6 / §9.7 FR-OP-09/11 / §13.1.2 AC-OP-33、`reqs/specification.md（Annex A）` AC-OP-30/31/32；ADR `reqs/adr/D-025-m2a-m2b.md`；参考 `artifacts/ui-review/m2b2-api-verify.mjs`、`artifacts/ui-review/m2b2-ui-verify.mjs` |
 | 环境 | Windows 11 / git 2.59 / .NET 10；真实 Host PID 63108（18:12:35 启动，workspace=`D:\Workspace\git_1\artifacts\real-test\workspace`，CDP 9222 实测可驱动；**评审中途 Host/CDP 被并行进程关闭（约 18:34），之后改用只读 SQLite + 已入库截图/脚本复跑**）；`%LOCALAPPDATA%\MbdGitTool\db\mbd.db` 评审时刻 523 行 |
 | 方法 | ① CDP 真实鼠标事件驱动工作台（审计弹窗、抽屉、恢复确认），取 DOM 文本/行数/分页/导出路径与 toast；② Host 桥只读调用 `getOperationLog/getBackupRefs/exportOperationLog/openPath/cleanupRetention`；③ `sqlite3` 只读统计审计数据构成；④ 工作区外临时 git 仓黑盒复现 `reset --hard` 的 untracked 覆盖；⑤ 对照 `git show 1371f51:…` 复核所有行号 |
 | 边界 | **只评审，未改任何源码/需求/真实仓库**；临时脚本与截图在 `%TEMP%\uxrev`。评审开始后 HEAD 为 `1371f51`；评审期间并行修复以提交 **`cbdfa78`**（`fix(m2b2a): restore untracked safety, branch/safety-ref hardening, audit isolation and retention floor`）落库，仅含 Host 侧 4 个文件 + `docs/review-m2b2-code.md`：untracked 阻断、安全 ref 去重、审计测试隔离、审计保留下限 90。**本报告全部结论按 `git show 1371f51` 的 blob 给出**；`cbdfa78` 只关闭 P0-1 的 Host 侧一半与 P1-2 的隔离根因，P0-2/P1-1/P1-3/P1-4/P1-5/P1-6/P1-7/P1-8 均不在该修复内，须作为新对象复评 |
@@ -80,7 +80,7 @@
 
 **P2-2 过滤交互细节。** 动作过滤是**大小写不敏感等值**（API 侧统一转大写，`api.ts:1843-1846`），不支持“PUSH|SYNC”多值或模糊；无“清除筛选”按钮，只能手工清空；无结果时的空态未回显当前过滤条件。
 
-**P2-3 审计动作枚举漂移。** `RESTORE_BACKUP`、`CLEANUP_RETENTION`、`RESET` 不在 SRS §8.1 `operation_log.action (CHECK 同 job.kind 集)` 的枚举内（`reqs/requirements.md:395`），且 `AUDIT_ACTION_LABEL` 未收录，表格原样显示大写（`viewmodel.ts:1122-1141`）；107/523 行是 CLEANUP_RETENTION 维护噪声，审计页无法排除维护行。
+**P2-3 审计动作枚举漂移。** `RESTORE_BACKUP`、`CLEANUP_RETENTION`、`RESET` 不在 SRS §8.1 `operation_log.action (CHECK 同 job.kind 集)` 的枚举内（`reqs/specification.md:395`），且 `AUDIT_ACTION_LABEL` 未收录，表格原样显示大写（`viewmodel.ts:1122-1141`）；107/523 行是 CLEANUP_RETENTION 维护噪声，审计页无法排除维护行。
 
 **P2-8 分页无水位。** `ORDER BY id DESC LIMIT/OFFSET`（`AuditDatabase.cs:308`）；审计表会因启动/命令清理、其它作业持续追加新行，翻页时可能重复/漏行；UI 无快照水位或“刷新后回到顶部”提示。
 
@@ -140,7 +140,7 @@
 - UI 确认条文案：`text=发布分支并建立 upstream（main → origin/main）`，`detail=空仓首推：首次推送将建立 upstream（setUpstream=true）…`，accept 传 `{setUpstream:true, confirm:true}`（`workbench.ts:1541-1572`）。这是**成功式承诺**，但其实用户即将看到的是拒绝错误。
 - **同一页面的另一入口自相矛盾**：EMPTY 仓树空态主按钮“初始化并首推…”点击后提示“当前 Host 未开放该能力”（`RepoTreePanel.vue:45-52,81-93`）；而底部 PUSH 却启用并弹“空仓首推”确认条。两个入口对同一能力给出相反说法，违反 AC-UI-08 单源矩阵/AC-UI-09“禁止可点无效果”的口径。
 - 开发期截图 `artifacts/m2b2-realhost/02-real-empty-push-bar.png` 同时显示：卡片“空仓”、四个面板“空仓库（无首个提交）”、底部 PUSH 绿色可用、确认条“发布分支并建立 upstream（master → origin/master）…空仓首推”。真实 Host 自测脚本对该场景**只打开确认条并点取消**（`cdp-m2b2-realhost-check.mjs:159-179`；result.json `real.empty-confirm-no-write-before-accept`），**从未接受/执行过 EMPTY 首推**——即该能力没有被任何证据证明可成功。
-- `docs/m2b-status.md:58`“EMPTY 首推｜…git push -u origin HEAD 建 upstream；unborn 拒绝且零远端写”本身已承认唯一真实场景被拒绝；而 SRS §7.6（`reqs/requirements.md:353,372`）“EMPTY ✅ 首推建 upstream”与 D-025 §2.5④ 存在**规格与 git 事实冲突**，需需求方裁决，不能既写“恢复 EMPTY.PUSH=Y”又交付一个只能失败的按钮。
+- `docs/m2b-status.md:58`“EMPTY 首推｜…git push -u origin HEAD 建 upstream；unborn 拒绝且零远端写”本身已承认唯一真实场景被拒绝；而 SRS §7.6（`reqs/specification.md:353,372`）“EMPTY ✅ 首推建 upstream”与 D-025 §2.5④ 存在**规格与 git 事实冲突**，需需求方裁决，不能既写“恢复 EMPTY.PUSH=Y”又交付一个只能失败的按钮。
 
 **P0-2 判定：** EMPTY 状态下 PUSH 应**禁用**并 tooltip 指向“先 COMMIT 生成首个提交后重试”（或实现真正的“提交+首推”原子流程并由 Host 回写矩阵），同时修正 SRS/ADR/夹具；在此之前不得宣称 FR-REPO-05“EMPTY 首推”已交付。
 
@@ -173,7 +173,7 @@
 
 | 缺口 | 1371f51 状态 | 证据 | 严重度 |
 |---|---|---|---|
-| 写前 journal + 崩溃 reconcile（FR-SAFE-04 P0） | **完全没有**：全仓 grep `journal/reconcile` 仅命中 SQLite `journal_mode=WAL` 注释，无 journal 表/文件/启动 reconcile | `src/**` grep 结果；`reqs/requirements.md:549` | P1-7（M2b 出口 P0 未实现） |
+| 写前 journal + 崩溃 reconcile（FR-SAFE-04 P0） | **完全没有**：全仓 grep `journal/reconcile` 仅命中 SQLite `journal_mode=WAL` 注释，无 journal 表/文件/启动 reconcile | `src/**` grep 结果；`reqs/specification.md:549` | P1-7（M2b 出口 P0 未实现） |
 | 离线降级完整行为 | 部分：仅全局 pill + FETCH 禁用；误报/伪在线；无分区七态 | §3.2 | P1-5 |
 | 保留清理可视化 | **无**：`cleanupRetention` 只在 `api.ts:1871-1874` 有客户端方法，workbench/组件/设置页均未调用；设置页“删除保留期/备份 ref 保留”是只读写死“30 天”，无 `backup.retentionDays` 配置项、无上次清理时间/计数展示 | `ui/src` grep `cleanupRetention` 仅 api.ts；`ModalHost.vue:228-234` | P1-7 |
 | 备份恢复全链路 | 代码+Host 单测+开发期自测存在；但 1371f51 的真实 UI 链路证据缺失（自测工件早于本提交构建且未入库），确认/预检仍有 P0-1/P1-3/P1-4 | §2 | P1-8 |
@@ -194,7 +194,7 @@
 
 ### 4.3 M2b 是否完整
 
-**不完整。** M2b 出口要求 `AC-OP-01…AC-OP-32`、`AC-REPO-01…11`、`AC-SAFE-01…13`、`AC-UI-10c` + 故障注入 + 14 态矩阵复验（`reqs/requirements.md:141`）。截至 1371f51：AC-OP-31/32 未实现；AC-OP-30 不通过；AC-OP 全量逐条证据/故障注入缺失；journal/reconcile 未实现；离线降级不完整；FR-REPO-05 其余修复类（Repair/Re-clone、detached 建分支）未交付；保留清理可视化/配置缺失。**M2b-2a 只是 M2b-2b 的前半段，状态报告 §5/§6 也自述为待办，不能据此宣称 M2b/M2 完成。**
+**不完整。** M2b 出口要求 `AC-OP-01…AC-OP-32`、`AC-REPO-01…11`、`AC-SAFE-01…13`、`AC-UI-10c` + 故障注入 + 14 态矩阵复验（`reqs/specification.md:141`）。截至 1371f51：AC-OP-31/32 未实现；AC-OP-30 不通过；AC-OP 全量逐条证据/故障注入缺失；journal/reconcile 未实现；离线降级不完整；FR-REPO-05 其余修复类（Repair/Re-clone、detached 建分支）未交付；保留清理可视化/配置缺失。**M2b-2a 只是 M2b-2b 的前半段，状态报告 §5/§6 也自述为待办，不能据此宣称 M2b/M2 完成。**
 
 ---
 
@@ -226,7 +226,7 @@
 |---|---|---|
 | P2-1 | “打开所在目录”对真实导出路径必失败（openPath 限工作区）；clipboard 失败仍提示“已复制” | `OpenPathService.cs:138-141`；`workbench.ts:2807-2813` |
 | P2-2 | 动作过滤等值匹配、无多值/模糊、无清除按钮；空态不回显过滤条件 | `AuditDatabase.cs:571-574`；`ModalHost.vue:278-289` |
-| P2-3 | 审计 action 枚举漂移（RESTORE_BACKUP/CLEANUP_RETENTION/RESET 不在 §8.1 job.kind）；无中文标签；维护行占 20% | `viewmodel.ts:1122-1141`；`reqs/requirements.md:395` |
+| P2-3 | 审计 action 枚举漂移（RESTORE_BACKUP/CLEANUP_RETENTION/RESET 不在 §8.1 job.kind）；无中文标签；维护行占 20% | `viewmodel.ts:1122-1141`；`reqs/specification.md:395` |
 | P2-4 | 恢复前安全 ref 只在 8s toast，不列表/不可恢复 | `workbench.ts:2911-2918`；`BackupRefService.cs:31-32` |
 | P2-5 | 恢复错误跨仓残留（切 tab/重载不清 `backupRestore.error`） | `workbench.ts:2823-2863,2898-2899`；`ComponentDrawer.vue:268-270` |
 | P2-6 | 备份列表无分页；时间格式无年份/秒；无 branch 列 | `ComponentDrawer.vue:246-267`；`viewmodel.ts` formatStamp |

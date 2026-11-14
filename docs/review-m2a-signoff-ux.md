@@ -2,7 +2,7 @@
 
 > 复评角色：独立最终 UX/需求（含需求符合度）签收复评员
 > 复评对象：`fe98b95 fix(m2): complete final gate evidence (write pre-read-through, audit actor/requestId, fixture parity, M2a CDP selfcheck 10/10)`（2026-11-14 15:25:21 +0800，HEAD）
-> 输入：`docs/review-m2a-final-ux.md`（对 `9d7afd0` 的 P0-A/P0-B）、`docs/review-m2a-final-security.md`（R-1/R-2/R-3）、`docs/review-m2-gate-ux.md`、`docs/m2a-ac-report.md`、`reqs/requirements.md` §13.1.1/§13.1.2/§13.4（v0.3.1-r2）、`reqs/adr/D-025-m2a-m2b.md`、`reqs/v0.2/fixtures/m2-matrix.json`、`ui/scripts/cdp-m2a-selfcheck.mjs`、`src/**`、`ui/src/**`、`tests/**`
+> 输入：`docs/review-m2a-final-ux.md`（对 `9d7afd0` 的 P0-A/P0-B）、`docs/review-m2a-final-security.md`（R-1/R-2/R-3）、`docs/review-m2-gate-ux.md`、`docs/m2a-ac-report.md`、`reqs/specification.md` §13.1.1/§13.1.2/§13.4（v0.3.1-r2）、`reqs/adr/D-025-m2a-m2b.md`、`reqs/fixtures/m2-matrix.json`、`ui/scripts/cdp-m2a-selfcheck.mjs`、`src/**`、`ui/src/**`、`tests/**`
 > 硬性约束：**只评审**。未修改任何源码/需求/夹具/真实 RTCRepos 工作区；未杀掉运行中 Host、未启动替代服务；未执行任何真实写操作。全量测试在 `git archive HEAD` 导出的 `%TEMP%` 不可变树 + `--artifacts-path` 隔离产物中运行，未触碰工作区 `bin/`。本轮唯一写盘文件 = 本报告（另有 `%TEMP%` 下的导出树/探针，均在仓库外）。
 > 复评时间：2026-11-14 15:25–15:40（本地）。
 
@@ -13,7 +13,7 @@
 | 核对项 | 判定 | 依据 |
 |---|---|---|
 | ① `node ui/scripts/cdp-m2a-selfcheck.mjs` | **PASS 10/10，exit 0** | 10 条断言全部 PASS，`{total:10, passed:10, failed:[]}`，`EXIT=0`（§2） |
-| ② SRS §13.1.2 的 9 条 AC 定义与 ADR 一致 | **PASS** | 9 条 G/W/T 齐全（`reqs/requirements.md:1098-1168`），与 `reqs/adr/D-025-m2a-m2b.md` §2.2/§3/§5 逐条对应，无冲突（§3） |
+| ② SRS §13.1.2 的 9 条 AC 定义与 ADR 一致 | **PASS** | 9 条 G/W/T 齐全（`reqs/specification.md:1098-1168`），与 `reqs/adr/D-025-m2a-m2b.md` §2.2/§3/§5 逐条对应，无冲突（§3） |
 | ② `docs/m2a-ac-report.md` 13 条状态/证据与实测自洽 | **基本 PASS（11/13 完全自洽；2 处非阻断 P1 文档残留）** | 13 行状态与代码/测试/真实证据一致；行 13 字段清单未随实现更新、行 6 “本轮截图”未归档，见 §4、§7.1 |
 | ② 夹具 `m2-matrix.json` `status=aligned` 且被单测消费 | **PASS** | `status:"aligned"`（夹具 `:16`）；`RepoActionAvailabilityMatrixTests` 直接读取夹具并断言 `status=="aligned"`+14×5 逐格，271/271 实测通过（§5） |
 | ③ 状态栏模板 / M2b Toast / tooltip / PUSH 确认条不回归 | **PASS** | 自检 4 项全 PASS；状态栏实测 `最近一次操作：FETCH RTCT_Demo/DESIGN — 成功 · 15:25`；确认条高 44px、bbox 不变、未确认 0 写（§2、§6） |
@@ -62,7 +62,7 @@ EXIT=0
 
 ## 3. 核对项②（前半）：SRS §13.1.2 九条 AC 定义与 ADR 一致性
 
-`reqs/requirements.md` v0.3.1-r2 `### 13.1.2`（`:1084`）含 **9 条**完整 Given/When/Then：`AC-UI-10a`(`:1098`)、`AC-UI-10b`(`:1106`)、`AC-UI-10c`(`:1114`，M2b)、`AC-UI-15`(`:1122`)、`AC-SAFE-14`(`:1130`)、`AC-SAFE-15`(`:1138`)、`AC-SAFE-16`(`:1146`)、`AC-SAFE-17`(`:1154`)、`AC-OP-33`(`:1162`)。前置冻结口径齐全：tooltip 格式 `原因 [E_*] → 替代动作`（`:1092`）、COMMIT 两步（`:1094`）、单源夹具（`:1090`）、M2a 出口 13 条（`:1088`）。
+`reqs/specification.md` v0.3.1-r2 `### 13.1.2`（`:1084`）含 **9 条**完整 Given/When/Then：`AC-UI-10a`(`:1098`)、`AC-UI-10b`(`:1106`)、`AC-UI-10c`(`:1114`，M2b)、`AC-UI-15`(`:1122`)、`AC-SAFE-14`(`:1130`)、`AC-SAFE-15`(`:1138`)、`AC-SAFE-16`(`:1146`)、`AC-SAFE-17`(`:1154`)、`AC-OP-33`(`:1162`)。前置冻结口径齐全：tooltip 格式 `原因 [E_*] → 替代动作`（`:1092`）、COMMIT 两步（`:1094`）、单源夹具（`:1090`）、M2a 出口 13 条（`:1088`）。
 
 | SRS §13.1.2 AC | ADR D-025 对应 | 一致性结论 |
 |---|---|---|
@@ -102,7 +102,7 @@ EXIT=0
 
 ## 5. 夹具与单测消费（核对项②）
 
-- `reqs/v0.2/fixtures/m2-matrix.json:16` `"status": "aligned"`；14 主状态 × 5 键、`requiresConfirm` 规则与 M2a 覆盖（`DIVERGED.PULL`/`EMPTY.PUSH` 禁用）齐全。
+- `reqs/fixtures/m2-matrix.json:16` `"status": "aligned"`；14 主状态 × 5 键、`requiresConfirm` 规则与 M2a 覆盖（`DIVERGED.PULL`/`EMPTY.PUSH` 禁用）齐全。
 - `tests/MbdGitTool.Host.Tests/RepoActionAvailabilityMatrixTests.cs` 直接读取夹具、断言 `status=="aligned"`、14 态逐格比对 Host `GetAvailability` 的 `enabled/requiresConfirm/reasonCode`；本轮隔离全量测试通过 ⇒ **夹具被单测真实消费**。
 - 全量测试（提交对象导出树）：`Core 71/71`、`Host 200/200`、**271/271、0 失败/0 跳过**，`TreatWarningsAsErrors=true` 构建成功 ⇒ 0 warning/0 error，`EXIT=0`。
 - 残留：`m2-matrix.json:24` freezeNote 仍写“本文件状态为 SINGLE_SOURCE_PENDING_CODE_ALIGNMENT…”与 `status=aligned` 自相矛盾（P2）；CDP 脚本未读取夹具、`ui/src/mocks/workbenchMock.ts:643` 仍硬编码 14×5（P2，见 §7.2）。
@@ -145,7 +145,7 @@ EXIT=0
 | P1-3 | P1 | `docs/m2-ops-status.md:3,79` 仍写“Gate 状态：M2a 待复评（修复中）”“复评前置③ `cdp` exit 0 未满足”，与本次签收/自检 exit 0 矛盾 | 签收后按本报告更新为“M2a 已通过（M2b 未接入）”，`m2-ops` tag 不恢复 |
 | P2-1 | P2 | AC-SAFE-15 的 ADR §5 断言“外部改 HEAD → RunRepoAction → E_CONCURRENT_CHANGE”与 Then②“写前 read-through 重扫”存在层次歧义：router 层写前 refresh 后，既有的“改 HEAD 再动作”不再稳定复现 `E_CONCURRENT_CHANGE`（CAS 只覆盖 refresh→执行窗口）；报告行 10 的“CAS 实测四动作”未注明层级，当前可由 service 级测试 `CasMismatch_WriteAction…` 复现 | 修订 ADR §5 措辞或在报告注明 CAS 断言层级；可补一条 router 级“写前 refresh/scan_at 前进”测试 |
 | P2-2 | P2 | AC-OP-33 的实现落点为 JSONL 而非 SRS §8.1 的 SQLite `operation_log`；字段为 `requestId` 而非 `request_id`（语义等价）。安全 Gate 以 SRS “以实现落点为准”接受，M2b 做完整表 | 在 ADR/SRS §13.1.2 或 M2b 契约中补“M2a JSONL audit-lite 为最小实现、M2b 迁 `operation_log`”的授权说明；不必改代码 |
-| P2-3 | P2 | `reqs/v0.2/fixtures/m2-matrix.json:24` freezeNote 与 `status:"aligned"` 自相矛盾（仍写 PENDING）；`ui/src/mocks/workbenchMock.ts:643` 仍硬编码 14×5，CDP 脚本未读取夹具（ADR §5 “Host 单测与 CDP 共用、禁止第三份手写期望”仅 Host 单测侧落地） | 更新 freezeNote；CDP/Mock 改为读夹具或注明 Mock 仅 dev 用途 |
+| P2-3 | P2 | `reqs/fixtures/m2-matrix.json:24` freezeNote 与 `status:"aligned"` 自相矛盾（仍写 PENDING）；`ui/src/mocks/workbenchMock.ts:643` 仍硬编码 14×5，CDP 脚本未读取夹具（ADR §5 “Host 单测与 CDP 共用、禁止第三份手写期望”仅 Host 单测侧落地） | 更新 freezeNote；CDP/Mock 改为读夹具或注明 Mock 仅 dev 用途 |
 | P2-4 | P2 | `docs/m2a-ac-report.md:3` 仍写“候选代码：工作区最新（待提交）”（已提交为 `fe98b95`）；`docs/m2-ops-status.md:52,59` 单测数 234/234 过期 | 文档同步 |
 | P2-5 | P2 | 已知非阻断 UX 债务仍在：COMMIT 对话框无 staged 文件列表、错误 Toast 双 `✕`、CHKOUT 候选含 `origin/HEAD`、卡片右键菜单 M2b 标签缺括号文字 | 归后续修复（M2b/M3） |
 

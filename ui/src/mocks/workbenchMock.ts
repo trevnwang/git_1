@@ -655,7 +655,7 @@ export function mockHostInfo(): HostInfoDto {
 // ───────────────────── Mock 单源矩阵（仅 Mock/CDP 自测；运行逻辑只消费 state.hostActions） ─────────────────────
 
 /**
- * 与单源夹具 `reqs/v0.2/fixtures/m2-matrix.json`（M2a 构建）同构的 14 态 × 5 键编码
+ * 与单源夹具 `reqs/fixtures/m2-matrix.json`（M2a 构建）同构的 14 态 × 5 键编码
  * （PULL/FETCH/CHKOUT/COMMIT/PUSH）：Y=允许 / C=允许但需确认 / N=禁止。
  * M2b-2：EMPTY.PUSH 按 SRS §7.6 恢复（空仓首推建 upstream；仍由 Host 强制 confirm）。
  * 仅在无 Host（浏览器 dev / CDP）时由 store 载入 `state.hostActions`，**不得**被运行逻辑直接引用。

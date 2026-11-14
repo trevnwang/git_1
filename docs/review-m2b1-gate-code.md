@@ -126,7 +126,7 @@
 | 真实事件 | 取消作业捕获 4 条 `JOB_UPDATED`，键=`[cancellable,current,data,event,jobId,state,total]`，`current.id==data.id==jobId`，终态 `state=CANCELED` 且 `cancellable=false`；页面 0 console error | **PASS** |
 | 线程安全 | 后台 worker→`MainWindow.xaml.cs:74-90` `Dispatcher.HasShutdownStarted` 检查 + `Dispatcher.BeginInvoke`→`WebViewBridge.PostEvent`；序列化/超长/桥销毁只告警丢弃（`WebViewBridge.cs:77-103`） | **PASS** |
 | UI 兼容（新旧形状/部分快照） | `api.ts` `normalizeJobUpdatedEvent`：优先 `current`，兼容旧 `{event,data}`，无完整 items 时合成 `partial=true`；`workbench.ts:1765-1784` `mergeJob` 对 partial 保留旧 items/kind；`:1838-1856` 按 id 合并；`CANCELLED→CANCELED` 兼容（`api.ts` `normalizeJobState`）；P0-2 根因 `syncCurrentJobSegment` 已移除，改为 `noteNewActiveJobs` 只加未读角标（`:1862-1867`） | **PASS**（真实任务中心显示新 job；作者 16:47 自测 68/68 亦含 event.old-data-envelope 项） |
-| 无洪泛/节流 | **未加节流**：每次状态/进度都 Publish 全量 items（`ExecuteItemAsync:550,634`、`ExecuteJobAsync:438`、`Enqueue:176`、`FinalizeJob:883`）≈`2N+3` 条；真实 16 项 dryRun 实测 **35 条（=2N+3）/357,462 字节（单条 max 12,438B）**；16 项取消 4 条/单条 max 9,657B。按 800 项上限外推约 1,603 条、天然 O(N²) 字节量级，UI 主线程逐条 parse/map/sort | **PASS（无失控/无重复循环/无线程错误）；洪泛风险残留 P2-R2**（架构约束 `reqs/v0.2/diagrams.md:167` ≤10Hz/UI 100ms 节流未落实，属上轮 P2-3 未清） |
+| 无洪泛/节流 | **未加节流**：每次状态/进度都 Publish 全量 items（`ExecuteItemAsync:550,634`、`ExecuteJobAsync:438`、`Enqueue:176`、`FinalizeJob:883`）≈`2N+3` 条；真实 16 项 dryRun 实测 **35 条（=2N+3）/357,462 字节（单条 max 12,438B）**；16 项取消 4 条/单条 max 9,657B。按 800 项上限外推约 1,603 条、天然 O(N²) 字节量级，UI 主线程逐条 parse/map/sort | **PASS（无失控/无重复循环/无线程错误）；洪泛风险残留 P2-R2**（架构约束 `reqs/diagrams.md:167` ≤10Hz/UI 100ms 节流未落实，属上轮 P2-3 未清） |
 
 ---
 

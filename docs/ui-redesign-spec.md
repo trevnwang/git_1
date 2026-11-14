@@ -3,7 +3,7 @@
 > 状态：设计冻结候选（S1 交付物，可直接驱动 S2/S3 实现）
 > 日期：2026-11-14　版本：spec-v3.0
 > 唯一视觉基准：`docs/images/reference/main-ui-reference.png`（652×441 PNG，图内画布 585×379，源自 drawio 490×319 的 1.19× 导出）
-> 需求基线：`reqs/requirements.md` SRS v0.2.1 §7 / §9.5–9.8 / §11；现状锚点：`docs/ui-review-m0.md`；节奏：`docs/ui-redesign-plan.md`
+> 需求基线：`reqs/specification.md` SRS v0.2.1 §7 / §9.5–9.8 / §11；现状锚点：`docs/ui-review-m0.md`；节奏：`docs/ui-redesign-plan.md`
 > 现有实现：`ui/src/App.vue`（单文件 7 视图 + 左图标导航）、`ui/src/api.ts`、`ui/src/styles/tokens.css`、`src/MbdGitTool.Core/Contracts/SnapshotDto.cs`、`src/MbdGitTool.Host/Bridge/WebViewBridge.cs`
 > 交付约束：本规格**只新增本文件**，不改动任何其他文件；实现阶段再动代码。
 

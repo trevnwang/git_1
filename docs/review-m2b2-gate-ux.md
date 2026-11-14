@@ -43,7 +43,7 @@
 ### 1.2 判定与缺口
 
 - **PASS**：查询/过滤/分页/CSV/JSON 导出/真实 path/错误态/空态均真实可用；导出无 path 视为失败（`api.ts:1532-1538`），未发现伪成功。
-- **P1-3（审计表缺备份 ref 列）**：表头仅 `时间/actor/动作/组件/仓/结果/错误码/HEAD/job`（`ModalHost.vue:347`），**无备份 ref/jobItemId**；而底部 hint 写「批量作业行含 jobId/jobItemId/backupRef」（`ModalHost.vue:389`）→ UI 自相矛盾。FR-OP-09 明确要求审计含「备份 ref」（`reqs/requirements.md:525`），AC-OP-30② 要求可据此追溯恢复。
+- **P1-3（审计表缺备份 ref 列）**：表头仅 `时间/actor/动作/组件/仓/结果/错误码/HEAD/job`（`ModalHost.vue:347`），**无备份 ref/jobItemId**；而底部 hint 写「批量作业行含 jobId/jobItemId/backupRef」（`ModalHost.vue:389`）→ UI 自相矛盾。FR-OP-09 明确要求审计含「备份 ref」（`reqs/specification.md:525`），AC-OP-30② 要求可据此追溯恢复。
 - **P1-4（导出不受过滤约束）**：在 `PUSH` 过滤（12 条）下点导出 CSV/JSON，实际导出 **523 条**；UI 无任何范围说明 → 用户以为导出筛选结果，实际导出全表（易触 `E_TOO_MANY_ENTRIES` 上限/导出超范围数据）。另 UI 仅暴露 action/result 两个过滤，Host 已支持 `from/to/componentId`，而空态文案却提「调整时间范围」（`ModalHost.vue:340-342`）→ 无该控件。
 - **P1-6（数据/证据口径）**：真实库实测 **528 行**（本 Gate 写入前 523）：`CF100A_Demo` 370、`MOCK_*` 16、`CF100B_Slow` 14、`CF999_NotThere` 8、路径穿越夹具 6、NULL（CLEANUP_RETENTION）107、真实组件 `RTCT_Demo` 7（含本 Gate 5 行）；UI 首屏即可见 `CF100A_Demo` 测试夹具行。`docs/m2b-status.md:54-55` 仍称「521 行真实可查 / 真实 521 行导出成功」——与实况不符（cbdfa78 未更正该口径；其 `docs/review-m2b2-code.md` 已指出污染来源）。
 - P2：审计 action 枚举/中文标签漂移（`RESTORE_BACKUP/CLEANUP_RETENTION/RESET` 不在 §8.1 `job.kind` 集；107/523 行为清理噪声）；offset 分页无水位（追加行可重复/漏行）；导出文件名不记录过滤范围；安全 ref 不在审计表展示。
@@ -87,7 +87,7 @@
 
 | 核对 | 证据 |
 |---|---|
-| 矩阵 | Host `EMPTY="NYCYY"`（PUSH 允许，`RepoActionService.cs:74`）；夹具 `EMPTY.PUSH.enabled=true, requiresConfirm=true`（`reqs/v0.2/fixtures/m2-matrix.json:150-153`）；cbdfa78 提交说明「fixture normalized」= 把夹具改成与 Host 一致，**非能力修复** |
+| 矩阵 | Host `EMPTY="NYCYY"`（PUSH 允许，`RepoActionService.cs:74`）；夹具 `EMPTY.PUSH.enabled=true, requiresConfirm=true`（`reqs/fixtures/m2-matrix.json:150-153`）；cbdfa78 提交说明「fixture normalized」= 把夹具改成与 Host 一致，**非能力修复** |
 | 真实状态机 | `EMPTY` 唯一来源是 HEAD unborn（`RepoStateEvaluator.cs:72-76`）；`PushAsync` 对 EMPTY 先 `rev-parse HEAD`，unborn 直接返回 `E_REF_NOT_FOUND`：「EMPTY 空仓还没有首个提交（unborn HEAD），无法首推；请先在按钮条 COMMIT 生成首个提交后重试」（`RepoActionService.cs:777-803`）→ **联网前必失败** |
 | UI 文案 | PUSH 确认条 `发布分支并建立 upstream（main → origin/main）`、detail `空仓首推：首次推送将建立 upstream（setUpstream=true）`（`workbench.ts:1546-1572`）——成功式承诺 |
 | 复现（注入桥，响应文案按 Host 源码复制） | 选中 EMPTY 仓 → PUSH 可用（data-enabled=true）→ 确认条如上 → 点「确认推送」→ toast「✕ PUSH 失败 · E_REF_NOT_FOUND：EMPTY 空仓还没有首个提交…」、状态栏 `失败(E_REF_NOT_FOUND)`；**无伪造成功**，但按钮可点必失败 |
@@ -213,4 +213,4 @@ node ui/scripts/cdp-m2b2-selfcheck.mjs          # 作者自检（57 项，隔离
 | 自检 | `selfcheck-m2a.log`（11/11）、`selfcheck-m2b2.log`（57/57）、`selfcheck-m2b1.log`（未完成） |
 | 真实审计库统计（只读） | `sqlite3` 只读查询：528 行 / `CF100A_Demo` 370 / `RESTORE_BACKUP` 7（2 历史+5 本 Gate） |
 
-> 需求引用行号：`reqs/requirements.md:525`（FR-OP-09）、`:527`（FR-OP-11）、`:538`（FR-REPO-05）、`:549`（FR-SAFE-04）、`:353,372`（§7.6 EMPTY/矩阵）、`reqs/v0.2/ac-catalog.md:1015-1021`（AC-OP-30）、`reqs/v0.2/fixtures/m2-matrix.json:150-153`（EMPTY.PUSH）。
+> 需求引用行号：`reqs/specification.md:525`（FR-OP-09）、`:527`（FR-OP-11）、`:538`（FR-REPO-05）、`:549`（FR-SAFE-04）、`:353,372`（§7.6 EMPTY/矩阵）、`reqs/specification.md（Annex A）:1015-1021`（AC-OP-30）、`reqs/fixtures/m2-matrix.json:150-153`（EMPTY.PUSH）。

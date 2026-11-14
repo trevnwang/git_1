@@ -2,7 +2,7 @@
 
 > 评审日期：2026-11-14 12:28–13:05（本地）
 > 评审对象：M2 单仓操作（PULL / FETCH / CHKOUT / COMMIT / PUSH）工作台 UI + 组件详情抽屉 + 四仓树错误态 + 文件夹视图
-> 需求输入：`reqs/requirements.md` §7.6、§9.16（FR-ACT）、§9.17（FR-CARD/FR-INFO）、§11.0–§11.3；`docs/ui-redesign-spec.md` §5/§6；`docs/ui-redesign-plan.md` S6
+> 需求输入：`reqs/specification.md` §7.6、§9.16（FR-ACT）、§9.17（FR-CARD/FR-INFO）、§11.0–§11.3；`docs/ui-redesign-spec.md` §5/§6；`docs/ui-redesign-plan.md` S6
 > 代码输入：`ui/src/stores/workbench.ts`、`ui/src/viewmodel.ts`、`RepoActionsBar.vue`、`InfoPanel.vue`、`RepoTreePanel.vue`、`ActionDialog.vue`、`ConfirmDialog.vue`、`ComponentDrawer.vue`、`App.vue`、`ToastHost.vue`、`statusbar`；Host `RepoActionService.cs`（只读核对，不改代码）
 > 运行输入：真实 Host（CDP 127.0.0.1:9222，RTCRepos + `artifacts/real-test/workspace`）；隔离 Mock 实例（`ui/dist` 静态服务于 5176 + Headless Edge CDP 9334 + 注入 `window.__DSH_TEST_BRIDGE__`，13 个单仓状态 × 14 组件）
 > 截图输入：`artifacts/ui-review/90-m2-fetch.png` … `98-m2-final-workbench.png`、`m2-01…m2-14`、`m2-host-07`

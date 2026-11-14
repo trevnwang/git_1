@@ -4,7 +4,7 @@
 |---|---|
 | 评审对象 | 提交 `1371f51c1080022cd72c59dd08a385003cba95b3`（`feat(m2b2a): SQLite operation_log, export, backup refs restore, EMPTY first push, retention`，2026-11-14 18:13:44 +0800） |
 | 评审范围 | M2b-2a：`operation_log` SQLite 双写/查询/导出、备份 ref 列/恢复、EMPTY 首推、保留清理；**只评审、不改代码** |
-| 输入 | `src/MbdGitTool.Host/Services/{AuditDatabase,OperationAuditService,BackupRefService,RetentionService,BatchOperationService,RepoActionService}.cs`、`src/MbdGitTool.Host/Bridge/HostCommandRouter.cs`、`src/MbdGitTool.Core/Contracts/{AuditDto,BackupDto,BridgeParams}.cs`、`tests/MbdGitTool.Host.Tests/M2b2*.cs`、`docs/m2b-status.md`、`docs/images/m2b/audit-log.png`、SRS `reqs/requirements.md` §8.1（`:395`）/§8.2（`:406-413`）/§9.7 FR-OP-05/09/11（`:521,525,527`）/§7.6（`:344-373`）/附录 D（`:1366-1368`）、`reqs/v0.2/ac-catalog.md` AC-OP-30（`:1015-1021`）、ADR D-025（`:89,162`） |
+| 输入 | `src/MbdGitTool.Host/Services/{AuditDatabase,OperationAuditService,BackupRefService,RetentionService,BatchOperationService,RepoActionService}.cs`、`src/MbdGitTool.Host/Bridge/HostCommandRouter.cs`、`src/MbdGitTool.Core/Contracts/{AuditDto,BackupDto,BridgeParams}.cs`、`tests/MbdGitTool.Host.Tests/M2b2*.cs`、`docs/m2b-status.md`、`docs/images/m2b/audit-log.png`、SRS `reqs/specification.md` §8.1（`:395`）/§8.2（`:406-413`）/§9.7 FR-OP-05/09/11（`:521,525,527`）/§7.6（`:344-373`）/附录 D（`:1366-1368`）、`reqs/specification.md（Annex A）` AC-OP-30（`:1015-1021`）、ADR D-025（`:89,162`） |
 | 环境 | Windows / git 2.59 / .NET SDK 10.0.404 / 工作区 `D:\Workspace\git_1`（`HEAD=1371f51`，`git status` 干净）；真实 Host PID 63108（18:12:35 启动，评审期间未杀、未驱动）；评审期间另有并行进程驱动真实 Host/运行测试 |
 | 方法 | ① 逐行静态核对（行号均指 `1371f51`）；② `dotnet test` 实跑（Host 全量 266/266、Core 71/71，0 失败/0 跳过）；③ 只读查询真实 `%LOCALAPPDATA%\MbdGitTool\db\mbd.db`（`Mode=ReadOnly`）与 `audit/operations.jsonl`、`host.log`；④ 关键破坏性行为用**工作区外临时 git 仓**做黑盒复现（不修改仓库）；⑤ 与 SRS/AC/ADR 逐条对照 |
 | 边界 | 未修改任何源码/配置/真实仓库/真实用户数据；唯一产出为本文件。副作用披露见 §9。 |
@@ -171,7 +171,7 @@
 
 | 核对项 | 证据 | 判定 |
 |---|---|---|
-| 矩阵恢复 | `RepoActionService.Matrix`：`EMPTY="NYCYY"`（顺序 PULL/FETCH/CHKOUT/COMMIT/PUSH，`:62-80`）；PUSH 允许且 `RequiresConfirm` 强制 true（`:136-180`）；与 §7.6 EMPTY 行（Fetch ✅/Pull —/Push ✅首推/Commit ✅/Checkout ⚠️，`requirements.md:353`）及单源夹具 `reqs/v0.2/fixtures/m2-matrix.json`（`EMPTY.PUSH.enabled=true, requiresConfirm=true`）一致；`RepoActionAvailabilityMatrixTests` 逐格断言 | **PASS** |
+| 矩阵恢复 | `RepoActionService.Matrix`：`EMPTY="NYCYY"`（顺序 PULL/FETCH/CHKOUT/COMMIT/PUSH，`:62-80`）；PUSH 允许且 `RequiresConfirm` 强制 true（`:136-180`）；与 §7.6 EMPTY 行（Fetch ✅/Pull —/Push ✅首推/Commit ✅/Checkout ⚠️，`requirements.md:353`）及单源夹具 `reqs/fixtures/m2-matrix.json`（`EMPTY.PUSH.enabled=true, requiresConfirm=true`）一致；`RepoActionAvailabilityMatrixTests` 逐格断言 | **PASS** |
 | 首推建 upstream | `PushAsync`：`firstPush=state=="EMPTY"`，`setUpstream = args.setUpstream || firstPush || NO_UPSTREAM`（`:766-813`）；argv 固定 `push [-u] origin HEAD`，无 force；`M2b2EmptyPushTests.cs:39-68` 断言 `@{upstream}=origin/main` 且 bare 远端 main=HEAD | **PASS** |
 | unborn 零远端写 | 首推前 `rev-parse --verify HEAD`，失败返回 `E_REF_NOT_FOUND + requiresCommit`，**在启动网络 git 前**（`:780-803`）；测试 `:70-94` 断言 bare `for-each-ref` 为空 | **PASS** |
 | NO_UPSTREAM 不回退 | 同一 `setUpstream` 兜底，NO_UPSTREAM 必带 `-u`（不出现“普通 push 后再补 upstream”的二次写）；`M2b2EmptyPushTests.cs:96-122` 断言 upstream 已建立 | **PASS** |

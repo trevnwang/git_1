@@ -149,7 +149,7 @@
 
 ### 4.1 出口是否明确
 
-- ✅ SRS §3.3 `reqs/requirements.md:139` 已拆 M2a/M2b：M2a 出口 = 13 条 AC（AC-UI-08/09/10/10a/10b/11/13/15 + AC-SAFE-14…17 + AC-OP-33），M2b 出口另列；§3.3 注（`:143-147`）明确「M2 总出口 = M2a ∧ M2b」「M2a 当前=待复评，不得写已通过」。
+- ✅ SRS §3.3 `reqs/specification.md:139` 已拆 M2a/M2b：M2a 出口 = 13 条 AC（AC-UI-08/09/10/10a/10b/11/13/15 + AC-SAFE-14…17 + AC-OP-33），M2b 出口另列；§3.3 注（`:143-147`）明确「M2 总出口 = M2a ∧ M2b」「M2a 当前=待复评，不得写已通过」。
 - ✅ §9.16 M2a 范围注（`:619,631-637`）：确认条/焦点/tooltip/M2b 边界/状态栏模板/审计一条均纳入 M2a；§9.17 M2a 范围（`:653`）。
 - ✅ ADR D-025 §2.2 九项 M2a 交付、§3 出口 AC 表、§2.6 债务表齐全，与 SRS 口径一致。
 - ✅ 未发现任何文档提前声称「M2a 已通过」；`docs/m2-ops-status.md:3-5` 仍写 Gate 不通过（诚实状态）。
@@ -161,7 +161,7 @@
 | **§13.1.2 不存在** | `grep -n "^### 13\." requirements.md` 仅有 13.1/13.1.1/13.2/13.3/13.4；SRS `:1026` 与 ADR §3/§6 引用的「§13.1.2 的 AC-SAFE-14…17、AC-OP-33」**全文无定义**（AC-SAFE-17 在 requirements.md 命中 0 次） |
 | AC-UI-10a/10b/10c/15 无 Given/When/Then | §13.1.1 表（`:1066-1081`）止于 AC-UI-14；AC-UI-10a/10b/10c/15 仅出现在 changelog/§3.3/§9.16/§13.1.1 前言等引用处（分别命中 5/5/5/7 次，均非定义行） |
 | §13.4 追溯矩阵未更新 | changelog（`:30`）声称「§13.4 追溯矩阵与门禁更新」，但 FR-ACT 行（`:1122`）仍只有 AC-UI-08/09/10，FR-SAFE 行（`:1116`）仍只有 AC-SAFE-01…13；无 AC-UI-10a/10b/15、AC-SAFE-14…17、AC-OP-33 |
-| 三件证据缺失（ADR 硬门槛） | ADR `:182`「产出 `docs/m2a-ac-report.md`、`reqs/v0.2/fixtures/m2-matrix.json`、新 CDP 脚本；三者缺一不得宣布 M2a 通过」；实际三者**均不存在**（旧 `ui/scripts/cdp-m2-selfcheck.mjs` 未更新，仍为 `9614772` 提交版本；本提交只新增 `cdp-checkout-selfcheck.mjs`） |
+| 三件证据缺失（ADR 硬门槛） | ADR `:182`「产出 `docs/m2a-ac-report.md`、`reqs/fixtures/m2-matrix.json`、新 CDP 脚本；三者缺一不得宣布 M2a 通过」；实际三者**均不存在**（旧 `ui/scripts/cdp-m2-selfcheck.mjs` 未更新，仍为 `9614772` 提交版本；本提交只新增 `cdp-checkout-selfcheck.mjs`） |
 
 > 结论：M2a 出口 13 条中，8 条在 SRS 侧无法独立验收；ADR 虽给了条件，但缺少 ADR 自定的执行物 → **当前不具备打 tag 的可审计条件**。
 
@@ -175,7 +175,7 @@
 
 1. **UI 仍持第二套矩阵**：`ui/src/viewmodel.ts:502` `const MATRIX`、`:725 actionAvailability()` 本地逐格计算；`ui/src/api.ts:280 RequestMethod` 无 `getAvailability`，`HostCommandRouter.cs:218-348` 亦无该 case；UI 也未解析 `getComponentDetail` 的 `repos[].actions`。
 2. **Host `RequiresConfirm` 与冻结口径冲突**：真实 Host `getComponentDetail(RTCT_Demo).repos[0].actions` 实测 SYNCED 五键全部 `requiresConfirm:false`（含 COMMIT/PUSH）；而 SRS §7.6 冻结（`:370`）要求「COMMIT/PUSH 确认标志固定 C」，ADR AC-UI-08 Host 断言（`:168`）要求 `RequiresConfirm = (cell==⚠) ∨ action∈{COMMIT,PUSH}`。Host 实现只取 `cell=='C'`（`RepoActionService.cs:113`），矩阵 SYNCED=`YYYYY`（`:63`），因此 COMMIT/PUSH 永远 false。
-3. **单源夹具缺失**：`reqs/v0.2/fixtures/m2-matrix.json` 不存在 → AC-UI-08 的「夹具驱动断言」无据可依。
+3. **单源夹具缺失**：`reqs/fixtures/m2-matrix.json` 不存在 → AC-UI-08 的「夹具驱动断言」无据可依。
 
 > 影响：AC-UI-08 判 **FAIL**；同时意味着「直接调用桥/脚本可绕过确认条写」的防御层缺失（UI 层确认条仍有效，故 fixcheck NP0-1 行为闭环不受影响）。
 
@@ -212,10 +212,10 @@
 
 | ID | 问题 | 证据 | 修复 |
 |---|---|---|---|
-| **G-P0-1** | **AC-UI-08 单源矩阵不成立**：UI 仍自算矩阵；Host `RequiresConfirm` 对 COMMIT/PUSH 恒 false（与 §7.6 冻结 C、ADR Host 断言冲突）；`m2-matrix.json` 缺失 | §4.4；`viewmodel.ts:502,725`；`RepoActionService.cs:63,113`；真实 `getComponentDetail.repos[].actions`；`reqs/v0.2/fixtures/m2-matrix.json` 不存在 | ① Host `GetAvailability` 对 COMMIT/PUSH 置 `RequiresConfirm=true`（或按 ADR 断言生成）；② 新增 `getAvailability` 桥或 UI 解析 `getComponentDetail.repos[].actions`，**删除** `viewmodel.ts MATRIX`；③ 生成 14×5 单源夹具，Host 单测+CDP 共用 |
+| **G-P0-1** | **AC-UI-08 单源矩阵不成立**：UI 仍自算矩阵；Host `RequiresConfirm` 对 COMMIT/PUSH 恒 false（与 §7.6 冻结 C、ADR Host 断言冲突）；`m2-matrix.json` 缺失 | §4.4；`viewmodel.ts:502,725`；`RepoActionService.cs:63,113`；真实 `getComponentDetail.repos[].actions`；`reqs/fixtures/m2-matrix.json` 不存在 | ① Host `GetAvailability` 对 COMMIT/PUSH 置 `RequiresConfirm=true`（或按 ADR 断言生成）；② 新增 `getAvailability` 桥或 UI 解析 `getComponentDetail.repos[].actions`，**删除** `viewmodel.ts MATRIX`；③ 生成 14×5 单源夹具，Host 单测+CDP 共用 |
 | **G-P0-2** | **AC-OP-33 审计-lite 未实现** | §4.5：全仓 0 处 `operation_log/audit` | `RepoActionService` 每次动作（成功/失败）写 1 行 `operation_log` 最小列，补 Host 测试与 `docs/m2a-ac-report.md` 审计证据 |
 | **G-P0-3** | **AC-UI-15 M2b 边界提示未实施** | §4.6 实测任务中心/批量条/菜单/卡片仍写「M2 接入」 | 统一改「M2b 未接入（批量/作业/审计）」，点击给明确提示且 Host 写调用=0，补 CDP 断言 |
-| **G-P0-4** | **M2a 出口 AC 不可验收/证据链缺失**：SRS §13.1.2 缺失、10a/10b/10c/15/SAFE-14…17/OP-33 无 Given/When/Then、§13.4 未更新；ADR §5 三件证据全缺 | §4.2；ADR `:182` | 回写 SRS §13.1.1/§13.1.2 与 §13.4；产出 `docs/m2a-ac-report.md`、`reqs/v0.2/fixtures/m2-matrix.json`、`ui/scripts/cdp-m2a-selfcheck.mjs`（旧脚本作废） |
+| **G-P0-4** | **M2a 出口 AC 不可验收/证据链缺失**：SRS §13.1.2 缺失、10a/10b/10c/15/SAFE-14…17/OP-33 无 Given/When/Then、§13.4 未更新；ADR §5 三件证据全缺 | §4.2；ADR `:182` | 回写 SRS §13.1.1/§13.1.2 与 §13.4；产出 `docs/m2a-ac-report.md`、`reqs/fixtures/m2-matrix.json`、`ui/scripts/cdp-m2a-selfcheck.mjs`（旧脚本作废） |
 | **G-P0-5** | **FR-ACT-06 状态栏「最近一次操作」模板未交付**（fixcheck P1-2 未修，ADR 列为 M2a 必交付） | §4.7 D-6；`workbench.ts:359-367`；真实状态栏 | 按 FR-OPS-05 模板输出 `最近一次操作：<动作> <组件>/<RepoType> — <成功\|失败(E_*)> · HH:mm`，补 CDP 正则断言 |
 
 ### 5.2 新 P1（4 项）
@@ -249,7 +249,7 @@
 ### 6.2 打 tag 的最小前置（建议）
 
 1. 完成 G-P0-1…G-P0-5；其中 AC-UI-08 必须看到「UI 无第二套矩阵 + Host RequiresConfirm 正确 + 单源夹具三处一致」的可复跑证据。
-2. 回写 SRS §13.1.1/§13.1.2/§13.4，产出 `docs/m2a-ac-report.md`（逐 AC 证据，含真实 Host 五键写操作 + 审计行查询）、`reqs/v0.2/fixtures/m2-matrix.json`、`ui/scripts/cdp-m2a-selfcheck.mjs` 并在 CI/本机复跑。
+2. 回写 SRS §13.1.1/§13.1.2/§13.4，产出 `docs/m2a-ac-report.md`（逐 AC 证据，含真实 Host 五键写操作 + 审计行查询）、`reqs/fixtures/m2-matrix.json`、`ui/scripts/cdp-m2a-selfcheck.mjs` 并在 CI/本机复跑。
 3. 处理 G-P1-1/G-P1-2 的「AC 字面 vs 实现」二选一裁决（推荐改 AC 文案，不动已实测有效的实现）。
 4. 真实夹具补一次 `NO_UPSTREAM`/Tag/SYNCED+staged 写操作 E2E（本轮按约束未执行），并在验收报告注明。
 5. `docs/review-m2-ux-fixcheck.md` 的 P1-2/P1-8 等既有 P1 不阻塞 M2a 打 tag，但建议随 G-P0-5/G-P1-4 一并收口。

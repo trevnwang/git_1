@@ -10,7 +10,7 @@ using Xunit;
 
 namespace MbdGitTool.Host.Tests;
 
-/// <summary>AC-UI-08 单源矩阵：Host GetAvailability 必须与 reqs/v0.2/fixtures/m2-matrix.json 逐格一致。</summary>
+/// <summary>AC-UI-08 单源矩阵：Host GetAvailability 必须与 reqs/fixtures/m2-matrix.json 逐格一致。</summary>
 public sealed class RepoActionAvailabilityMatrixTests
 {
     private static readonly string[] Actions = { "PULL", "FETCH", "CHKOUT", "COMMIT", "PUSH" };
@@ -59,7 +59,7 @@ public sealed class RepoActionAvailabilityMatrixTests
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var candidate = Path.Combine(directory.FullName, "reqs", "v0.2", "fixtures", "m2-matrix.json");
+            var candidate = Path.Combine(directory.FullName, "reqs", "fixtures", "m2-matrix.json");
             if (File.Exists(candidate))
             {
                 return candidate;
@@ -68,7 +68,7 @@ public sealed class RepoActionAvailabilityMatrixTests
             directory = directory.Parent;
         }
 
-        return Path.Combine("reqs", "v0.2", "fixtures", "m2-matrix.json");
+        return Path.Combine("reqs", "fixtures", "m2-matrix.json");
     }
 
     private static RepoRef Repo(string state)

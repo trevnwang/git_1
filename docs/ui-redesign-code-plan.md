@@ -2,7 +2,7 @@
 
 > 文档性质：**代码差距 + Host API 契约 + Host/前端实现方案 + 风险/顺序 + 测试方案**；只定方案，不改代码。
 > 视觉/交互唯一输入：`docs/images/reference/main-ui-reference.png` + **`docs/ui-redesign-spec.md`（spec-v3.0，S1 已产出，本文按其章节/数值对齐）**。
-> 需求基线：`reqs/requirements.md` v0.2.1 §7.1–7.6、§9.6（FR-DETAIL）、§9.10（FR-OPS）、§11（信息架构/CI 锚点）、§12.1–12.2。
+> 需求基线：`reqs/specification.md` v0.2.1 §7.1–7.6、§9.6（FR-DETAIL）、§9.10（FR-OPS）、§11（信息架构/CI 锚点）、§12.1–12.2。
 > 节奏基线：`docs/ui-redesign-plan.md` 的 S1–S7；本文把实现收敛为 4 个可执行阶段（§6.3），对齐 spec §11.3 的 S2/S3/S4/S6。
 > 代码基准：2026-11-14 `D:\Workspace\git_1`（M1-a：本地扫描 + Gitea 只读清单 + WebView2 WebMessage 桥）。
 >
@@ -104,7 +104,7 @@
 | `ui/src/api.ts` | 301 | 信封、2 方法、宽容 normalize | **重写 dispatcher**（§5.4），保留 `normalizeSnapshot` |
 | `ui/src/styles/tokens.css` | 240 | §11.2 token + 旧 `.app` grid + 看板样式 | token 复用；新增 `--layout-*`、`--tint-*`（spec §9.4）；旧样式移 legacy |
 | `tests/MbdGitTool.Core.Tests` | 4 类/71 测试 | 命名/状态/聚合 | 复用；新增 Host 测试项目（§7.1） |
-| `reqs/v0.2/fixtures/state-matrix.ps1` | 1869 | 25 个离线 git 状态夹具（自校验） | 状态/矩阵/真实回归夹具（§7.4） |
+| `reqs/fixtures/state-matrix.ps1` | 1869 | 25 个离线 git 状态夹具（自校验） | 状态/矩阵/真实回归夹具（§7.4） |
 | `artifacts/m1-fixture` / `artifacts/real-test/workspace` | — | 本地 2 组件/6 仓；RTCRepos 4 组件/14 仓 | E2E 真实环境（§7.4） |
 
 ### 1.3 旧功能保留清单（spec §11.1，禁止回退）
@@ -1595,7 +1595,7 @@ dotnet run --project src\MbdGitTool.Host
 node ui/e2e/run-ac.mjs --port=9222
 
 # 状态夹具（nightly / P4）
-pwsh -NoProfile -File reqs/v0.2/fixtures/state-matrix.ps1 -Root $env:TEMP\MbdGitFixtures\ui-v3 -Only F-SYNCED,F-DIRTY,F-UNMERGED,F-MISSING
+pwsh -NoProfile -File reqs/fixtures/state-matrix.ps1 -Root $env:TEMP\MbdGitFixtures\ui-v3 -Only F-SYNCED,F-DIRTY,F-UNMERGED,F-MISSING
 ```
 
 门禁：`dotnet build` 0 warning（`TreatWarningsAsErrors`）；`dotnet test` 全绿；`npm run build`（vue-tsc）通过；AC-UI 34/34；0 console error/exception；1440/1280 无溢出；安全用例全过；契约 golden 未漂移；截图归档；本文 §3/§5 变更同步。
@@ -1638,7 +1638,7 @@ pwsh -NoProfile -File reqs/v0.2/fixtures/state-matrix.ps1 -Root $env:TEMP\MbdGit
 - `ui/src/App.vue`（拆为 AppShell）、`ui/src/api.ts`（dispatcher）、`ui/src/styles/tokens.css`（`--layout-*`/`--tint-*`；旧 `.app` 样式迁移）
 - `ui/package.json`（`e2e` script，无新增运行时依赖）
 - `MbdGitTool.sln`（Host 测试项目）
-- `reqs/requirements.md`（SRS delta：FR-UI/FR-FS/AC-UI，spec §11.2 已列，S1 产出）
+- `reqs/specification.md`（SRS delta：FR-UI/FR-FS/AC-UI，spec §11.2 已列，S1 产出）
 
 **不修改**
 

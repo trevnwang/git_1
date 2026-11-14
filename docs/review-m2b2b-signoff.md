@@ -4,7 +4,7 @@
 |---|---|
 | 评审对象 | `1324dd4f10ba1950bbdc12ef7467bff059c86a15`（`fix(m2b2b): safety refs visible/restorable, restore journal, export filters, tests`，含 `4d4a8b5`）；diff `4d4a8b5..1324dd4` = 15 文件 +1357/−28（Host 3、Core 契约 2、测试 3、UI 4、docs 2、误入 TestResults 1，无 `reqs/` 变更） |
 | 评审范围 | 上一轮 Gate P1 五项逐项闭环：①journal/reconcile+审计回填/repair 自动化用例；②安全 ref `refs/backup/restore/*` 可见/可恢复/保留；③restore reset 接 journal；④审计导出过滤；⑤审计证据口径。并复跑全量测试与 M2b-2/M2b-1/M2a/realhost 自检，给出 phase tag 结论。**只读评审，不改代码/真实仓库** |
-| 判据 | `reqs/adr/D-026-m2b2a-deferrals.md`（§3 M2b-2b 必须完成、§4 自动化用例全绿）、`reqs/requirements.md` FR-OP-09/11、FR-SAFE-04、`reqs/v0.2/ac-catalog.md` AC-OP-30/AC-SAFE-08/09；上一轮 `docs/review-m2b2b-gate-code.md`、`docs/m2b2b-status.md` |
+| 判据 | `reqs/adr/D-026-m2b2a-deferrals.md`（§3 M2b-2b 必须完成、§4 自动化用例全绿）、`reqs/specification.md` FR-OP-09/11、FR-SAFE-04、`reqs/specification.md（Annex A）` AC-OP-30/AC-SAFE-08/09；上一轮 `docs/review-m2b2b-gate-code.md`、`docs/m2b2b-status.md` |
 | 环境 | Win11 / .NET SDK 10.0.404 / git 2.56.1 / 本机真实 Gitea `192.168.50.20:3000`（评审时 PAT 已失效 401，见 §3）。评审开始时 `HEAD=b48d8e5`（后并行提交 `d4c895e` docs-only）；工作区有**并行工作流的未提交源码改动**（`BridgeErrors.cs`/`BatchOperationService.cs`，非本受评提交），为隔离污染，全量测试在 `1324dd4` 的 `git archive` 临时快照 `%TEMP%\signoff-m2b2b-1324dd4` 中构建执行 |
 | 方法 | ①`git show 1324dd4` 逐行静态核对；②`1324dd4` 快照串行全量构建+测试（Core→Host，避免 testhost 并发）；③按官方脚本实跑 4 套 CDP 自检（自建 `1324dd4` Host + CDP 9222）；④只读查询真实库/JSONL/journal/exports 与真实 `refs/backup/*`；⑤与 ADR/AC 逐条对照 |
 | 边界 | 未修改任何源码/配置/`reqs`/真实仓库；本报告是唯一新增文件。全量测试与 UI 自检副作用见 §6 |

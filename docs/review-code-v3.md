@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 |---|---|
 | 评审对象 | 后端 `src/MbdGitTool.Core/{Contracts,Security,Files,Domain}/**`、`src/MbdGitTool.Host/{Bridge,Services}/**`、`MainWindow.xaml.cs`；前端 `ui/src/{api.ts,stores/workbench.ts,components/**,composables/**,mocks/**}` |
-| 对标方案 | `docs/ui-redesign-code-plan.md`（下称 code-plan）、`docs/ui-redesign-spec.md`（下称 spec）、`reqs/requirements.md` §10.2 AC-UI-01…34 |
+| 对标方案 | `docs/ui-redesign-code-plan.md`（下称 code-plan）、`docs/ui-redesign-spec.md`（下称 spec）、`reqs/specification.md` §10.2 AC-UI-01…34 |
 | 只读证据 | 运行中 Host + WebView2 CDP 9222 真机探针（`Runtime.evaluate` 直发桥消息、真实 DOM 读取；未执行任何写文件/openPath 真实启动） |
 | 运行态 | `source=local+gitea`，workspace=`D:\Workspace\git_1\artifacts\real-test\workspace`，4 组件 / 14 仓；页面 `https://app.local/index.html`，构建产物 `bin/Debug/net10.0-windows/ui/assets/index-CEGxHDqY.js`（2026-11-14 02:55:11） |
 | 基线 | `dotnet test MbdGitTool.sln -c Debug`：**Core 71 passed / Host 145 passed / 0 failed / 0 skipped**（5s） |

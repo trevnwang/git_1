@@ -25,7 +25,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="..\..\reqs\v0.2\fixtures\m2-matrix.json" Link="fixtures\m2-matrix.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\reqs\fixtures\m2-matrix.json" Link="fixtures\m2-matrix.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

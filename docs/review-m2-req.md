@@ -2,7 +2,7 @@
 
 > 评审日期：2026-11-14 13:09–13:35（本地）
 > 评审对象：M2 单仓写操作（`PULL` / `FETCH` / `CHKOUT` / `COMMIT` / `PUSH`）的 Host 实现、UI 可用性矩阵、确认/前置/失败/回写链路，以及 M2 出口口径
-> 需求输入：`reqs/requirements.md` §3.3（M2 出口）、§7.5/§7.6（矩阵与新鲜度）、§9.16（FR-ACT）、§9.17（FR-INFO）、§11.0–§11.3、§13（AC）、附录 D（错误码）；`docs/ui-redesign-spec.md` §5/§6；`docs/review-m2-ux.md`（8 个 P0）；`docs/m2-ops-status.md`（实现/实测/剩余）
+> 需求输入：`reqs/specification.md` §3.3（M2 出口）、§7.5/§7.6（矩阵与新鲜度）、§9.16（FR-ACT）、§9.17（FR-INFO）、§11.0–§11.3、§13（AC）、附录 D（错误码）；`docs/ui-redesign-spec.md` §5/§6；`docs/review-m2-ux.md`（8 个 P0）；`docs/m2-ops-status.md`（实现/实测/剩余）
 > 实现输入：`src/MbdGitTool.Host/Services/RepoActionService.cs`、`LocalScanner.cs`、`GitCli.cs`、`Bridge/HostCommandRouter.cs`、`Core/Contracts/*`、`ui/src/stores/workbench.ts`、`ui/src/viewmodel.ts`、`ui/src/components/workbench/{RepoActionsBar,InfoPanel}.vue`、`ui/src/components/overlays/{ActionDialog,ConfirmDialog,ComponentDrawer}.vue`、`ui/scripts/cdp-m2-selfcheck.mjs`
 > 运行输入：真实 Host（PID 5348，CDP 9222，commit `06c6ea2`，真实 Gitea `RTCRepos` + `artifacts/real-test/workspace`）；本次仅做**只读 CDP 探测**（快照/DOM/按钮矩阵/对话框结构），**未执行任何写操作**
 > 硬性约束：本轮只新建本报告，未改任何代码、构建产物与需求文档。
@@ -173,7 +173,7 @@ SRS M2 出口原文：批量 Clone/Pull/Checkout/Tag/SYNC/Delete/Restore/Create 
 
 ### 7.1 现状：AC-UI-08/10/11 目前**不可自动验收**
 
-1. **AC 权威分层未回写**：`requirements.md:998-1000` 明确 AC-UI-01…14 尚未回写 `reqs/v0.2/ac-catalog.md`；M2 出口引用 AC-UI-08/10/11 必须同时注记 §13.1.1。
+1. **AC 权威分层未回写**：`requirements.md:998-1000` 明确 AC-UI-01…14 尚未回写 `reqs/specification.md（Annex A）`；M2 出口引用 AC-UI-08/10/11 必须同时注记 §13.1.1。
 2. **唯一提交的 UI 自测脚本已过期**：
    - Mock 仓库样例无 `stagedCount`（`ui/scripts/cdp-m2-selfcheck.mjs:46-71`）→ 当前 UI 会禁用 COMMIT，脚本第 4 步（`:555-591`）将失败；
    - 脚本仍期望 PULL 弹 `confirm-dialog`（`:596-608`）、PUSH 弹 `confirm-dialog`（`:617-629`），与当前“免确认直接执行”实现相反；
@@ -186,7 +186,7 @@ SRS M2 出口原文：批量 Clone/Pull/Checkout/Tag/SYNC/Delete/Restore/Create 
 
 | 断言 | 方式 | 期望 |
 |---|---|---|
-| 14 态×5 键矩阵 | 表驱动测试，**期望表从新增 `reqs/v0.2/fixtures/m2-matrix.json`（由 SRS §7.6 生成）读取**，不手写第三份 | Host `GetAvailability` 编码 == 夹具；`Enabled == MatrixAllowed`；`RequiresConfirm == (cell==C)` |
+| 14 态×5 键矩阵 | 表驱动测试，**期望表从新增 `reqs/fixtures/m2-matrix.json`（由 SRS §7.6 生成）读取**，不手写第三份 | Host `GetAvailability` 编码 == 夹具；`Enabled == MatrixAllowed`；`RequiresConfirm == (cell==C)` |
 | 禁用 tooltip 三段式 | 单测序列化 `RepoActionAvailabilityDto` + UI 快照 | 每格 `Reason` 匹配 `原因：.+；替代：.+；错误码：E_[A-Z_]+` |
 | read-through + CAS | 临时仓：scan → 外部改 HEAD → `RunRepoAction` | 返回 `E_CONCURRENT_CHANGE`，仓库零改动；且 action 前 `scan_at` 前进 |
 | BUSY | 临时仓创建 `.git/index.lock` 后 `FETCH`/`COMMIT` | 返回 `E_REPO_BUSY`；`.git/index.lock` 仍存在（不删锁） |
@@ -249,7 +249,7 @@ for (const vp of [[1440,900],[1280,800]]) { setViewport(vp); assert(scrollWidth=
 ### 7.4 建议 E2E / 夹具断言
 
 - 真实 Gitea fixture：AC-REPO-01…06、AC-OP-29（外部 `index.lock`）、AC-OP-26/27（强杀 + 取消）、AC-REPO-11（EMPTY 首推建 upstream）。
-- 状态矩阵夹具：复用 `reqs/v0.2/fixtures/`，新增 14 态 + 每态 5 键期望；UI 与 Host 共用同一 JSON（单源）。
+- 状态矩阵夹具：复用 `reqs/fixtures/`，新增 14 态 + 每态 5 键期望；UI 与 Host 共用同一 JSON（单源）。
 - 故障注入报告：至少覆盖 `E_REPO_BUSY`、`E_CONCURRENT_CHANGE`、`E_GIT_NON_FF`、`E_DIRTY_WORKTREE`、`E_NOTHING_TO_COMMIT`、网络失败、服务端保护分支。
 
 ### 7.5 14 态注入与“单源矩阵”根治方案

@@ -6,7 +6,7 @@
 | 项目 | 内容 |
 |---|---|
 | 评审对象 | 功能对象 `cbdfa78`（`fix(m2b2a): restore untracked safety, branch/safety-ref hardening, audit isolation and retention floor`，2026-11-14 18:36:54 +0800）+ `b967d73`（`fix(m2b2a): audit backupRef column, restore clean-workspace warning, offline false-positive, EMPTY unborn guard`，18:52:01 +0800）；评审期间落库 `e40cac4`（`docs(m2b2a): ADR D-026 deferrals and corrected audit evidence wording`，19:05:32 +0800；**无 `src/`、`tests/`、`ui/src/` 变更**）。`HEAD=e40cac4264cf9e291580601d02d3c8c0fd30c819` |
-| 输入 | `docs/review-m2b2-code.md`（P0=1/P1=5）、`docs/review-m2b2-ux.md`（P0=2/P1=8）、`docs/m2b-status.md`、SRS `reqs/requirements.md` §7.6/§9.7/附录 D、`reqs/v0.2/ac-catalog.md` AC-OP-30、ADR D-025、`reqs/v0.2/fixtures/m2-matrix.json`、M2b-1 Gate 报告口径 |
+| 输入 | `docs/review-m2b2-code.md`（P0=1/P1=5）、`docs/review-m2b2-ux.md`（P0=2/P1=8）、`docs/m2b-status.md`、SRS `reqs/specification.md` §7.6/§9.7/附录 D、`reqs/specification.md（Annex A）` AC-OP-30、ADR D-025、`reqs/fixtures/m2-matrix.json`、M2b-1 Gate 报告口径 |
 | 环境 | Windows 11 / .NET SDK 10.0.404 / git 2.59 / 工作区 `D:\Workspace\git_1`；真实数据 `%LOCALAPPDATA%\MbdGitTool`；评审期间真实 Host PID 54532（18:52:02 启动；Host dll 18:50:01=`cbdfa78`，UI bundle 18:49:55 已含 `b967d73` 文案）在约 19:00 前关闭（9222 拒绝连接；并行评审期间，关闭者未由本评审确认） |
 | 方法 | ① `git show`/diff 静态核对（行号对应 `b967d73`）；② 全量 `dotnet test`（隔离 `--artifacts-path`，避免运行中 Host 锁 bin）；③ `--no-incremental` 洁净构建核 **0 warning/0 error**；④ `%TEMP%` 黑盒探针（临时 git 仓 + 引用 Host 项目）复验恢复矩阵/安全 ref/保留下限；⑤ 隔离 CDP 自检（独立 headless Edge + 注入测试桥 + 当前 `ui/dist`，不触真实 Host/真实仓库）；⑥ 只读核对真实 `operation_log`/JSONL/exports/真实导出文件 |
 | 边界 | **未修改**任何源码/配置/`reqs`/UI 源码或真实仓库；唯一源码树新增为 `docs/review-m2b2-gate.md` 与 gitignored `artifacts/gate-m2b2-final/`；探针仓与自检临时产物均在 `%TEMP%`；真实库/JSONL/exports 全程只读（未清理/未标注污染行） |
@@ -94,7 +94,7 @@
 ### 2.2 有 HEAD 的 EMPTY 首推仍可用（Host 矩阵单源）
 
 - Host 矩阵未改：`RepoActionService.cs:74` `EMPTY="NYCYY"`（PUSH 允许）；`GetAvailability` 由矩阵派生 `Enabled=MatrixAllowed`、PUSH `RequiresConfirm=true`（`:131-180`）。
-- 单源夹具：`reqs/v0.2/fixtures/m2-matrix.json` EMPTY.PUSH `{enabled:true, requiresConfirm:true, reasonCode:CONFIRM_REQUIRED}`；`RepoActionAvailabilityMatrixTests` 逐格断言通过。
+- 单源夹具：`reqs/fixtures/m2-matrix.json` EMPTY.PUSH `{enabled:true, requiresConfirm:true, reasonCode:CONFIRM_REQUIRED}`；`RepoActionAvailabilityMatrixTests` 逐格断言通过。
 - 行为测试：`M2b2EmptyPushTests.GetAvailability_EmptyState_PushEnabledAndRequiresConfirm`（矩阵单源）、`EmptyFirstPush_SetsUpstreamAndCreatesRemoteBranch`（预置 HEAD 的 EMPTY → `push -u origin HEAD` 建立 upstream、bare 远端 main=HEAD）、`EmptyPush_UnbornHead_FailsWithReadableCodeAndNoRemoteWrite`、`NoUpstreamPush_AlsoSetsUpstream`，337 全量中通过。
 - UI 守卫只在 `!headSha` 生效，若快照为 EMPTY 且带 HEAD（矩阵单源口径）则 PUSH 仍按 Host 矩阵启用。
 - **判定 PASS**（Host 矩阵单源；真实状态机下 EMPTY 恒 unborn，故真实 Host 无法演示“成功首推”，需先 COMMIT——与 SRS §7.6/D-025 的“EMPTY 直接首推”规格冲突仍未裁决，见 §8）。

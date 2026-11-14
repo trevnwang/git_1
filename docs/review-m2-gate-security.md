@@ -4,7 +4,7 @@
 |---|---|
 | 复评对象 | 提交 `1afa014`（`fix(m2): close security P0 and UX P0, add M2a/M2b ADR`，2026-11-14 14:07:01 +0800） |
 | 复评范围 | 原评审 `docs/review-m2-code.md` 的 **P0-1、P1-1、P1-2、P1-3、P1-6、P1-8**（及 AC-SAFE-14/15/16/17 中对应安全面） |
-| 输入 | `docs/review-m2-code.md`；`reqs/adr/D-025-m2a-m2b.md`（M2a 出口 AC，权威）；`reqs/requirements.md` v0.3.1；`src/MbdGitTool.Host/Services/{RepoActionService,GitCli,LocalScanner,AppConfig,RemoteRefsService,HostLog}.cs`、`src/MbdGitTool.Host/Bridge/HostCommandRouter.cs`、`src/MbdGitTool.Core/Contracts/*`、`tests/MbdGitTool.Host.Tests/{RepoActionSecurityTests,RepoActionGitTests,TestInfrastructure,RealWorkspaceSmokeTests}.cs`、UI 相关只读参考 |
+| 输入 | `docs/review-m2-code.md`；`reqs/adr/D-025-m2a-m2b.md`（M2a 出口 AC，权威）；`reqs/specification.md` v0.3.1；`src/MbdGitTool.Host/Services/{RepoActionService,GitCli,LocalScanner,AppConfig,RemoteRefsService,HostLog}.cs`、`src/MbdGitTool.Host/Bridge/HostCommandRouter.cs`、`src/MbdGitTool.Core/Contracts/*`、`tests/MbdGitTool.Host.Tests/{RepoActionSecurityTests,RepoActionGitTests,TestInfrastructure,RealWorkspaceSmokeTests}.cs`、UI 相关只读参考 |
 | 环境 | Windows 11 / git 2.56.1.windows.1 / dotnet SDK 10.0.404 / 仓库 `D:\Workspace\git_1`（HEAD=`1afa014`，`git status` 干净） |
 | 方法 | ① 逐行代码/契约核对；② 独立服务级黑盒夹具（自建临时控制台程序引用 HEAD 构建产物，真实 git + 回环 TCP 抓包 + `GIT_TRACE2_EVENT` 子进程命令审计）；③ 12 组 git 2.56.1 行为实验（临时目录）；④ 全量 `dotnet test`；⑤ 真实工作区烟测前后只读比对 |
 | 边界 | **只新增本报告，未修改任何源码/配置/真实工作区**；未停止运行中的 Host（用 `--artifacts-path` 隔离构建规避文件锁）；全部夹具在 `%TEMP%`；未对真实 Gitea 发起任何写操作 |
@@ -20,7 +20,7 @@
 
 > **Gate 结论：本次提交 `1afa014` 不建议打 M2a tag（不打）。**
 > 修复 N-1（约 10 行 + 1 个负向单测）后即可解除该阻断；另需在 `docs/m2a-ac-report.md` 中显式交代 N-2（写前 read-through 重扫 / `scan_at` 单调前进未实现）。6 项原缺陷“已关闭”的结论不受 N-1 影响。
-> 本报告不覆盖 AC-UI-08/09/10/10a/10b/11/13/15 与 AC-OP-33（UI/审计/矩阵），这些需由并行复评给出；按 D-025 §5，当前仓库也尚未见 `docs/m2a-ac-report.md` 与 `reqs/v0.2/fixtures/m2-matrix.json`，不具备“M2a 全绿”材料。
+> 本报告不覆盖 AC-UI-08/09/10/10a/10b/11/13/15 与 AC-OP-33（UI/审计/矩阵），这些需由并行复评给出；按 D-025 §5，当前仓库也尚未见 `docs/m2a-ac-report.md` 与 `reqs/fixtures/m2-matrix.json`，不具备“M2a 全绿”材料。
 
 | 汇总口径 | 结果 |
 |---|---|
@@ -250,7 +250,7 @@ dotnet test MbdGitTool.sln --artifacts-path "$env:TEMP\m2gate-artifacts1" -v min
 | 是否建议 M2a gate 通过 / 打 tag？ | **否，建议本次不打 M2a tag**。理由：新发现 **N-1（P1）** 使 D-025 冻结的 **AC-SAFE-17 未全绿**（“PULL 显式分支≠当前分支 → 拒绝”未实现，且已实测可把当前分支 FF 到其它远端分支 tip）；另 AC-SAFE-15 的“动作前 read-through 重扫/`scan_at` 前进”无实现与证据（N-2），需在验收报告中交代。 |
 | 阻断项修复成本 | N-1：约 10 行 + 1 个负向单测（`RepoActionSecurityTests`），可当天复评；N-2：可选实现 refresh 或在 `docs/m2a-ac-report.md` 按偏差口径记录。 |
 | 修复后可打的 tag 口径 | 建议 `m2a`（仅 M2a 单仓安全交付）；**不得**打 `m2-ops`/宣称“M2 交付完成”（M2b 未接入，ADR §2.1/§2.4）。 |
-| 其他 M2a 出口材料 | 当前仓库未见 `docs/m2a-ac-report.md`、`reqs/v0.2/fixtures/m2-matrix.json`、`ui/scripts/cdp-m2a-selfcheck.mjs`（ADR §5 要求），即使安全/代码面闭环，也不具备宣布“M2a 全绿”的材料。 |
+| 其他 M2a 出口材料 | 当前仓库未见 `docs/m2a-ac-report.md`、`reqs/fixtures/m2-matrix.json`、`ui/scripts/cdp-m2a-selfcheck.mjs`（ADR §5 要求），即使安全/代码面闭环，也不具备宣布“M2a 全绿”的材料。 |
 
 ---
 

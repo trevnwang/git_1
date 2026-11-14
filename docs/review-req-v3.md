@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 评审对象 | `reqs/requirements.md` v0.3（§9.13–9.17、§11.0–11.7、§13.1.1、§13.4）+ `docs/ui-redesign-spec.md` + `docs/ui-redesign-plan.md` |
+| 评审对象 | `reqs/specification.md` v0.3（§9.13–9.17、§11.0–11.7、§13.1.1、§13.4）+ `docs/ui-redesign-spec.md` + `docs/ui-redesign-plan.md` |
 | 被核对实现 | `ui/src/components/**`、`ui/src/stores/workbench.ts`、`ui/src/viewmodel.ts`、`ui/src/api.ts`、`src/MbdGitTool.Host/Bridge/*`、`src/MbdGitTool.Host/Services/*`、`tests/MbdGitTool.Host.Tests/*`、`tests/MbdGitTool.Core.Tests/*` |
 | 运行核对 | WebView2 CDP（9222）真机读取 DOM/bbox/computed style + `Input.dispatchMouseEvent`/`Input.dispatchKeyEvent` 真实事件；当前构建 `source=local+gitea`（M1 只读阶段，Host `features.repoActions=false`） |
 | 截图证据 | `artifacts/ui-review/40-v3-workbench.png`、`41-v3-folder.png`、`50-v3-folder-expand.png`（均为 1424×861 窗内内容区，非 §11.0.3 要求的 1440×900 基线，见 §8 P2 与 §7-D6） |
@@ -208,8 +208,8 @@
 
 | # | 级别 | 问题 | 证据 | 影响 |
 |---|---|---|---|---|
-| D1 | **P0** | 旧 v0.2 AC 仍被 §13 声明为唯一权威，且与新 UI 直接冲突：`AC-BOARD-01` 要求**表格默认视图**、`AC-BOARD-02` 要求卡片**宽≥320/高≥104/底色中性**、`AC-DETAIL-03` 要求 Tab **CI 第 4 位**、`AC-CI-01` 要求 **CI-1 左侧导航入口** | `reqs/v0.2/ac-catalog.md:579,592,730,1375`；§13 开头“AC 目录唯一权威…冲突时以 AC 目录为准”；§13.4 只口头说“表格相关断言由 AC-UI-02 取代” | 验收时按 ac-catalog 会判当前实现失败（无表格/无左导航/卡片 76px），按 §13.1.1 则判通过——**双源冲突，冻结门禁无法签收** |
-| D2 | **P0** | 两套 `AC-UI-*` 编号同号异物：spec §10.2 定义 **AC-UI-01…34**（如 AC-UI-21=CI 锚点、AC-UI-22=CI FAIL 底色），SRS §13.1.1 定义 **AC-UI-01…14**（AC-UI-12=CI 锚点、AC-UI-04=路径安全…）；spec §11.2 R-07/§11.3 还要求 SRS 补 `AC-FS-01..04` | `docs/ui-redesign-spec.md:883-920,973`；`reqs/requirements.md:1035-1054` | 同一个“AC-UI-12”指两张不同的验收用例，M0/M1 出口引用会歧义 |
+| D1 | **P0** | 旧 v0.2 AC 仍被 §13 声明为唯一权威，且与新 UI 直接冲突：`AC-BOARD-01` 要求**表格默认视图**、`AC-BOARD-02` 要求卡片**宽≥320/高≥104/底色中性**、`AC-DETAIL-03` 要求 Tab **CI 第 4 位**、`AC-CI-01` 要求 **CI-1 左侧导航入口** | `reqs/specification.md（Annex A）:579,592,730,1375`；§13 开头“AC 目录唯一权威…冲突时以 AC 目录为准”；§13.4 只口头说“表格相关断言由 AC-UI-02 取代” | 验收时按 ac-catalog 会判当前实现失败（无表格/无左导航/卡片 76px），按 §13.1.1 则判通过——**双源冲突，冻结门禁无法签收** |
+| D2 | **P0** | 两套 `AC-UI-*` 编号同号异物：spec §10.2 定义 **AC-UI-01…34**（如 AC-UI-21=CI 锚点、AC-UI-22=CI FAIL 底色），SRS §13.1.1 定义 **AC-UI-01…14**（AC-UI-12=CI 锚点、AC-UI-04=路径安全…）；spec §11.2 R-07/§11.3 还要求 SRS 补 `AC-FS-01..04` | `docs/ui-redesign-spec.md:883-920,973`；`reqs/specification.md:1035-1054` | 同一个“AC-UI-12”指两张不同的验收用例，M0/M1 出口引用会歧义 |
 | D3 | **P0** | spec 明确保留与 SRS v0.3 冲突的裁决：R-04“卡片允许 55% 状态色 tint”、R-03“`*` 后缀与 `●N` 并存”、R-07“SRS 无文件夹视图需补 FR-FS”、§3.5“批量入口 4 处”、§8.1 “CI-4 第 4 项/CI-7 左栏 popover”；SRS v0.3 对应条款为“卡片底色中性/§11.3 禁止 `*`/FR-FOLDER-05 已有/§11.6 三入口/§11.4 CI-4 第 5 位、CI-7 标题区 B” | spec §11.2 R-03/R-04、§3.5、§8.1、§11.3；SRS §11.2/§11.3/§11.4/§11.6 | 实现按 spec 做 → 与 SRS 逐条冲突；本报告 §3 的 CARD-01/CARD-04/CI-4/CI-7/FOLDER-05 均源于此 |
 | D4 | **P1** | SRS 内部自相矛盾：①FR-WS-01/§11.0.2 说 F 区“通栏”，但参考图（D-022 图为准）与 spec §6.1/实现均为“中+右两列”；②§11.3/FR-CARD-04 说批量条为“C 区顶部浮层 ≤36px”，spec §3.5/实现为“左栏底部 52px 常驻”；③FR-DETAIL-02 与 §11.4 CI-4 说 CI 第 5 Tab、§11.0.1 #10 旧表说第 4 位 | SRS:574,727,834,1041,1044；spec:525-527,300-307 | 实现无论怎么做都违反其中一处；AC-UI-01/02 的 bbox 断言也随之歧义 |
 | D5 | **P1** | §13.4 追溯矩阵错映射/漏映射：`FR-WS → AC-UI-01/05/07/13`（AC-UI-05 属文件树）、`FR-CARD → AC-UI-01/02/07`（双击抽屉/多选/批量阈值无 AC）、`FR-INFO → AC-UI-03/11/12`（AC-UI-03 属文件树）；`FR-WS-05` 键盘/可访问性、`FR-CARD-04` 阈值、`FR-FOLDER-04` 筛选隔离、`FR-INFO-04` 时延均无 AC | SRS:1092-1097、§3.3 M0 出口“AC 追溯矩阵 100% 覆盖 FR” | 矩阵声称 100% 覆盖实际不成立；“无 AC 的 FR 不得进 M2”门禁失效 |
@@ -306,10 +306,10 @@ console error = 0
 
 ## 附录 B：核对文件索引
 
-- 需求：`reqs/requirements.md`（§9.13–9.17 = L568–627；§11.0–11.7 = L695–915；AC-UI = L1039–1054；§13.4 = L1077–1102；附录 D = L1251–1255）
+- 需求：`reqs/specification.md`（§9.13–9.17 = L568–627；§11.0–11.7 = L695–915；AC-UI = L1039–1054；§13.4 = L1077–1102；附录 D = L1251–1255）
 - 设计：`docs/ui-redesign-spec.md`（§3.1–3.6 L239–326；§6 L521–588；§7 L592–680；§8.1 L686–702；§10.1–10.2 L878–920；§11.2 裁决 L954–973）
 - 实现：`ui/src/components/workbench/*`、`ui/src/components/folder/*`、`ui/src/components/shell/*`、`ui/src/components/overlays/*`、`ui/src/stores/workbench.ts`、`ui/src/viewmodel.ts`、`ui/src/api.ts`、`ui/src/types/workbench.ts`
 - Host：`src/MbdGitTool.Host/Bridge/HostCommandRouter.cs`、`src/MbdGitTool.Host/Services/{RepoTreeService,WorkspaceTreeService,OpenPathService,RepoActionService,ComponentDetailService,CiStatusService}.cs`、`src/MbdGitTool.Core/{Files/FileTreeReader,Security/PathPolicy,Contracts/*}.cs`
 - 测试：`tests/MbdGitTool.Host.Tests/*`（12 个测试文件，覆盖 Host API/路径安全/openPath/文件树/提交/组件详情/矩阵）
-- 旧 AC：`reqs/v0.2/ac-catalog.md`（AC-BOARD-01 L579、AC-BOARD-02 L592、AC-DETAIL-03 L730、AC-CI-01 L1375、FR→AC 矩阵 L1515）
+- 旧 AC：`reqs/specification.md（Annex A）`（AC-BOARD-01 L579、AC-BOARD-02 L592、AC-DETAIL-03 L730、AC-CI-01 L1375、FR→AC 矩阵 L1515）
 - 截图/脚本：`artifacts/ui-review/40-v3-workbench.png`、`41-v3-folder.png`、`50-v3-folder-expand.png`、`drive-v3-func.mjs`、`test-folder.mjs`

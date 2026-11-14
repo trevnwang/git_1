@@ -9,7 +9,7 @@
 
 | # | AC | 状态 | 证据（本轮） |
 |---|---|---|---|
-| 1 | AC-UI-08 矩阵单源 + tooltip | ✅ | `ui/src/viewmodel.ts` 无 `MATRIX`；UI 消费 Host `getComponentDetail.repos[].actions`（真实 Host：COMMIT/PUSH `requiresConfirm=true`，code `CONFIRM_REQUIRED`）。禁用 title 实测 `MISSING：仓库未克隆 [E_REPO_NOT_LOCAL] → 先 Clone`（紧凑冻结格式）。夹具 `reqs/v0.2/fixtures/m2-matrix.json` 已建 |
+| 1 | AC-UI-08 矩阵单源 + tooltip | ✅ | `ui/src/viewmodel.ts` 无 `MATRIX`；UI 消费 Host `getComponentDetail.repos[].actions`（真实 Host：COMMIT/PUSH `requiresConfirm=true`，code `CONFIRM_REQUIRED`）。禁用 title 实测 `MISSING：仓库未克隆 [E_REPO_NOT_LOCAL] → 先 Clone`（紧凑冻结格式）。夹具 `reqs/fixtures/m2-matrix.json` 已建 |
 | 2 | AC-UI-09 阶段门禁/无静默 | ✅ | M2a 按钮由 Host actions 启用；点击禁用按钮仅 Toast；确认条未确认写调用=0（Gate UX 实测）；真实 COMMIT/PUSH 成功后 Toast/状态栏/审计均变化 |
 | 3 | AC-UI-10 前置/失败/进行中/回写/审计 | ✅ | COMMIT 无 staged 禁用 + `E_NOTHING_TO_COMMIT`；PULL 非快进 `E_GIT_NON_FF`（测试）；成功 ≤2s 回写（status 15:08）；每次动作审计一行 |
 | 4 | AC-UI-10a COMMIT 确认条 | ✅ | 对话框→确认条 `将提交 1 个文件（已暂存 1）`→确认；真实提交 `73cee5b`；未确认 0 写 |

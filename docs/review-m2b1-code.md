@@ -4,7 +4,7 @@
 |---|---|
 | 评审对象 | 提交 `3ea870e`（`feat(m2b): job engine, batch operations and task center (M2b-1)`，2026-11-14 16:18:45 +0800） |
 | 评审范围 | M2b-1：作业内核（job/job_item/JOB_UPDATED/取消/仅重试失败/持久化）+ 批量 PULL/FETCH/SYNC/CLONE/DELETE/RESTORE/CREATE/TAG + 任务中心；**只评审、不改代码** |
-| 输入 | `src/MbdGitTool.Host/Services/{JobEngine,JobStore,BatchOperationService,OperationAuditService,RepoActionService}.cs`、`src/MbdGitTool.Host/Bridge/{HostCommandRouter,WebViewBridge}.cs`、`src/MbdGitTool.Host/MainWindow.xaml.cs`、`src/MbdGitTool.Core/Contracts/JobDto.cs`、`tests/MbdGitTool.Host.Tests/JobEngineTests.cs`、`docs/m2b-status.md`、SRS v0.3.1-r2 §8.1（`reqs/requirements.md:381-404`）/§9.7（`:507-528`）/§13.1.2（`:1114-1120`）、ADR D-025 §2.3/§4（`reqs/adr/D-025-m2a-m2b.md:83-95,150-152`）、AC 目录（`reqs/v0.2/ac-catalog.md:895-1020`） |
+| 输入 | `src/MbdGitTool.Host/Services/{JobEngine,JobStore,BatchOperationService,OperationAuditService,RepoActionService}.cs`、`src/MbdGitTool.Host/Bridge/{HostCommandRouter,WebViewBridge}.cs`、`src/MbdGitTool.Host/MainWindow.xaml.cs`、`src/MbdGitTool.Core/Contracts/JobDto.cs`、`tests/MbdGitTool.Host.Tests/JobEngineTests.cs`、`docs/m2b-status.md`、SRS v0.3.1-r2 §8.1（`reqs/specification.md:381-404`）/§9.7（`:507-528`）/§13.1.2（`:1114-1120`）、ADR D-025 §2.3/§4（`reqs/adr/D-025-m2a-m2b.md:83-95,150-152`）、AC 目录（`reqs/specification.md（Annex A）:895-1020`） |
 | 环境 | Windows 11 / git 2.56.1.windows.1 / dotnet SDK 10.0.404 / 工作区 `D:\Workspace\git_1`，`HEAD=3ea870e`、`git status --short` 空（本报告文件除外）；评审期间运行中 Host PID 45672（Debug 构建，未杀、未干扰） |
 | 方法 | ① `git show 3ea870e` + 逐行静态核对（行号均指该提交）；② 全量测试实跑（Release 隔离输出）；③ 只读核对本机真实数据 `%LOCALAPPDATA%\MbdGitTool\{jobs\jobs.json,audit\operations.jsonl}`（16:16–16:18 的作业/审计行，时间早于被评提交，非并行评审产生）；④ 与 SRS/ADR/AC 目录逐条对照 |
 | 边界 | **未修改任何源码/配置/真实仓库**；唯一产出为本文件。测试构建输出落 `src/**/bin/Release`、`obj`（gitignored）；未对真实 Gitea 发起任何写操作。注：评审期间另有并行 UI 评审在驱动真实 Host（16:23 之后的 job/audit 行不计入本报告证据） |
@@ -85,7 +85,7 @@
 
 ### 2.4 job 状态机合法性（SRS §8.1 冻结 CHECK 集）
 
-SRS 冻结：`job.state ∈ QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED/INTERRUPTED/PARTIAL`，`job_item.state ∈ QUEUED/RUNNING/OK/FAILED/BUSY/SKIPPED/CANCELLED/INTERRUPTED`（`reqs/requirements.md:393-394`；AC-UI-10c 亦用 `CANCELLED`，`:1119`）。
+SRS 冻结：`job.state ∈ QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED/INTERRUPTED/PARTIAL`，`job_item.state ∈ QUEUED/RUNNING/OK/FAILED/BUSY/SKIPPED/CANCELLED/INTERRUPTED`（`reqs/specification.md:393-394`；AC-UI-10c 亦用 `CANCELLED`，`:1119`）。
 
 | 核对项 | 证据 | 判定 |
 |---|---|---|
@@ -236,7 +236,7 @@ SRS 冻结：`job.state ∈ QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED/INTERRUPTE
 |---|---|---|
 | 线程安全（UI Dispatcher） | `MainWindow.xaml.cs:73-91`：`EventSink` 内 `Dispatcher.HasShutdownStarted` 检查 + `Dispatcher.BeginInvoke`；`WebViewBridge.PostEvent` 要求 UI 线程（`WebViewBridge.cs:69-101`），序列化/超长/销毁均只告警丢弃 | **PASS** |
 | 消息形状 | 固定 `{event:"JOB_UPDATED", data:JobDto}`（`JobEngine.cs:1695-1719,1860-1863`；单测 `JobEngineTests.cs:79-94`）；但 AC-UI-10c② 要求 `{jobId,state,current,total,cancellable}`——实际是 `data.id`、无 `current`（进度需 `ok/failed/skipped` 推导），`data.cancel_requested` 也缺；并行实测（§1.5-3）payload 键实为 `cancellable,createdAt,failed,finishedAt,id,items,kind,ok,skipped,startedAt,state,total`，独立确认无 `jobId/current` | **FAIL（契约）→ P1-1**；形状本身 PASS |
-| 洪水控制 | 每条状态变化都 Publish：受理 1 + 开始 1 + 每 item 2 条（开始/结束）+ 取消剩余 1 + 终态 1 ≈ **2N+3 条**，每条携带**全量 items**；无节流/合并/序列号（`JobEngine.cs:524,585,812,1695-1719`）；800 item 上限（`:40`）下约 1603 条、单条最大含 800 个 item。对照架构约束“`job.progress` 事件 ≤10Hz、UI 节流 100ms”（`reqs/v0.2/diagrams.md:167`） | P2-3 |
+| 洪水控制 | 每条状态变化都 Publish：受理 1 + 开始 1 + 每 item 2 条（开始/结束）+ 取消剩余 1 + 终态 1 ≈ **2N+3 条**，每条携带**全量 items**；无节流/合并/序列号（`JobEngine.cs:524,585,812,1695-1719`）；800 item 上限（`:40`）下约 1603 条、单条最大含 800 个 item。对照架构约束“`job.progress` 事件 ≤10Hz、UI 节流 100ms”（`reqs/diagrams.md:167`） | P2-3 |
 | 上限/断连 | 单条 >2MB 丢弃（`WebViewBridge.cs:94`、`HostCommandRouter.cs:26`）；断连丢弃后 UI 靠 1.5s 轮询兜底（`workbench.ts:1894-1913`） | PASS（有兜底），但无“丢事件的最终一致性”断言 |
 | UI 轮询是否重复更新 | 终态通知有防重（`workbench.ts:1793,1809`）；但 `mergeJob` 只对计数取 max、状态/items 用 `{...next}` 覆盖（`:1753-1761`），迟到的轮询响应可把 item 状态从 OK 回退为 RUNNING（显示回退/闪烁），非终态重复通知风险低 | P2-3 |
 | 伪造事件风险 | 仅 Host→UI 单通道；UI 接受 `event/type` + `data/job/payload` 多形（`api.ts:553-583`），来源校验仅用于 Host 侧入站（`WebViewBridge.cs:264-274`）；页面内脚本可伪造 JOB_UPDATED 触发通知/刷新，但 UI 包为本地可信资源，风险低 | PASS（低风险，记录） |
@@ -279,7 +279,7 @@ SRS 冻结：`job.state ∈ QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED/INTERRUPTE
 
 **P0-1 批量破坏性操作（SYNC/DELETE）绕过 §7.6 矩阵与 FR-SAFE-01/FR-OP-06 预检/强确认**
 - 证据：`JobEngine.cs:630-646` 对 SYNC/CLONE/DELETE/RESTORE/CREATE/TAG 直接调用 `_batch.*`，**不进矩阵判定**（矩阵只在 `RepoActionKinds` 分支 `:630-634`）；`BatchOperationService.SyncAsync` 仅查 `IN_PROGRESS/busy`（`:107-110`）后即 stash -u + `reset --hard`（`:189-215`）；`DeleteAsync` 仅查 busy（`:351-354`）后即 `Directory.Move`（`:387-405`）——**不检查 dirty/AHEAD/stash**；`PreviewDryRun` 只有泛化文案（`JobEngine.cs:748-773`），无“未推送 commit 清单/untracked 清单/stash 条数/影响仓数”（AC-OP-16① 逐字段）；UI 确认文案还声称“脏仓/未推送仓将失败或跳过”（`workbench.ts:1996-1998`），与 Host 实际“stash+reset 覆盖”不符，且 DIVERGED 未要求输入组件 ID（AC-OP-16③）。
-- 影响：§7.6 冻结 `AHEAD.SYNC=❌`（`requirements.md:359`）、`DIVERGED.SYNC=⚠ 默认阻断`（`:357`）；FR-OP-06 P0 四阻断（`reqs/requirements.md:522`）；AC-OP-15③/16/20/21 无法通过。虽 `.trash`/backup ref 使数据可恢复，但“默认阻断 + 丢失清单 + 输入组件 ID 强确认”三层保护全部缺失。
+- 影响：§7.6 冻结 `AHEAD.SYNC=❌`（`requirements.md:359`）、`DIVERGED.SYNC=⚠ 默认阻断`（`:357`）；FR-OP-06 P0 四阻断（`reqs/specification.md:522`）；AC-OP-15③/16/20/21 无法通过。虽 `.trash`/backup ref 使数据可恢复，但“默认阻断 + 丢失清单 + 输入组件 ID 强确认”三层保护全部缺失。
 - 修复建议：SYNC/DELETE 进入共同 preflight（矩阵、dirty/AHEAD/stash、丢失清单 dry-run），DIVERGED/AHEAD 默认阻断 + typedConfirm；Host 侧二次确认参数（组件 ID）独立于 `confirm`；UI 文案与行为对齐，禁止宣称“将失败/跳过”。
 
 ### 8.2 P1（7）

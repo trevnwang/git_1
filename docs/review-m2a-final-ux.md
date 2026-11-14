@@ -2,7 +2,7 @@
 
 > 复评角色：独立最终 UX/需求 Gate 复评员
 > 复评对象：`9d7afd0 fix(m2): final gate fixes (read-through/CAS, EMPTY.PUSH, audit-lite, single-source matrix, M2b copy, status template)`（2026-11-14 15:08:24 +0800）
-> 输入：`docs/review-m2-gate-ux.md`（5 个 Gate-P0）、`docs/m2a-ac-report.md`、`reqs/requirements.md` §13.1.1/§13.1.2（v0.3.1-r2）、`reqs/adr/D-025-m2a-m2b.md`、`reqs/v0.2/fixtures/m2-matrix.json`、`ui/src/**`、`src/**`、`tests/**`、`docs/images/m2/`
+> 输入：`docs/review-m2-gate-ux.md`（5 个 Gate-P0）、`docs/m2a-ac-report.md`、`reqs/specification.md` §13.1.1/§13.1.2（v0.3.1-r2）、`reqs/adr/D-025-m2a-m2b.md`、`reqs/fixtures/m2-matrix.json`、`ui/src/**`、`src/**`、`tests/**`、`docs/images/m2/`
 > 硬性约束：**只评审**。未修改源码/需求/夹具/真实仓库，未杀掉运行中 Host、未启动替代服务；CDP 交互全部为只读或“注入桥拦截+合成回执”，`runRepoAction` 未向 Host 下发一次（审计文件无 `E_GATE_BLOCKED` 行）。本轮唯一写盘文件 = 本报告。
 > 复评时间：2026-11-14 15:08–15:18（本地）。
 
@@ -80,7 +80,7 @@
 | 真实 Host COMMIT/PUSH `RequiresConfirm=true` | ✅ | 真实 Host 原始 `getComponentDetail` 实测：`RTCT_Demo` 4 仓与 `RTCT_Synced` 4 仓（SYNCED/AHEAD）COMMIT/PUSH 全部 `requiresConfirm=true`、`reasonCode=CONFIRM_REQUIRED`；`RTCT_Incomplete`（MISSING，禁用）同样 `requiresConfirm=true`、`reasonCode=STATE_BLOCKED`。代码 `RepoActionService.cs:121-123`（`cell=='C' || COMMIT || PUSH`） |
 | 注入/夹具下确认规则一致 | ✅ | 夹具 14 态每格 `requiresConfirm = cell=='C' || action∈{COMMIT,PUSH}`；UI Mock 规则同（`ui/src/mocks/workbenchMock.ts:716-717`），与 Host 代码逐格 0 差异 |
 | tooltip 紧凑冻结格式 | ✅ | 真实 MISSING 仓 5 键 title 全部匹配 `/^.+ \[E_[A-Z_]+\] → .+$/`（例：`MISSING：仓库未克隆 [E_REPO_NOT_LOCAL] → 先 Clone`）；SYNCED+staged0 的 COMMIT 同样匹配（`[E_NOTHING_TO_COMMIT] → …`） |
-| 夹具 14×5 与 Host 逐格一致 | ✅ | 脚本对 `RepoActionService.cs:63-80` 的 14 行编码 × 5 键 = 70 格，按冻结规则展开 `enabled/requiresConfirm/reasonCode` 后与 `reqs/v0.2/fixtures/m2-matrix.json` 比对：**0 差异**；含 `DIVERGED.PULL=disabled`、`EMPTY.PUSH=disabled` 两处 M2a 覆盖 |
+| 夹具 14×5 与 Host 逐格一致 | ✅ | 脚本对 `RepoActionService.cs:63-80` 的 14 行编码 × 5 键 = 70 格，按冻结规则展开 `enabled/requiresConfirm/reasonCode` 后与 `reqs/fixtures/m2-matrix.json` 比对：**0 差异**；含 `DIVERGED.PULL=disabled`、`EMPTY.PUSH=disabled` 两处 M2a 覆盖 |
 | 矩阵与 §7.6 关键口径 | ✅ | `EMPTY=NYCYN`、`DIVERGED=NYCNN`、`NO_UPSTREAM=NYNNY`、`SYNCED=YYYYY`，与 ADR §2.5 裁决一致 |
 
 ### 2.2 残留 P1（不改变本项 PASS，但影响“单源”工程化）
@@ -104,7 +104,7 @@
 
 ### 3.2 FAIL 依据
 
-1. **必需字段缺失**：ADR §2.2-6（`reqs/adr/D-025-m2a-m2b.md:67`）要求“至少含 `ts/actor/componentId/repoType/action/before_head/after_head/result/error_code/request_id`”；SRS §8.1 的 `operation_log` 物理列（`reqs/requirements.md:395`）与 AC-OP-33 Then②（`:1167`）同样要求 `actor`、`request_id`。实现（`src/MbdGitTool.Host/Services/OperationAuditService.cs:92-106`）写出字段为 `ts/action/componentId/repoType/state/preHead/postHead/ok/errorCode/durationMs`：**68 行中 `actor` 缺 68、`request_id` 缺 68**；`before_head/after_head/result/error_code` 只是语义近似（`preHead/postHead/ok/errorCode`），`actor`/`request_id` 语义完全缺失。
+1. **必需字段缺失**：ADR §2.2-6（`reqs/adr/D-025-m2a-m2b.md:67`）要求“至少含 `ts/actor/componentId/repoType/action/before_head/after_head/result/error_code/request_id`”；SRS §8.1 的 `operation_log` 物理列（`reqs/specification.md:395`）与 AC-OP-33 Then②（`:1167`）同样要求 `actor`、`request_id`。实现（`src/MbdGitTool.Host/Services/OperationAuditService.cs:92-106`）写出字段为 `ts/action/componentId/repoType/state/preHead/postHead/ok/errorCode/durationMs`：**68 行中 `actor` 缺 68、`request_id` 缺 68**；`before_head/after_head/result/error_code` 只是语义近似（`preHead/postHead/ok/errorCode`），`actor`/`request_id` 语义完全缺失。
 2. **落点不是 `operation_log`**：SRS §13.1.2 AC-OP-33 的测试层级明确“真实 Host + SQLite `operation_log`”（`:1164`），When 给出 `select ts,actor,target_json,before_json,after_json,action,result,error_code,request_id from operation_log …`（`:1166`）；ADR §5 同一查询（`:180`）。实际为 `%LOCALAPPDATA%\MbdGitTool\audit\operations.jsonl`（自由 JSONL，无表/无 SQL），且没有 `actor/request_id`，无法完成 AC 要求的“同一 request_id 前后行数比对”“重启不重复”。
    - `docs/m2a-ac-report.md:36-43` 把“JSONL audit-lite / 完整 operation_log 归 M2b”列为**已知残留并称不阻塞**，但 ADR §2.3/§2.6 只把**查询/导出/≥90 天保留**归 M2b，最小列写入（含 `actor/request_id`）仍属 M2a；该“降级”未经 ADR/SRS 授权。
 3. **证据自洽性**：`docs/m2a-ac-report.md:24`（row 13）把该形态记为 ✅ 并写“真实动作证据见文件末尾两行”——报告正文结束于 §3 已知残留表，**根本没有“文件末尾两行”**；同表列出的字段集也不含 AC 强制的 `actor/request_id`，属“文档说通过但口径不成立”。
@@ -145,7 +145,7 @@
 
 | 断言 | 判定 | 证据 |
 |---|---|---|
-| SRS §13.1.2 存在且 9 条 G/W/T | ✅ | `reqs/requirements.md:1084` 标题；§13.1.2 含 `AC-UI-10a/10b/10c/15、AC-SAFE-14/15/16/17、AC-OP-33` 共 **9** 条，均含 Given/When/Then（`:1098-1168`）；前言冻结 tooltip 正则 `:1092`、COMMIT 两步 `:1094`、单源夹具与 M2a 13 条 `:1088-1090` |
+| SRS §13.1.2 存在且 9 条 G/W/T | ✅ | `reqs/specification.md:1084` 标题；§13.1.2 含 `AC-UI-10a/10b/10c/15、AC-SAFE-14/15/16/17、AC-OP-33` 共 **9** 条，均含 Given/When/Then（`:1098-1168`）；前言冻结 tooltip 正则 `:1092`、COMMIT 两步 `:1094`、单源夹具与 M2a 13 条 `:1088-1090` |
 | §13.4 追溯更新 | ✅ | `:1193-1218`：FR-ACT 行新增 `AC-UI-10a/10b/15`、FR-SAFE 行含 `AC-SAFE-14…17`、FR-OPS 行含 `AC-OP-33`；`:1218` 写明 M2a 13 条门禁与三件证据 |
 | 13 条 AC 状态表存在 | ✅ | `docs/m2a-ac-report.md:10-24` 覆盖 13 条，状态均为 ✅ |
 
@@ -156,7 +156,7 @@
 3. **row 8（`:19`，AC-UI-15）称“代码 + CDP 自测”，但仓库 CDP 证据不可复跑**：`ui/scripts/cdp-m2a-selfcheck.mjs:3` 明写“断言清单占位/待实现”，`:14` 写“以退出码 2 结束”，`:252-254` 实际 `process.exit(2)` 并打印 `[PENDING] …不得作为 M2a 通过证据`；旧 `cdp-m2-selfcheck.mjs` 仍在 `ui/scripts/`（未删除、未加作废标记）。
 4. **row 6（`:17`，AC-UI-11）称“前轮 CDP + 本轮截图”，但提交未归档任何截图**：`git show --stat 9d7afd0` 无 `docs/images/**`；`git ls-files docs/images/m2` 最新为 13:18 的 fixcheck 截图；`docs/m2a-ac-report.md` 全文 0 处截图/JSON/日志路径。ADR §5 要求“证据归档：`docs/m2a-ac-report.md` + 截图/JSON/Host 日志”，实际最终 Gate 证据只存在于 gitignored 的 `artifacts/ui-review/**`，不可随提交审计。
 5. **row 1（`:12`，AC-UI-08）说“夹具已建”，但夹具未被测试/CDP 实际消费且 status 仍 PENDING**（见 §2.2）。
-6. **三件证据名义齐全、实质缺一**：`docs/m2a-ac-report.md`、`reqs/v0.2/fixtures/m2-matrix.json`、`ui/scripts/cdp-m2a-selfcheck.mjs` 均存在，但第三件是占位脚本，不满足 ADR §5“复评入口 … 并在 CI/本机复跑”、`docs/m2-ops-status.md` §6 前置③“跑出 exit 0（附输出）”。
+6. **三件证据名义齐全、实质缺一**：`docs/m2a-ac-report.md`、`reqs/fixtures/m2-matrix.json`、`ui/scripts/cdp-m2a-selfcheck.mjs` 均存在，但第三件是占位脚本，不满足 ADR §5“复评入口 … 并在 CI/本机复跑”、`docs/m2-ops-status.md` §6 前置③“跑出 exit 0（附输出）”。
 7. **测试量声明无提交内路径**：`docs/m2a-ac-report.md:32` 的 265/265 在提交内无 trx/日志；并行安全 Gate 已用隔离树复跑 265/265 通过（可作旁证），故不将测试数量本身作为阻断，但“可复跑证据路径”在提交内仍缺失。
 
 ### 5.3 修复建议
@@ -272,7 +272,7 @@
 ## 附录 A：可复跑命令与关键值
 
 1. **单源夹具 vs Host 逐格比对**（Node，只读）：
-   - 读取 `reqs/v0.2/fixtures/m2-matrix.json` 与 `src/MbdGitTool.Host/Services/RepoActionService.cs:63-80` 的 14 行编码；
+   - 读取 `reqs/fixtures/m2-matrix.json` 与 `src/MbdGitTool.Host/Services/RepoActionService.cs:63-80` 的 14 行编码；
    - 展开 `enabled = cell∈{Y,C}`、`requiresConfirm = cell==C || action∈{COMMIT,PUSH}`、`reasonCode = !enabled ? STATE_BLOCKED : requiresConfirm ? CONFIRM_REQUIRED : AVAILABLE`；
    - 结果：14 态 × 5 键 = **70 格，0 差异**；Host 测试硬编码矩阵、UI Mock 矩阵亦与 Host 0 差异。
 2. **真实 Host 只读探测**（CDP）：`Runtime.evaluate` 读状态栏/按钮/title、`getComponentDetail` 原始 actions；实测 `RTCT_Demo`(SYNCED×3/AHEAD×1) 与 `RTCT_Synced`(SYNCED×4) 的 COMMIT/PUSH `requiresConfirm=true`、`CONFIRM_REQUIRED`；`RTCT_Incomplete`(MISSING) 同 true、`STATE_BLOCKED`。

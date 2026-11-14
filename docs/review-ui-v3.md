@@ -2,7 +2,7 @@
 
 > 评审日期：2026-11-14 03:00–03:10（本地）
 > 视觉基准（唯一）：`docs/images/reference/main-ui-reference.png`（652×441，有效画布 585×379，drawio 示意）
-> 规格输入：`docs/ui-redesign-spec.md` §1–§8、`docs/ui-redesign-plan.md`、`reqs/requirements.md` §9.13–9.17 / §11.0–§11.7
+> 规格输入：`docs/ui-redesign-spec.md` §1–§8、`docs/ui-redesign-plan.md`、`reqs/specification.md` §9.13–9.17 / §11.0–§11.7
 > 评审对象：**运行中的 v3 工作台**（`https://app.local/index.html`，CDP 127.0.0.1:9222）
 > 运行产物：`ui/dist` build = **02:55:11**；源码快照 = **~02:55:48**（`RepoActionsBar.vue` 在 build 之后被修改，见 P0-5）
 > 视口实测：1440×900 / 1280×800，dpr=1；对比截图：`artifacts/ui-review/40-v3-workbench.png`、`41-v3-folder.png`、`45-v3-action-toast.png`、`48-v3-1280.png`、`50-v3-folder-expand.png`、`51-v3-folder-repo-select.png`（前六者实际为 1424×861，非 AC-29 基线尺寸）

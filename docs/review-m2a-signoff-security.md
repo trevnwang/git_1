@@ -4,7 +4,7 @@
 |---|---|
 | 复评对象 | 提交 `fe98b95`（`fix(m2): complete final gate evidence (write pre-read-through, audit actor/requestId, fixture parity, M2a CDP selfcheck 10/10)`，2026-11-14 15:25:21 +0800，2026-11-14 15:25 评审） |
 | 本轮定位 | 对 `docs/review-m2a-final-security.md`（对象 `9d7afd0`，结论“不打”）中 **R-1/R-2/R-3 三项阻断项**及原 P0/P1 回退面的**最终签收复评**；按 lead 指定 6 项核对（read-through、审计 JSONL、N-1+矩阵夹具、全量测试、回归、签收结论）执行 |
-| 输入 | `docs/review-m2a-final-security.md`、`reqs/requirements.md` §13.1.2（AC-SAFE-14…17/AC-OP-33）、`reqs/adr/D-025-m2a-m2b.md` §2.2/§3/§5、`docs/m2a-ac-report.md`、`docs/review-m2-gate-security.md`、`reqs/v0.2/fixtures/m2-matrix.json` |
+| 输入 | `docs/review-m2a-final-security.md`、`reqs/specification.md` §13.1.2（AC-SAFE-14…17/AC-OP-33）、`reqs/adr/D-025-m2a-m2b.md` §2.2/§3/§5、`docs/m2a-ac-report.md`、`docs/review-m2-gate-security.md`、`reqs/fixtures/m2-matrix.json` |
 | 环境 | Windows 11 / git 2.56.1.windows.1 / dotnet SDK 10.0.404 / 仓库 `D:\Workspace\git_1`，`HEAD=fe98b95`，评审开始时工作区干净（`git status` 空）；评审开始时运行中 Host PID 32464（15:24:45 启动，`bin\Debug\net10.0-windows\MbdGitTool.Host.exe` 构建于 15:22:09），评审期间该进程已不再运行（**非本评审所杀**） |
 | 方法 | ① 严格以 **commit 对象**为准：`git archive fe98b95` 导出不可变树到 `%TEMP%\m2a-fe98b95-tree`；② 在同一导出树跑两轮全量测试（普通构建、`--artifacts-path` 隔离构建，均不触碰真实工作区）；③ 独立黑盒夹具（`%TEMP%\m2a-signoff-harness`，引用 **fe98b95 精确构建产物** `MbdGitTool.Host.dll`，真实 git + 隔离审计目录 + `GIT_TRACE2_EVENT` argv 审计，35 项断言）；④ 独立解析 Host `Matrix` 与 `m2-matrix.json` 逐格比对（14×5=70 格）；⑤ 真实 `%LOCALAPPDATA%\MbdGitTool\audit\operations.jsonl` 最近行/全文件核对；⑥ `git diff 9d7afd0 fe98b95` 逐行核对回退面 |
 | 边界 | **只新增本报告，未修改任何源码/配置/测试/真实仓库**；全部构建与夹具位于 `%TEMP%`；未对真实 Gitea 发起任何写操作；真实审计文件在评审全程保持 **69 行不变**（两次全量测试与黑盒夹具均使用临时审计目录） |
@@ -116,7 +116,7 @@ dotnet test MbdGitTool.sln --artifacts-path "$env:TEMP\m2a-final-artifacts" -v m
 - 黑盒夹具 9/9 PASS：拒绝码、`expected=main/current=feature`、HEAD/分支零改动、网络 git argv=0、审计 +1（失败行 preHead==postHead）且带 `actor/requestId`。
 
 ### 4.2 矩阵夹具 14×5 与 Host 代码对齐
-- 独立脚本（不经仓库测试代码）解析 `src/MbdGitTool.Host/Services/RepoActionService.cs:63-80` 的 `Matrix` 与 `reqs/v0.2/fixtures/m2-matrix.json`，逐格计算 `enabled=cell∈{Y,C}`、`requiresConfirm=(cell=='C' ∨ action∈{COMMIT,PUSH})`、`reasonCode=STATE_BLOCKED/CONFIRM_REQUIRED/AVAILABLE`：
+- 独立脚本（不经仓库测试代码）解析 `src/MbdGitTool.Host/Services/RepoActionService.cs:63-80` 的 `Matrix` 与 `reqs/fixtures/m2-matrix.json`，逐格计算 `enabled=cell∈{Y,C}`、`requiresConfirm=(cell=='C' ∨ action∈{COMMIT,PUSH})`、`reasonCode=STATE_BLOCKED/CONFIRM_REQUIRED/AVAILABLE`：
   ```text
   states_host=14 states_fixture=14 cells=70 mismatches=0
   host_only=[] fixture_only=[]
@@ -143,9 +143,9 @@ dotnet test MbdGitTool.sln --artifacts-path "$env:TEMP\m2a-final-artifacts" -v m
 已通过! - 通过:   71，总计:   71  - MbdGitTool.Core.Tests.dll
 失败!  - 失败:    1，通过:  199，总计:  200 - MbdGitTool.Host.Tests.dll
   RepoActionAvailabilityMatrixTests.GetAvailability_MatchesSingleSourceFixture_ForAllStatesAndActions
-  错误消息: 夹具不存在：reqs\v0.2\fixtures\m2-matrix.json
+  错误消息: 夹具不存在：reqs\fixtures\m2-matrix.json
 ```
-根因：`RepoActionAvailabilityMatrixTests.FindFixture()`（`:48-63`）从 `AppContext.BaseDirectory` 逐级向上找 `reqs/v0.2/fixtures/m2-matrix.json`；`--artifacts-path` 把 bin 放到 `%TEMP%` 后向上找不到仓库根目录，于是失败。**这不是文件锁，也不是产品代码失败**，但意味着“271/271”在“不杀 Host 的避锁路线”下不可复现（要么杀 Host 用普通构建，要么修夹具发现逻辑，见 P2-1）。
+根因：`RepoActionAvailabilityMatrixTests.FindFixture()`（`:48-63`）从 `AppContext.BaseDirectory` 逐级向上找 `reqs/fixtures/m2-matrix.json`；`--artifacts-path` 把 bin 放到 `%TEMP%` 后向上找不到仓库根目录，于是失败。**这不是文件锁，也不是产品代码失败**，但意味着“271/271”在“不杀 Host 的避锁路线”下不可复现（要么杀 Host 用普通构建，要么修夹具发现逻辑，见 P2-1）。
 
 **核对项④判定：PASS（271/271、0 warning；`--artifacts-path` 路线 270/271 的缺陷记 P2-1）。**
 
@@ -205,10 +205,10 @@ PASS CAS.service_layer_still_detects_stale_head
 ### P2-1【P2，测试/证据链】矩阵单源测试在 `--artifacts-path` 构建下失败（270/271）
 - 位置：`tests/MbdGitTool.Host.Tests/RepoActionAvailabilityMatrixTests.cs:48-63`（从 `AppContext.BaseDirectory` 上溯找夹具）。
 - 实测：§5.2。
-- 修复：把 `reqs/v0.2/fixtures/m2-matrix.json` 作为 `Content` 复制到测试输出（或允许 `MBD_REPO_ROOT`/`git rev-parse --show-toplevel` 兜底），使普通构建与 `--artifacts-path` 构建都能读同一夹具；然后两路线各复跑 271。
+- 修复：把 `reqs/fixtures/m2-matrix.json` 作为 `Content` 复制到测试输出（或允许 `MBD_REPO_ROOT`/`git rev-parse --show-toplevel` 兜底），使普通构建与 `--artifacts-path` 构建都能读同一夹具；然后两路线各复跑 271。
 
 ### P2-2【P2，单源矩阵不自洽】夹具 `status=aligned` 但 `freezeNotes` 仍写“状态为 SINGLE_SOURCE_PENDING_CODE_ALIGNMENT”；仓库仍存第三份手写矩阵
-- `reqs/v0.2/fixtures/m2-matrix.json:16` 与 `:24` 自相矛盾（测试只断言 `status`，无法发现）；`RepoActionAndComponentDetailTests.cs:18-36` 仍有 `ExpectedMatrix` 手写期望，违反 ADR §5“Host 单测与 CDP 共用，禁止第三份手写期望”。
+- `reqs/fixtures/m2-matrix.json:16` 与 `:24` 自相矛盾（测试只断言 `status`，无法发现）；`RepoActionAndComponentDetailTests.cs:18-36` 仍有 `ExpectedMatrix` 手写期望，违反 ADR §5“Host 单测与 CDP 共用，禁止第三份手写期望”。
 - 修复：更新 `freezeNotes`；删除/改为从夹具派生第三份矩阵（或显式记录其为过渡）。
 
 ### P2-3【P2，验收报告不一致】`docs/m2a-ac-report.md` 三处与代码/事实不符或残缺
