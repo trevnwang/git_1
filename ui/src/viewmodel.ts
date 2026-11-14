@@ -1167,6 +1167,8 @@ export function mapBackupRef(dto: BackupRefDto): BackupRefVm {
     sha: dto.sha,
     createdAt: dto.createdAt,
     repoType: (dto.repoType || '').toUpperCase(),
+    branch: dto.branch ?? null,
+    format: dto.format ?? (dto.branch ? 'BRANCH' : 'LEGACY'),
   }
 }
 

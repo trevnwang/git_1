@@ -28,6 +28,12 @@ public sealed class OperationAuditService
     /// <summary>审计文件名（固定）。</summary>
     public const string AuditFileName = "operations.jsonl";
 
+    /// <summary>SQLite 写失败回退队列文件名（固定，落审计目录；ADR D-026 P1-4）。</summary>
+    public const string FallbackFileName = "fallback.jsonl";
+
+    /// <summary><c>repairOperationLog</c> 审计动作名（operation_log.action 扩展值）。</summary>
+    public const string RepairOperationLogAction = "REPAIR_OPERATION_LOG";
+
     /// <summary>导出文件名前缀（固定，落 <see cref="AppConfig.ExportsRoot"/>）。</summary>
     public const string ExportFilePrefix = "operation-log-";
 
@@ -58,6 +64,7 @@ public sealed class OperationAuditService
         new(StringComparer.OrdinalIgnoreCase);
 
     private readonly object _sync;
+    private readonly object _fallbackSync;
     private readonly int _auditRetentionDays;
     private static string? _testIsolationRoot;
     /// <summary>测试模块初始化调用：把默认审计库/导出目录固定到临时根，避免污染真实 %LOCALAPPDATA%。</summary>
@@ -131,12 +138,27 @@ public sealed class OperationAuditService
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         DirectoryPath = Path.GetFullPath(directory);
         FilePath = Path.Combine(DirectoryPath, AuditFileName);
+        FallbackFilePath = Path.Combine(DirectoryPath, FallbackFileName);
         _sync = FileLocks.GetOrAdd(FilePath, _ => new object());
+        _fallbackSync = FileLocks.GetOrAdd(FallbackFilePath, _ => new object());
         ExportsRoot = Path.GetFullPath(
             string.IsNullOrWhiteSpace(exportsRoot) ? DefaultExportsRoot : exportsRoot!.Trim());
         _auditRetentionDays = Math.Clamp(auditRetentionDays, 1, 3650);
         Database = database;
         Database?.Initialize();
+
+        // FR-OP-09 / ADR D-026 P1-4：启动/初始化即把回退队列 + 主 JSONL 中 DB 缺失行回填
+        // （按 requestId+jobItemId+ts+action 稳定键去重；成功清空 fallback；失败仅告警，下次再试）。
+        if (Database is not null)
+        {
+            var backfill = BackfillFromJsonlAndFallback();
+            if (backfill.Inserted > 0 || backfill.FallbackRemaining > 0)
+            {
+                HostLog.Info(
+                    $"审计启动回填：inserted={backfill.Inserted} skipped={backfill.Skipped} "
+                    + $"fallbackRemaining={backfill.FallbackRemaining}");
+            }
+        }
     }
 
     /// <summary>审计目录（绝对路径）。</summary>
@@ -144,6 +166,12 @@ public sealed class OperationAuditService
 
     /// <summary>审计文件（绝对路径）。</summary>
     public string FilePath { get; }
+
+    /// <summary>SQLite 写失败回退队列文件（绝对路径；成功回填后删除/清空）。</summary>
+    public string FallbackFilePath { get; }
+
+    /// <summary>回退队列中尚未回填的行数（诊断/明确降级口径用）。</summary>
+    public int PendingFallbackCount => CountFallbackLines();
 
     /// <summary>导出目录（绝对路径；不存在时在导出时创建）。</summary>
     public string ExportsRoot { get; }
@@ -176,7 +204,12 @@ public sealed class OperationAuditService
             backupRef: execution.BackupRef);
     }
 
-    /// <summary>追加一条执行审计（字段级重载，便于独立测试/诊断；M2b 追加 job 关联可选字段）。</summary>
+    /// <summary>
+    /// 追加一条执行审计（JSONL + SQLite；任一失败仅告警，不影响动作结果）。
+    /// <para>M2b-2b（ADR D-026 P1-4）：SQLite 写入失败时把同一行追加到
+    /// <see cref="FallbackFilePath"/> 回退队列，下次启动/初始化回填；<paramref name="allowFallback"/>=false
+    /// 仅用于 repair 自身审计行（“不写回退”）。</para>
+    /// </summary>
     public void Record(
         string? action,
         string? componentId,
@@ -192,7 +225,8 @@ public sealed class OperationAuditService
         string? jobId = null,
         string? jobItemId = null,
         string? result = null,
-        string? backupRef = null)
+        string? backupRef = null,
+        bool allowFallback = true)
     {
         var ts = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
         var actionText = Sanitize(action) ?? "UNKNOWN";
@@ -209,42 +243,83 @@ public sealed class OperationAuditService
         var backup = Sanitize(backupRef);
         var resultText = Sanitize(result) ?? (ok ? "OK" : "FAILED");
 
-        WriteJsonLine(
-            actionText,
-            component,
-            type,
-            stateText,
-            pre,
-            post,
-            ok,
-            error,
-            Math.Max(0, durationMs),
-            actorText,
-            request,
-            resultText,
-            job,
-            jobItem,
-            backup,
-            ts);
-
-        // SQLite 双写（旁路）：失败只告警；列映射见 §8.1（target/before/after JSON 投影）。
+        string? line = null;
         try
         {
-            Database?.Insert(new OperationLogEntry(
-                Ts: ts,
-                Actor: actorText,
-                Action: actionText,
-                ComponentId: component,
-                RepoType: type,
-                TargetJson: BuildTargetJson(component, type),
-                BeforeJson: BuildHeadJson(pre, stateText),
-                AfterJson: BuildHeadJson(post, null),
-                Result: resultText,
-                ErrorCode: error,
-                RequestId: request,
-                JobId: job,
-                JobItemId: jobItem,
-                BackupRef: backup));
+            line = JsonSerializer.Serialize(
+                new AuditLine
+                {
+                    Ts = ts,
+                    Action = actionText,
+                    ComponentId = component,
+                    RepoType = type,
+                    State = stateText,
+                    PreHead = pre,
+                    PostHead = post,
+                    Ok = ok,
+                    ErrorCode = error,
+                    DurationMs = Math.Max(0, durationMs),
+                    Actor = actorText,
+                    RequestId = request,
+                    Result = resultText,
+                    JobId = job,
+                    JobItemId = jobItem,
+                    BackupRef = backup
+                },
+                JsonOptions);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            HostLog.Warn($"审计行序列化失败（{ex.GetType().Name}）：{FilePath}");
+        }
+
+        if (line is not null)
+        {
+            WriteJsonLine(line);
+        }
+
+        // SQLite 双写（旁路）：失败进回退队列；列映射见 §8.1（target/before/after JSON 投影）。
+        var entry = new OperationLogEntry(
+            Ts: ts,
+            Actor: actorText,
+            Action: actionText,
+            ComponentId: component,
+            RepoType: type,
+            TargetJson: BuildTargetJson(component, type),
+            BeforeJson: BuildHeadJson(pre, stateText),
+            AfterJson: BuildHeadJson(post, null),
+            Result: resultText,
+            ErrorCode: error,
+            RequestId: request,
+            JobId: job,
+            JobItemId: jobItem,
+            BackupRef: backup);
+
+        var inserted = TryInsertDatabase(entry);
+        if (!inserted && allowFallback && Database is not null)
+        {
+            if (line is null)
+            {
+                HostLog.Warn($"审计回退队列写入跳过：审计行无法序列化（{FallbackFilePath}）");
+            }
+            else
+            {
+                WriteFallbackLine(line);
+            }
+        }
+    }
+
+    /// <summary>SQLite 单行写入（旁路失败返回 false；不抛异常）。</summary>
+    private bool TryInsertDatabase(OperationLogEntry entry)
+    {
+        if (Database is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            return Database.Insert(entry);
         }
         catch (Exception ex) when (ex is IOException
             or UnauthorizedAccessException
@@ -253,8 +328,573 @@ public sealed class OperationAuditService
             or System.Security.SecurityException
             or InvalidOperationException)
         {
-            HostLog.Warn($"审计 SQLite 双写失败（{ex.GetType().Name}）：{Database?.FilePath ?? "<none>"}");
+            HostLog.Warn($"审计 SQLite 双写失败（{ex.GetType().Name}）：{Database.FilePath}");
+            return false;
         }
+    }
+
+    /// <summary>
+    /// 回退队列写入（SQLite 失败时；只追加审计元数据行，不含 token/output）。
+    /// 失败仅告警：JSONL 主链路已写入，查询/导出会明确 DB 可用性与 pendingFallback。
+    /// </summary>
+    private void WriteFallbackLine(string line)
+    {
+        try
+        {
+            var bytes = Encoding.UTF8.GetBytes(line + "\n");
+            lock (_fallbackSync)
+            {
+                Directory.CreateDirectory(DirectoryPath);
+                using var stream = new FileStream(
+                    FallbackFilePath,
+                    FileMode.Append,
+                    FileAccess.Write,
+                    FileShare.ReadWrite,
+                    bufferSize: 4096,
+                    FileOptions.None);
+                stream.Write(bytes, 0, bytes.Length);
+                stream.Flush();
+            }
+
+            HostLog.Warn($"审计 SQLite 写入失败：已写入回退队列（下次启动回填）{FallbackFilePath}");
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or NotSupportedException
+            or ArgumentException
+            or System.Security.SecurityException)
+        {
+            HostLog.Warn($"审计回退队列写入失败（{ex.GetType().Name}）：{FallbackFilePath}");
+        }
+    }
+
+    /// <summary>读取回退队列行（文件缺失/不可读返回空表）。</summary>
+    public IReadOnlyList<string> ReadFallbackLines()
+    {
+        try
+        {
+            lock (_fallbackSync)
+            {
+                if (!File.Exists(FallbackFilePath))
+                {
+                    return Array.Empty<string>();
+                }
+
+                return File.ReadAllLines(FallbackFilePath);
+            }
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or NotSupportedException
+            or ArgumentException)
+        {
+            HostLog.Warn($"审计回退队列读取失败（{ex.GetType().Name}）：{FallbackFilePath}");
+            return Array.Empty<string>();
+        }
+    }
+
+    private int CountFallbackLines()
+    {
+        var count = 0;
+        foreach (var line in ReadFallbackLines())
+        {
+            if (!string.IsNullOrWhiteSpace(line))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// M2b-2b 启动回填（FR-OP-09 / ADR D-026 P1-4）：把主 JSONL + 回退队列中 SQLite 缺失的行
+    /// 按稳定键（<c>requestId+jobItemId+ts+action</c>）回填；回退队列中成功回填的行清除，失败/不可解析的保留。
+    /// 失败只告警（返回 <see cref="AuditBackfillResult.Succeeded"/>=false）。
+    /// </summary>
+    public AuditBackfillResult BackfillFromJsonlAndFallback()
+    {
+        if (Database is null || !DatabaseAvailable)
+        {
+            return new AuditBackfillResult(0, 0, CountFallbackLines(), Succeeded: false);
+        }
+
+        var keys = Database.QueryStableKeys();
+        if (keys is null)
+        {
+            return new AuditBackfillResult(0, 0, CountFallbackLines(), Succeeded: false);
+        }
+
+        var keySet = new HashSet<string>(keys, StringComparer.Ordinal);
+        var inserted = 0;
+        var skipped = 0;
+        var dbHealthy = true;
+
+        // 1) 主 JSONL（M2a 起始终写入；DB 缺行/重建后由此回填）。
+        foreach (var line in ReadAuditLines())
+        {
+            var entry = ParseAuditLine(line);
+            if (entry is null)
+            {
+                continue;
+            }
+
+            var key = AuditDatabase.BuildStableKey(entry.RequestId, entry.JobItemId, entry.Ts, entry.Action);
+            if (!keySet.Add(key))
+            {
+                skipped++;
+                continue;
+            }
+
+            if (Database.Insert(entry))
+            {
+                inserted++;
+                continue;
+            }
+
+            // DB 运行期再次失败：停止后续写入（保留回退队列）；键不回滚（下次启动重新计算）。
+            dbHealthy = false;
+            break;
+        }
+
+        // 2) 回退队列（成功回填/DB 已有 → 丢弃；失败/不可解析 → 保留）。
+        var fallbackLines = ReadFallbackLines();
+        var remaining = new List<string>();
+        if (dbHealthy)
+        {
+            foreach (var line in fallbackLines)
+            {
+                var entry = ParseAuditLine(line);
+                if (entry is null)
+                {
+                    remaining.Add(line);
+                    continue;
+                }
+
+                var key = AuditDatabase.BuildStableKey(entry.RequestId, entry.JobItemId, entry.Ts, entry.Action);
+                if (!keySet.Add(key))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                if (Database.Insert(entry))
+                {
+                    inserted++;
+                    continue;
+                }
+
+                dbHealthy = false;
+                remaining.Add(line);
+            }
+        }
+        else
+        {
+            remaining.AddRange(fallbackLines);
+        }
+
+        if (dbHealthy && remaining.Count != fallbackLines.Count)
+        {
+            WriteFallbackRemaining(remaining);
+        }
+
+        if (inserted > 0 || remaining.Count > 0)
+        {
+            HostLog.Info(
+                $"审计回填完成：JSONL/回退 → operation_log 插入 {inserted} 行（跳过 {skipped}，"
+                + $"回退剩余 {remaining.Count}）");
+        }
+
+        return new AuditBackfillResult(inserted, skipped, remaining.Count, dbHealthy);
+    }
+
+    /// <summary>重写回退队列（空 = 删除文件）；失败仅告警（下次启动重试）。</summary>
+    private void WriteFallbackRemaining(IReadOnlyList<string> remaining)
+    {
+        try
+        {
+            lock (_fallbackSync)
+            {
+                if (remaining.Count == 0)
+                {
+                    if (File.Exists(FallbackFilePath))
+                    {
+                        File.Delete(FallbackFilePath);
+                    }
+
+                    return;
+                }
+
+                Directory.CreateDirectory(DirectoryPath);
+                var temporary = FallbackFilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                try
+                {
+                    File.WriteAllLines(
+                        temporary,
+                        remaining,
+                        new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                    File.Move(temporary, FallbackFilePath, overwrite: true);
+                }
+                finally
+                {
+                    if (File.Exists(temporary))
+                    {
+                        try
+                        {
+                            File.Delete(temporary);
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                        {
+                            // 临时文件清理失败不影响回填结果。
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or NotSupportedException
+            or ArgumentException)
+        {
+            HostLog.Warn($"审计回退队列重写失败（{ex.GetType().Name}）：{FallbackFilePath}");
+        }
+    }
+
+    /// <summary>
+    /// <c>repairOperationLog</c>（M2b-2b / ADR D-026 P1-4）：必须 <c>confirm=true</c>；删除并重建
+    /// <c>operation_log</c>，再从主 JSONL/回退队列回填（用于清理历史测试污染），最后写 1 条自身审计
+    /// （<c>action=REPAIR_OPERATION_LOG</c>，不写回退队列）。返回 <c>{ removed, inserted, total }</c>。
+    /// </summary>
+    public CommandResult RepairOperationLog(RepairOperationLogParams? parameters)
+    {
+        if (parameters?.Confirm != true)
+        {
+            return CommandResult.Failure(
+                BridgeErrorCodes.ConfirmRequired,
+                "repairOperationLog 会删除并重建 operation_log 表（仅保留 JSONL 可回填行），需 args.confirm=true 二次确认",
+                new Dictionary<string, object?>
+                {
+                    ["action"] = RepairOperationLogAction,
+                    ["requiresConfirm"] = true
+                });
+        }
+
+        if (Database is null || !DatabaseAvailable)
+        {
+            return DatabaseUnavailable();
+        }
+
+        var removed = Database.RecreateOperationLog();
+        if (removed is null)
+        {
+            return CommandResult.Failure(
+                BridgeErrorCodes.Internal,
+                "审计库 operation_log 重建失败（DB 不可用/IO 失败）；未伪装成功",
+                new Dictionary<string, object?> { ["database"] = "unavailable" });
+        }
+
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        var inserted = 0;
+        var skipped = 0;
+
+        foreach (var line in ReadAuditLines())
+        {
+            var entry = ParseAuditLine(line);
+            if (entry is null)
+            {
+                continue;
+            }
+
+            var key = AuditDatabase.BuildStableKey(entry.RequestId, entry.JobItemId, entry.Ts, entry.Action);
+            if (!keys.Add(key))
+            {
+                skipped++;
+                continue;
+            }
+
+            if (Database.Insert(entry))
+            {
+                inserted++;
+            }
+        }
+
+        // 回退队列同样回填（成功即清空；失败行保留）。
+        var fallbackLines = ReadFallbackLines();
+        var remaining = new List<string>();
+        foreach (var line in fallbackLines)
+        {
+            var entry = ParseAuditLine(line);
+            if (entry is null)
+            {
+                remaining.Add(line);
+                continue;
+            }
+
+            var key = AuditDatabase.BuildStableKey(entry.RequestId, entry.JobItemId, entry.Ts, entry.Action);
+            if (!keys.Add(key))
+            {
+                skipped++;
+                continue;
+            }
+
+            if (Database.Insert(entry))
+            {
+                inserted++;
+            }
+            else
+            {
+                remaining.Add(line);
+            }
+        }
+
+        if (remaining.Count != fallbackLines.Count)
+        {
+            WriteFallbackRemaining(remaining);
+        }
+
+        // 修复动作自身的审计行（必须 1 行；明确“不写回退”，DB 刚重建应可写）。
+        Record(
+            action: RepairOperationLogAction,
+            componentId: null,
+            repoType: null,
+            state: "N/A",
+            preHead: null,
+            postHead: null,
+            ok: true,
+            errorCode: null,
+            durationMs: 0,
+            actor: Environment.UserName,
+            requestId: Guid.NewGuid().ToString("N"),
+            result: "OK",
+            allowFallback: false);
+
+        var total = Database.Count();
+        if (total < 0)
+        {
+            total = inserted;
+        }
+
+        HostLog.Warn(
+            $"repairOperationLog：removed={removed} inserted={inserted} skipped={skipped} total={total} "
+            + $"fallbackRemaining={remaining.Count}");
+        return CommandResult.Success(new RepairOperationLogResultDto(removed.Value, inserted, total));
+    }
+
+    /// <summary>读取主 JSONL 行（文件缺失/不可读返回空表）。</summary>
+    private IReadOnlyList<string> ReadAuditLines()
+    {
+        try
+        {
+            lock (_sync)
+            {
+                if (!File.Exists(FilePath))
+                {
+                    return Array.Empty<string>();
+                }
+
+                return File.ReadAllLines(FilePath);
+            }
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or NotSupportedException
+            or ArgumentException)
+        {
+            HostLog.Warn($"审计 JSONL 读取失败（{ex.GetType().Name}）：{FilePath}");
+            return Array.Empty<string>();
+        }
+    }
+
+    /// <summary>把 JSONL/回退队列行解析为 SQLite 行（缺字段按 M2a 兼容口径补齐；损坏行返回 null）。</summary>
+    private static OperationLogEntry? ParseAuditLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var ts = GetString(root, "ts");
+            var action = GetString(root, "action");
+            if (string.IsNullOrWhiteSpace(ts) || string.IsNullOrWhiteSpace(action))
+            {
+                return null;
+            }
+
+            var component = Sanitize(GetString(root, "componentId"));
+            var repoType = Sanitize(GetString(root, "repoType"));
+            var state = Sanitize(GetString(root, "state"));
+            var preHead = Sanitize(GetString(root, "preHead"));
+            var postHead = Sanitize(GetString(root, "postHead"));
+            var ok = root.TryGetProperty("ok", out var okElement) && okElement.ValueKind == JsonValueKind.True;
+            var result = Sanitize(GetString(root, "result")) ?? (ok ? "OK" : "FAILED");
+
+            return new OperationLogEntry(
+                Ts: ts!,
+                Actor: Sanitize(GetString(root, "actor")),
+                Action: action!,
+                ComponentId: component,
+                RepoType: repoType,
+                TargetJson: BuildTargetJson(component, repoType),
+                BeforeJson: BuildHeadJson(preHead, state),
+                AfterJson: BuildHeadJson(postHead, null),
+                Result: result,
+                ErrorCode: Sanitize(GetString(root, "errorCode")),
+                RequestId: Sanitize(GetString(root, "requestId")),
+                JobId: Sanitize(GetString(root, "jobId")),
+                JobItemId: Sanitize(GetString(root, "jobItemId")),
+                BackupRef: Sanitize(GetString(root, "backupRef")));
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? GetString(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    /// <summary>回退队列行 → 审计记录（负 id 表示尚未入 SQLite；供查询/导出合并）。</summary>
+    private List<OperationLogRecord> ReadFallbackRecords(OperationLogFilter? filter = null, ISet<string>? excludeKeys = null)
+    {
+        var records = new List<OperationLogRecord>();
+        long nextId = 0;
+        foreach (var line in ReadFallbackLines())
+        {
+            var entry = ParseAuditLine(line);
+            if (entry is null)
+            {
+                continue;
+            }
+
+            if (filter is not null && !MatchesFilter(entry, filter))
+            {
+                continue;
+            }
+
+            if (excludeKeys is not null
+                && excludeKeys.Contains(AuditDatabase.BuildStableKey(
+                    entry.RequestId,
+                    entry.JobItemId,
+                    entry.Ts,
+                    entry.Action)))
+            {
+                continue;
+            }
+
+            nextId--;
+            records.Add(new OperationLogRecord(
+                nextId,
+                entry.Ts,
+                entry.Actor,
+                entry.Action,
+                entry.ComponentId,
+                entry.RepoType,
+                entry.TargetJson,
+                entry.BeforeJson,
+                entry.AfterJson,
+                entry.Result,
+                entry.ErrorCode,
+                entry.RequestId,
+                entry.JobId,
+                entry.JobItemId,
+                entry.BackupRef));
+        }
+
+        return records;
+    }
+
+    private static bool MatchesFilter(OperationLogEntry entry, OperationLogFilter filter)
+    {
+        if (!string.IsNullOrWhiteSpace(filter.FromUtc)
+            && string.CompareOrdinal(entry.Ts, filter.FromUtc) < 0)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.ToUtc)
+            && string.CompareOrdinal(entry.Ts, filter.ToUtc) > 0)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.Action)
+            && !string.Equals(entry.Action, filter.Action, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.ComponentId)
+            && !string.Equals(entry.ComponentId, filter.ComponentId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.Result)
+            && !string.Equals(entry.Result, filter.Result, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>DB 行 + 回退队列行合并后按 ts 倒序分页（DB 可用但存在 pending 行时使用）。</summary>
+    private OperationLogPageDto? BuildMergedPage(
+        OperationLogFilter filter,
+        IReadOnlyList<OperationLogRecord> fallbackRecords)
+    {
+        var dbFilter = filter with { Limit = MaxExportRows, Offset = 0 };
+        var dbRows = Database!.QueryAll(dbFilter, MaxExportRows);
+        if (dbRows is null)
+        {
+            return null;
+        }
+
+        var dbKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var row in dbRows)
+        {
+            dbKeys.Add(AuditDatabase.BuildStableKey(row.RequestId, row.JobItemId, row.Ts, row.Action));
+        }
+
+        var combined = new List<(string Ts, OperationLogItemDto Dto)>(dbRows.Count + fallbackRecords.Count);
+        foreach (var row in dbRows)
+        {
+            combined.Add((row.Ts, ToDto(row)));
+        }
+
+        foreach (var record in fallbackRecords)
+        {
+            if (dbKeys.Contains(AuditDatabase.BuildStableKey(
+                    record.RequestId,
+                    record.JobItemId,
+                    record.Ts,
+                    record.Action)))
+            {
+                continue;
+            }
+
+            combined.Add((record.Ts, ToDto(record)));
+        }
+
+        combined.Sort((left, right) => string.CompareOrdinal(right.Ts, left.Ts));
+        var total = combined.Count;
+        var items = combined
+            .Skip(filter.Offset)
+            .Take(filter.Limit)
+            .Select(entry => entry.Dto)
+            .ToList();
+        return new OperationLogPageDto(items, total);
     }
 
     /// <summary>
@@ -280,6 +920,19 @@ public sealed class OperationAuditService
         if (!DatabaseAvailable)
         {
             return DatabaseUnavailable();
+        }
+
+        // M2b-2b：DB 可用但回退队列仍有 pending 行时，查询结果与回退队列合并（不得把 DB 缺行隐藏成成功）。
+        var fallbackRecords = ReadFallbackRecords(filter!);
+        if (fallbackRecords.Count > 0)
+        {
+            var merged = BuildMergedPage(filter!, fallbackRecords);
+            if (merged is null)
+            {
+                return DatabaseUnavailable();
+            }
+
+            return CommandResult.Success(merged);
         }
 
         var page = Database!.Query(filter!);
@@ -342,12 +995,49 @@ public sealed class OperationAuditService
 
         var sourceFilter = filter!;
         var exportFilter = sourceFilter with { Limit = MaxExportRows, Offset = 0 };
-        var rows = Database.QueryAll(exportFilter, MaxExportRows);
-        if (rows is null)
+        var dbRows = Database.QueryAll(exportFilter, MaxExportRows);
+        if (dbRows is null)
         {
             return DatabaseUnavailable();
         }
 
+        // M2b-2b：导出同样合并回退队列（DB 可用但存在未回填行时不得导出“缺行成功”）。
+        var mergedRows = new List<OperationLogRecord>(dbRows);
+        var fallbackRecords = ReadFallbackRecords(sourceFilter);
+        if (fallbackRecords.Count > 0)
+        {
+            var dbKeys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var row in dbRows)
+            {
+                dbKeys.Add(AuditDatabase.BuildStableKey(row.RequestId, row.JobItemId, row.Ts, row.Action));
+            }
+
+            foreach (var record in fallbackRecords)
+            {
+                if (dbKeys.Contains(AuditDatabase.BuildStableKey(
+                        record.RequestId,
+                        record.JobItemId,
+                        record.Ts,
+                        record.Action)))
+                {
+                    continue;
+                }
+
+                mergedRows.Add(record);
+            }
+
+            mergedRows.Sort((left, right) => string.CompareOrdinal(left.Ts, right.Ts));
+        }
+
+        if (mergedRows.Count > MaxExportRows)
+        {
+            return CommandResult.Failure(
+                BridgeErrorCodes.TooManyEntries,
+                $"导出行数超过上限（{MaxExportRows}）：请缩小 from/to 范围",
+                new Dictionary<string, object?> { ["field"] = "range", ["total"] = mergedRows.Count });
+        }
+
+        IReadOnlyList<OperationLogRecord> rows = mergedRows;
         string path;
         try
         {
@@ -402,48 +1092,10 @@ public sealed class OperationAuditService
 
     // ------------------------------------------------------------------ JSONL
 
-    private void WriteJsonLine(
-        string action,
-        string? componentId,
-        string? repoType,
-        string state,
-        string? preHead,
-        string? postHead,
-        bool ok,
-        string? errorCode,
-        long durationMs,
-        string? actor,
-        string? requestId,
-        string result,
-        string? jobId,
-        string? jobItemId,
-        string? backupRef,
-        string ts)
+    private void WriteJsonLine(string line)
     {
         try
         {
-            var line = JsonSerializer.Serialize(
-                new AuditLine
-                {
-                    Ts = ts,
-                    Action = action,
-                    ComponentId = componentId,
-                    RepoType = repoType,
-                    State = state,
-                    PreHead = preHead,
-                    PostHead = postHead,
-                    Ok = ok,
-                    ErrorCode = errorCode,
-                    DurationMs = durationMs,
-                    Actor = actor,
-                    RequestId = requestId,
-                    Result = result,
-                    JobId = jobId,
-                    JobItemId = jobItemId,
-                    BackupRef = backupRef
-                },
-                JsonOptions);
-
             var bytes = Encoding.UTF8.GetBytes(line + "\n");
             lock (_sync)
             {
@@ -885,10 +1537,14 @@ public sealed class OperationAuditService
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
-    private static CommandResult DatabaseUnavailable() => CommandResult.Failure(
+    private CommandResult DatabaseUnavailable() => CommandResult.Failure(
         BridgeErrorCodes.Internal,
-        "审计数据库不可用（operation_log 查询/导出已降级；JSONL 审计仍生效）",
-        new Dictionary<string, object?> { ["database"] = "unavailable" });
+        "审计数据库不可用（operation_log 查询/导出已降级；JSONL 审计仍生效，失败行在 fallback.jsonl 等待回填）",
+        new Dictionary<string, object?>
+        {
+            ["database"] = "unavailable",
+            ["pendingFallback"] = PendingFallbackCount
+        });
 
     /// <summary>单行字段长度上限（防异常输入膨胀 JSONL；不改变字段存在性）。</summary>
     private static string? Sanitize(string? value)

@@ -80,6 +80,7 @@ public sealed class RepoActionService
         };
 
     private readonly GitCli _git;
+    private readonly OperationJournal? _journal;
     private readonly string? _giteaToken;
     private readonly string? _giteaBaseUrl;
     private readonly string? _giteaOrg;
@@ -88,9 +89,18 @@ public sealed class RepoActionService
     /// <param name="git">git 调用封装（可空，默认 <see cref="GitCli"/>）。</param>
     /// <param name="giteaToken">Gitea PAT（可空；为 null 时使用 <paramref name="config"/> 中的 token）。</param>
     /// <param name="config">应用配置（提供 Gitea baseUrl/org、token 与 allowInsecureHttp）。</param>
-    public RepoActionService(GitCli? git = null, string? giteaToken = null, AppConfig? config = null)
+    /// <param name="journal">
+    /// M2b-2b 写前 journal（FR-SAFE-04；可空 = 不做 journal，仅供不接 Host 的独立测试/安全用例）。
+    /// 生产由 <c>HostCommandRouter</c> 注入；git 写前写 STARTED，成功写 DONE，失败/取消/异常写 FAILED。
+    /// </param>
+    public RepoActionService(
+        GitCli? git = null,
+        string? giteaToken = null,
+        AppConfig? config = null,
+        OperationJournal? journal = null)
     {
         _git = git ?? new GitCli();
+        _journal = journal;
         var token = giteaToken ?? config?.GiteaToken;
         _giteaToken = string.IsNullOrWhiteSpace(token) ? null : token.Trim();
         _giteaBaseUrl = config?.GiteaBaseUrl;
@@ -191,12 +201,16 @@ public sealed class RepoActionService
     /// <para><paramref name="onCompleted"/>：执行结束（成功或失败/异常）时回调一次审计摘要
     /// （含 action/componentId/repoType/state/preHead/postHead/ok/errorCode/durationMs；不含 token/output），
     /// 供 <c>HostCommandRouter</c> 在返回前写审计-lite（G-P0-2/AC-OP-33）。</para>
+    /// <para><paramref name="jobId"/>/<paramref name="jobItemId"/>：批量作业复用单仓动作时的 job 关联，
+    /// 写进 journal 供崩溃 reconcile 回写任务中心（单仓 M2a 调用为 null）。</para>
     /// </summary>
     public async Task<CommandResult> RunAsync(
         RunRepoActionParams parameters,
         SnapshotIndex index,
         CancellationToken cancellationToken = default,
-        Action<RepoActionExecution>? onCompleted = null)
+        Action<RepoActionExecution>? onCompleted = null,
+        string? jobId = null,
+        string? jobItemId = null)
     {
         var execution = new RepoActionExecution
         {
@@ -211,7 +225,14 @@ public sealed class RepoActionService
         CommandResult result;
         try
         {
-            result = await RunCoreAsync(parameters!, index, cancellationToken, execution).ConfigureAwait(false);
+            result = await RunCoreAsync(
+                    parameters!,
+                    index,
+                    cancellationToken,
+                    execution,
+                    jobId,
+                    jobItemId)
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -258,7 +279,9 @@ public sealed class RepoActionService
         RunRepoActionParams? parameters,
         SnapshotIndex index,
         CancellationToken cancellationToken,
-        RepoActionExecution execution)
+        RepoActionExecution execution,
+        string? jobId,
+        string? jobItemId)
     {
         if (parameters is null)
         {
@@ -370,7 +393,15 @@ public sealed class RepoActionService
 
         // 8) 同仓串行：per-repo 信号量（静态字典，跨实例共享；批量作业复用同一把锁）。
         using var lease = await AcquireRepoLockAsync(localPath, cancellationToken).ConfigureAwait(false);
-        return await ExecuteAsync(action, repo, localPath, arguments, execution, cancellationToken)
+        return await ExecuteAsync(
+                action,
+                repo,
+                localPath,
+                arguments,
+                execution,
+                cancellationToken,
+                jobId,
+                jobItemId)
             .ConfigureAwait(false);
     }
 
@@ -380,7 +411,9 @@ public sealed class RepoActionService
         string localPath,
         ActionArguments arguments,
         RepoActionExecution execution,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? jobId,
+        string? jobItemId)
     {
         var stopwatch = Stopwatch.StartNew();
         var preHead = await ReadHeadAsync(localPath, cancellationToken).ConfigureAwait(false);
@@ -416,66 +449,97 @@ public sealed class RepoActionService
             }
         }
 
-        ActionOutcome outcome;
-        switch (action)
-        {
-            case "FETCH":
-                outcome = await FetchAsync(localPath, credentialEnvironment, cancellationToken).ConfigureAwait(false);
-                break;
-            case "PULL":
-                outcome = await PullAsync(localPath, arguments, credentialEnvironment, cancellationToken)
-                    .ConfigureAwait(false);
-                break;
-            case "CHKOUT":
-                outcome = await CheckoutAsync(localPath, arguments, cancellationToken).ConfigureAwait(false);
-                break;
-            case "COMMIT":
-                outcome = await CommitAsync(localPath, arguments, cancellationToken).ConfigureAwait(false);
-                break;
-            case "PUSH":
-                outcome = await PushAsync(localPath, repo, arguments, credentialEnvironment, cancellationToken)
-                    .ConfigureAwait(false);
-                break;
-            default:
-                return CommandResult.Failure(
-                    BridgeErrorCodes.InvalidArgument,
-                    $"不支持的 action：{action}",
-                    new Dictionary<string, object?> { ["field"] = "action", ["action"] = action });
-        }
-
-        stopwatch.Stop();
-        if (outcome.Failure is not null)
-        {
-            // 审计：失败动作理论上零 HEAD 改动；仍读取真实 HEAD 以记录 postHead（失败也记）。
-            execution.PostHead = await ReadHeadAsync(localPath, cancellationToken).ConfigureAwait(false) ?? preHead;
-            HostLog.Warn(
-                $"runRepoAction {action} {repo.ComponentId}/{repo.Repo.RepoType} ok=false "
-                + $"code={outcome.Failure.Error?.Code ?? "<none>"} ms={stopwatch.ElapsedMilliseconds}");
-            return outcome.Failure;
-        }
-
-        var postHead = await ReadHeadAsync(localPath, cancellationToken).ConfigureAwait(false) ?? preHead;
-        var branch = await ReadCurrentBranchAsync(localPath, cancellationToken).ConfigureAwait(false);
-        execution.PostHead = postHead;
-
-        HostLog.Info(
-            $"runRepoAction {action} {repo.ComponentId}/{repo.Repo.RepoType} ok=true ms={stopwatch.ElapsedMilliseconds}");
-
-        return CommandResult.Success(new
-        {
-            accepted = true,
+        // FR-SAFE-04 / ADR D-026 M2b-2b：真实 git 写前先落 journal STARTED（含 preHead/localPath/job 关联），
+        // 成功落 DONE（postHead）、失败落 FAILED（errorCode）、取消/异常也收口；进程被杀时留下 STARTED
+        // 由启动 JournalReconciler 按当前 HEAD 判定 NOT_APPLIED/UNKNOWN_APPLIED（不猜成功）。
+        var journalEntry = _journal?.Begin(
             action,
-            componentId = repo.ComponentId,
-            repoType = repo.Repo.RepoType,
-            state = NormalizeState(repo.Repo.State),
+            repo.ComponentId,
+            repo.Repo.RepoType,
             preHead,
-            postHead,
-            branch,
-            stashRef = outcome.StashRef,
-            output = outcome.Output,
-            durationMs = (long)stopwatch.ElapsedMilliseconds,
-            message = outcome.Message
-        });
+            localPath,
+            jobId,
+            jobItemId);
+
+        try
+        {
+            ActionOutcome outcome;
+            switch (action)
+            {
+                case "FETCH":
+                    outcome = await FetchAsync(localPath, credentialEnvironment, cancellationToken)
+                        .ConfigureAwait(false);
+                    break;
+                case "PULL":
+                    outcome = await PullAsync(localPath, arguments, credentialEnvironment, cancellationToken)
+                        .ConfigureAwait(false);
+                    break;
+                case "CHKOUT":
+                    outcome = await CheckoutAsync(localPath, arguments, cancellationToken).ConfigureAwait(false);
+                    break;
+                case "COMMIT":
+                    outcome = await CommitAsync(localPath, arguments, cancellationToken).ConfigureAwait(false);
+                    break;
+                case "PUSH":
+                    outcome = await PushAsync(localPath, repo, arguments, credentialEnvironment, cancellationToken)
+                        .ConfigureAwait(false);
+                    break;
+                default:
+                    _journal?.Fail(journalEntry, BridgeErrorCodes.InvalidArgument);
+                    return CommandResult.Failure(
+                        BridgeErrorCodes.InvalidArgument,
+                        $"不支持的 action：{action}",
+                        new Dictionary<string, object?> { ["field"] = "action", ["action"] = action });
+            }
+
+            stopwatch.Stop();
+            if (outcome.Failure is not null)
+            {
+                // 审计：失败动作理论上零 HEAD 改动；仍读取真实 HEAD 以记录 postHead（失败也记）。
+                execution.PostHead = await ReadHeadAsync(localPath, cancellationToken).ConfigureAwait(false) ?? preHead;
+                _journal?.Fail(journalEntry, outcome.Failure.Error?.Code ?? BridgeErrorCodes.GitFailed);
+                HostLog.Warn(
+                    $"runRepoAction {action} {repo.ComponentId}/{repo.Repo.RepoType} ok=false "
+                    + $"code={outcome.Failure.Error?.Code ?? "<none>"} ms={stopwatch.ElapsedMilliseconds}");
+                return outcome.Failure;
+            }
+
+            var postHead = await ReadHeadAsync(localPath, cancellationToken).ConfigureAwait(false) ?? preHead;
+            var branch = await ReadCurrentBranchAsync(localPath, cancellationToken).ConfigureAwait(false);
+            execution.PostHead = postHead;
+            _journal?.Complete(journalEntry, postHead);
+
+            HostLog.Info(
+                $"runRepoAction {action} {repo.ComponentId}/{repo.Repo.RepoType} ok=true ms={stopwatch.ElapsedMilliseconds}");
+
+            return CommandResult.Success(new
+            {
+                accepted = true,
+                action,
+                componentId = repo.ComponentId,
+                repoType = repo.Repo.RepoType,
+                state = NormalizeState(repo.Repo.State),
+                preHead,
+                postHead,
+                branch,
+                stashRef = outcome.StashRef,
+                output = outcome.Output,
+                durationMs = (long)stopwatch.ElapsedMilliseconds,
+                message = outcome.Message
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // 取消 ≠ 成功：journal 收口 FAILED（不猜成功），异常语义保持原样。
+            _journal?.Fail(journalEntry, BridgeErrorCodes.Timeout);
+            throw;
+        }
+        catch
+        {
+            // 未捕获异常同样收口（不留下无解释的 STARTED）；由 RunAsync 外层映射 E_INTERNAL。
+            _journal?.Fail(journalEntry, BridgeErrorCodes.Internal);
+            throw;
+        }
     }
 
     private async Task<ActionOutcome> FetchAsync(

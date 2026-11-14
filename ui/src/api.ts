@@ -447,6 +447,10 @@ export interface BackupRefDto {
   sha: string
   createdAt: string
   repoType: string
+  /** M2b-2b：备份来源分支（旧格式为 null）。 */
+  branch?: string | null
+  /** M2b-2b：LEGACY | BRANCH。 */
+  format?: string
 }
 
 /** `getBackupRefs` 参数（契约：{componentId,repoType?}）。 */
@@ -1555,6 +1559,8 @@ export function normalizeBackupRefs(value: unknown): BackupRefsDto {
       sha,
       createdAt: readString(refRecord, 'createdAt') ?? readString(refRecord, 'at') ?? '',
       repoType: (readString(refRecord, 'repoType') ?? '').toUpperCase(),
+      branch: readNullableString(refRecord, 'branch'),
+      format: readString(refRecord, 'format') ?? (readString(refRecord, 'branch') ? 'BRANCH' : 'LEGACY'),
     })
   }
   return { refs }

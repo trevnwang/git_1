@@ -269,12 +269,35 @@ public sealed class AuditDatabase
             command.ExecuteNonQuery();
             return true;
         }
-        catch (Exception ex) when (ex is SqliteException or InvalidOperationException or IOException)
+        catch (SqliteException ex)
         {
-            HostLog.Warn($"审计库写入失败（{ex.GetType().Name}）：仅保留 JSONL 行");
+            // 读只读库/损坏库/非 SQLite 文件属硬失败：运行期降级（查询/导出显式不可用），
+            // 由 OperationAuditService 写回退队列，下次启动回填。busy/locked 等瞬时错误不降级。
+            if (IsHardFailure(ex.SqliteErrorCode))
+            {
+                _available = false;
+                HostLog.Warn(
+                    $"审计库写入硬失败（sqlite={ex.SqliteErrorCode}）：运行期降级为 JSONL+回退队列，{FilePath}");
+            }
+            else
+            {
+                HostLog.Warn($"审计库写入失败（sqlite={ex.SqliteErrorCode}）：仅保留 JSONL/回退队列行");
+            }
+
+            return false;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException)
+        {
+            HostLog.Warn($"审计库写入失败（{ex.GetType().Name}）：仅保留 JSONL/回退队列行");
             return false;
         }
     }
+
+    private static bool IsHardFailure(int sqliteErrorCode) => sqliteErrorCode is
+        8   // SQLITE_READONLY
+        or 11  // SQLITE_CORRUPT
+        or 14  // SQLITE_CANTOPEN
+        or 26; // SQLITE_NOTADB
 
     /// <summary>分页查询（按 id 倒序 = 新行在前）；失败返回 null（调用方映射 E_INTERNAL）。</summary>
     public OperationLogQueryResult? Query(OperationLogFilter filter)
@@ -411,6 +434,113 @@ public sealed class AuditDatabase
         {
             HostLog.Warn($"审计库计数失败（{ex.GetType().Name}）");
             return -1;
+        }
+    }
+
+    /// <summary>
+    /// 读取全表稳定键集合（M2b-2b 回填去重；键 = <c>requestId+jobItemId+ts+action</c>）。
+    /// 不可用/失败返回 null（调用方不猜成功，保留回退队列）。
+    /// </summary>
+    public IReadOnlyCollection<string>? QueryStableKeys()
+    {
+        if (!_available)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var connection = OpenConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT request_id, job_item_id, ts, action FROM operation_log;";
+            using var reader = command.ExecuteReader();
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            while (reader.Read())
+            {
+                keys.Add(BuildStableKey(
+                    reader.IsDBNull(0) ? null : reader.GetString(0),
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetString(3)));
+            }
+
+            return keys;
+        }
+        catch (Exception ex) when (ex is SqliteException
+            or InvalidOperationException
+            or IOException
+            or FormatException
+            or OverflowException)
+        {
+            HostLog.Warn($"审计库稳定键读取失败（{ex.GetType().Name}）");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 稳定键（FR-OP-09 / ADR D-026 P1-4）：<c>requestId + jobItemId + ts + action</c>。
+    /// 回填只按该键去重，避免重启/重复补偿产生重复审计行。
+    /// </summary>
+    public static string BuildStableKey(string? requestId, string? jobItemId, string? ts, string? action) =>
+        (requestId ?? "\u0001NULL") + "\u001F"
+        + (jobItemId ?? "\u0001NULL") + "\u001F"
+        + (ts ?? string.Empty) + "\u001F"
+        + (action ?? string.Empty);
+
+    /// <summary>
+    /// 删除并重建 <c>operation_log</c> 表（<c>repairOperationLog</c> 用；用于清理历史测试污染）。
+    /// 返回重建前旧表行数；不可用/失败返回 null（调用方不得伪装成功）。
+    /// </summary>
+    public int? RecreateOperationLog()
+    {
+        if (!_available)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var connection = OpenConnection();
+            using var transaction = connection.BeginTransaction();
+
+            int removed;
+            using (var countCommand = connection.CreateCommand())
+            {
+                countCommand.Transaction = transaction;
+                countCommand.CommandText = "SELECT COUNT(*) FROM operation_log;";
+                removed = Convert.ToInt32(countCommand.ExecuteScalar() ?? 0, CultureInfo.InvariantCulture);
+            }
+
+            using (var dropCommand = connection.CreateCommand())
+            {
+                dropCommand.Transaction = transaction;
+                dropCommand.CommandText = "DROP TABLE IF EXISTS operation_log;";
+                dropCommand.ExecuteNonQuery();
+            }
+
+            using (var createCommand = connection.CreateCommand())
+            {
+                createCommand.Transaction = transaction;
+                createCommand.CommandText = CreateTableSql;
+                createCommand.ExecuteNonQuery();
+            }
+
+            foreach (var sql in CreateIndexSql)
+            {
+                using var createIndex = connection.CreateCommand();
+                createIndex.Transaction = transaction;
+                createIndex.CommandText = sql;
+                createIndex.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+            HostLog.Warn($"审计库 operation_log 已重建（旧表 {removed} 行已删除，等待 JSONL 回填）");
+            return removed;
+        }
+        catch (Exception ex) when (ex is SqliteException or InvalidOperationException or IOException)
+        {
+            HostLog.Warn($"审计库 operation_log 重建失败（{ex.GetType().Name}）");
+            return null;
         }
     }
 

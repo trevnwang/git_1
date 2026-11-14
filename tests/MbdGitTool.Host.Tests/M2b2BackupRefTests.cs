@@ -36,6 +36,8 @@ public sealed class M2b2BackupRefTests : IDisposable
         Assert.Contains(page.Refs, reference => reference.Sha == first);
         Assert.Contains(page.Refs, reference => reference.Sha == second);
         Assert.All(page.Refs, reference => Assert.Equal("IMPL", reference.RepoType));
+        Assert.All(page.Refs, reference => Assert.Null(reference.Branch));
+        Assert.All(page.Refs, reference => Assert.Equal(BackupRefFormats.Legacy, reference.Format));
         Assert.All(
             page.Refs,
             reference => Assert.Equal(
@@ -49,6 +51,38 @@ public sealed class M2b2BackupRefTests : IDisposable
         var designOnly = await new BackupRefService().GetBackupRefsAsync(repo, "DESIGN", CancellationToken.None);
         Assert.True(designOnly.Ok);
         Assert.Empty(Assert.IsType<BackupRefsDto>(designOnly.Data).Refs);
+    }
+
+    [Fact]
+    public async Task GetBackupRefs_NewFormat_ReturnsBranchAndFormat_AndEncodesSlashes()
+    {
+        var repo = CreateRepoWithCommits(out var first, out var second);
+        var newStamp = DaysAgo(1);
+        var legacyStamp = DaysAgo(2);
+        CreateNewBackupRef(repo, newStamp, "main", "IMPL", first);
+        CreateNewBackupRef(repo, newStamp, "feature/x", "IMPL", second);
+        CreateBackupRef(repo, legacyStamp, "IMPL", second);
+
+        var result = await new BackupRefService().GetBackupRefsAsync(repo, "IMPL", CancellationToken.None);
+
+        Assert.True(result.Ok, result.Error?.Code);
+        var page = Assert.IsType<BackupRefsDto>(result.Data);
+        Assert.Equal(3, page.Refs.Count);
+
+        var mainRef = Assert.Single(page.Refs, reference => reference.Branch == "main");
+        Assert.Equal(BackupRefFormats.Branch, mainRef.Format);
+        Assert.Equal($"refs/backup/sync/{newStamp}/main/IMPL", mainRef.Ref);
+        Assert.Equal(first, mainRef.Sha);
+        Assert.Equal("IMPL", mainRef.RepoType);
+
+        var slashRef = Assert.Single(page.Refs, reference => reference.Branch == "feature/x");
+        Assert.Equal(BackupRefFormats.Branch, slashRef.Format);
+        Assert.Contains("feature%2Fx", slashRef.Ref, StringComparison.Ordinal);
+        Assert.Equal(second, slashRef.Sha);
+
+        var legacyRef = Assert.Single(page.Refs, reference => reference.Format == BackupRefFormats.Legacy);
+        Assert.Null(legacyRef.Branch);
+        Assert.Equal($"refs/backup/sync/{legacyStamp}/IMPL", legacyRef.Ref);
     }
 
     [Fact]
@@ -85,6 +119,92 @@ public sealed class M2b2BackupRefTests : IDisposable
         Assert.True(again!.Restored);
         Assert.Equal(first, TestGit.Capture(repo, "rev-parse", "HEAD"));
         Assert.Equal(first, TestGit.Capture(repo, "rev-parse", again.SafetyRef!));
+    }
+
+    [Fact]
+    public async Task Restore_NewFormatSameBranch_Succeeds_AndReportsBackupBranch()
+    {
+        var repo = CreateRepoWithCommits(out var first, out var second);
+        var current = CurrentBranch(repo);
+        var stamp = DaysAgo(1);
+        var backupRef = CreateNewBackupRef(repo, stamp, current, "IMPL", first);
+
+        var (result, error) = await new BackupRefService().RestoreAsync(
+            repo, "IMPL", backupRef, CancellationToken.None);
+
+        Assert.Null(error);
+        Assert.NotNull(result);
+        Assert.True(result!.Restored);
+        Assert.Equal(first, result.PostHead);
+        Assert.Equal(second, result.PreHead);
+        Assert.Equal(first, TestGit.Capture(repo, "rev-parse", "HEAD"));
+        Assert.Contains("备份来源分支：" + current, result.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("旧备份无分支身份", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Restore_NewFormatDifferentBranch_RejectedWithZeroWrites()
+    {
+        var repo = CreateRepoWithCommits(out var first, out var second);
+        var current = CurrentBranch(repo);
+        var other = current + "-old";
+        TestGit.Run(repo, "branch", other); // 真实存在但非当前分支
+        var stamp = DaysAgo(1);
+        var backupRef = CreateNewBackupRef(repo, stamp, other, "IMPL", first);
+        var refsBefore = TestGit.Capture(repo, "for-each-ref", "--format=%(refname)", "refs/backup/");
+
+        var (result, error) = await new BackupRefService().RestoreAsync(
+            repo, "IMPL", backupRef, CancellationToken.None);
+
+        Assert.Null(result);
+        Assert.Equal(BridgeErrorCodes.ActionNotAllowed, error!.Code);
+        Assert.Equal(other, error.Details!["expected"] as string);
+        Assert.Equal(current, error.Details!["current"] as string);
+        Assert.Equal(other, error.Details!["branch"] as string);
+
+        // 零写：HEAD/分支/工作区/备份 ref 全部不变（未建安全备份 ref、未 reset）。
+        Assert.Equal(second, TestGit.Capture(repo, "rev-parse", "HEAD"));
+        Assert.Equal(current, CurrentBranch(repo));
+        Assert.Equal(refsBefore, TestGit.Capture(repo, "for-each-ref", "--format=%(refname)", "refs/backup/"));
+        Assert.Equal(string.Empty, TestGit.Capture(repo, "status", "--porcelain"));
+    }
+
+    [Fact]
+    public async Task Restore_NewFormatBranchWithSlash_RoundTripsEncodedSegment()
+    {
+        var repo = CreateRepoWithCommits(out var first, out _);
+        TestGit.Run(repo, "checkout", "-q", "-b", "feature/x");
+        var stamp = DaysAgo(1);
+        var backupRef = CreateNewBackupRef(repo, stamp, "feature/x", "IMPL", first);
+        Assert.Contains("feature%2Fx", backupRef, StringComparison.Ordinal);
+
+        var (result, error) = await new BackupRefService().RestoreAsync(
+            repo, "IMPL", backupRef, CancellationToken.None);
+
+        Assert.Null(error);
+        Assert.True(result!.Restored);
+        Assert.Equal(first, result.PostHead);
+        Assert.Equal("feature/x", CurrentBranch(repo));
+        Assert.Contains("备份来源分支：feature/x", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Restore_LegacyFormat_AllowedButMessageFlagsMissingBranchIdentity()
+    {
+        var repo = CreateRepoWithCommits(out var first, out _);
+        var current = CurrentBranch(repo);
+        var stamp = DaysAgo(1);
+        CreateBackupRef(repo, stamp, "IMPL", first);
+
+        var (result, error) = await new BackupRefService().RestoreAsync(
+            repo, "IMPL", $"refs/backup/sync/{stamp}/IMPL", CancellationToken.None);
+
+        Assert.Null(error);
+        Assert.NotNull(result);
+        Assert.True(result!.Restored);
+        Assert.Equal(first, result.PostHead);
+        Assert.Contains("旧备份无分支身份，请确认当前分支", result.Message, StringComparison.Ordinal);
+        Assert.Contains(current, result.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -165,6 +285,69 @@ public sealed class M2b2BackupRefTests : IDisposable
         Assert.Equal(expected, BackupRefService.TryParseBackupRef(value, out _, out _, out _));
     }
 
+    [Theory]
+    [InlineData("refs/backup/sync/20260101000000/IMPL", true, null, BackupRefFormats.Legacy)]
+    [InlineData("refs/backup/sync/20260101000000/impl", true, null, BackupRefFormats.Legacy)]
+    [InlineData("refs/backup/sync/20260101000000/main/IMPL", true, "main", BackupRefFormats.Branch)]
+    [InlineData("refs/backup/sync/20260101000000/DETACHED/IMPL", true, "DETACHED", BackupRefFormats.Branch)]
+    [InlineData("refs/backup/sync/20260101000000/feature%2Fx/IMPL", true, "feature/x", BackupRefFormats.Branch)]
+    [InlineData("refs/backup/sync/20260101000000/release%2F1.0/IMPL", true, "release/1.0", BackupRefFormats.Branch)]
+    [InlineData("refs/backup/sync/20260101000000//IMPL", false, null, null)] // 空 branch 段
+    [InlineData("refs/backup/sync/20260101000000/../IMPL", false, null, null)] // 相对段
+    [InlineData("refs/backup/sync/20260101000000/main/IMPL/extra", false, null, null)] // 多余段
+    [InlineData("refs/backup/sync/20260101000000/main", false, null, null)] // 缺 TYPE
+    [InlineData("refs/backup/sync/20260101000000/main/MAIN", false, null, null)] // 非四仓类型
+    [InlineData("refs/backup/sync/2026010100000/main/IMPL", false, null, null)] // stamp 非 14 位
+    [InlineData("refs/backup/sync/20260101000000/feature%2fx/IMPL", false, null, null)] // 非规范小写转义
+    [InlineData("refs/backup/sync/20260101000000/ma%20in/IMPL", false, null, null)] // 分支含空白
+    [InlineData("refs/backup/restore/20260101000000/main/IMPL", false, null, null)] // 非 sync 前缀
+    public void TryParseBackupRef_NewAndLegacyFormats_ReturnBranchAndFormat(
+        string value,
+        bool expectedOk,
+        string? expectedBranch,
+        string? expectedFormat)
+    {
+        var ok = BackupRefService.TryParseBackupRef(
+            value,
+            out var refText,
+            out var stamp,
+            out var branch,
+            out var repoType,
+            out var format);
+
+        Assert.Equal(expectedOk, ok);
+        if (!expectedOk)
+        {
+            Assert.Equal(string.Empty, refText);
+            Assert.Equal(string.Empty, stamp);
+            Assert.Null(branch);
+            Assert.Equal(string.Empty, repoType);
+            Assert.Equal(BackupRefFormats.Legacy, format);
+            return;
+        }
+
+        Assert.Equal(value, refText);
+        Assert.Equal("20260101000000", stamp);
+        Assert.Equal(expectedBranch, branch);
+        Assert.Equal(expectedFormat, format);
+        Assert.Equal("IMPL", repoType);
+        Assert.Equal(expectedBranch is null, format == BackupRefFormats.Legacy);
+    }
+
+    [Theory]
+    [InlineData("main", "main")]
+    [InlineData("feature/x", "feature%2Fx")]
+    [InlineData("release/1.0", "release%2F1.0")]
+    [InlineData("DETACHED", "DETACHED")]
+    [InlineData(null, BackupRefService.DetachedBranchSegment)]
+    [InlineData("", BackupRefService.DetachedBranchSegment)]
+    [InlineData("has space", BackupRefService.DetachedBranchSegment)]
+    [InlineData("bad..name", BackupRefService.DetachedBranchSegment)]
+    [InlineData("-leading", BackupRefService.DetachedBranchSegment)]
+    [InlineData("a=b", "a%3Db")]
+    public void EncodeBranchSegment_EncodesBranchOrFallsBackToDetached(string? branch, string expected) =>
+        Assert.Equal(expected, BackupRefService.EncodeBranchSegment(branch));
+
     [Fact]
     public async Task CleanupExpired_DeletesOnlyOldLocalRefs_NotRemote()
     {
@@ -190,6 +373,32 @@ public sealed class M2b2BackupRefTests : IDisposable
         // 远端（bare）不含 backup ref（清理只删本地；SYNC 备份 ref 从不上推）。
         var remoteRefs = TestGit.Capture(bareRemote, "for-each-ref", "--format=%(refname)", "refs/backup/");
         Assert.Equal(string.Empty, remoteRefs);
+    }
+
+    [Fact]
+    public async Task CleanupExpired_RemovesOldRefsInBothFormats_KeepsRecentNewFormat()
+    {
+        var config = TestAudit.NewConfig(_workspace.Root);
+        var repo = CreateRepoWithCommits(out var first, out var second);
+        var oldStamp = DaysAgo(31);
+        var recentStamp = DaysAgo(1);
+        CreateBackupRef(repo, oldStamp, "IMPL", first); // 旧格式超期
+        CreateNewBackupRef(repo, oldStamp, "main", "IMPL", second); // 新格式超期
+        CreateNewBackupRef(repo, recentStamp, "feature/x", "IMPL", second); // 新格式保留期内
+
+        var removed = await new BackupRefService(config).CleanupExpiredAsync(30, CancellationToken.None);
+
+        Assert.Equal(2, removed);
+        var refs = TestGit.Capture(repo, "for-each-ref", "--format=%(refname)", "refs/backup/");
+        Assert.DoesNotContain(oldStamp, refs, StringComparison.Ordinal);
+        Assert.Contains(recentStamp, refs, StringComparison.Ordinal);
+
+        // 保留期内新格式仍可解析并经 getBackupRefs 返回 branch/format（保留期不变）。
+        var listed = await new BackupRefService().GetBackupRefsAsync(repo, "IMPL", CancellationToken.None);
+        Assert.True(listed.Ok, listed.Error?.Code);
+        var remaining = Assert.Single(Assert.IsType<BackupRefsDto>(listed.Data).Refs);
+        Assert.Equal("feature/x", remaining.Branch);
+        Assert.Equal(BackupRefFormats.Branch, remaining.Format);
     }
 
     [Fact]
@@ -283,6 +492,18 @@ public sealed class M2b2BackupRefTests : IDisposable
 
     private static void CreateBackupRef(string repo, string stamp, string repoType, string sha) =>
         TestGit.Run(repo, "update-ref", $"refs/backup/sync/{stamp}/{repoType}", sha);
+
+    /// <summary>M2b-2b 新格式：<c>refs/backup/sync/&lt;stamp&gt;/&lt;branch-encoded&gt;/&lt;TYPE&gt;</c>。</summary>
+    private static string CreateNewBackupRef(string repo, string stamp, string branch, string repoType, string sha)
+    {
+        var encoded = BackupRefService.EncodeBranchSegment(branch);
+        var refName = $"refs/backup/sync/{stamp}/{encoded}/{repoType}";
+        TestGit.Run(repo, "update-ref", refName, sha);
+        return refName;
+    }
+
+    private static string CurrentBranch(string repo) =>
+        TestGit.Capture(repo, "rev-parse", "--abbrev-ref", "HEAD");
 
     private static string DaysAgo(int days) =>
         DateTime.UtcNow.AddDays(-days).ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);

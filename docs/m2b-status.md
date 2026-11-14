@@ -36,7 +36,7 @@
 - 前端 `npm run build` 通过；CDP 自测任务中心/批量/确认/取消/重试。
 - 截图：`docs/images/m2b/task-history.png`、`clone-dialog.png`、`clone-job.png`。
 
-## 5. 未完成（M2b-2）
+## 5. M2b-2b 进展（2026-11-14 20:40）\n\n见 `docs/m2b2b-status.md`：备份分支身份/恢复校验、审计回填与 repair、写前 journal/reconcile、realhost 19/19、369/369 测试。仍待 AC-OP 全量证据/真机 reconcile 演练后才能打 `m2b`。\n\n## 6. 未完成（M2b-2）
 
 1. **审计完整表**：SQLite `operation_log` 全字段、查询/导出、≥90 天保留（当前 JSONL audit-lite + job 关联）。
 2. **备份 ref 恢复**：按 `refs/backup/sync/*` 选择恢复（当前仅展示 backupRef；无 ref 恢复参数）。

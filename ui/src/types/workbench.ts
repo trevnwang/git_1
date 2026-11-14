@@ -509,6 +509,8 @@ export interface BackupRefVm {
   sha: string
   createdAt: string
   repoType: string
+  branch: string | null
+  format: string
 }
 
 /** 离线判定结果（source=local 且存在远程错误/离线标记时 offline=true）。 */

@@ -64,6 +64,8 @@ public sealed class JobEngine : IDisposable
     private readonly SnapshotService _snapshots;
     private readonly RepoActionService _actions;
     private readonly OperationAuditService _audit;
+    private readonly OperationJournal? _journal;
+    private readonly GitCli _git;
     private readonly JobStore _store;
     private readonly BatchOperationService _batch;
     private readonly PathPolicy? _paths;
@@ -86,6 +88,12 @@ public sealed class JobEngine : IDisposable
     /// <param name="audit">审计服务（可空；默认按 config 创建）。</param>
     /// <param name="store">作业持久化（可空；默认按 config 创建）。</param>
     /// <param name="onJobFinished">作业结束回调（HostCommandRouter 用于失效派生缓存/刷新 CAS 基线）。</param>
+    /// <param name="journal">
+    /// M2b-2b 写前 journal（FR-SAFE-04；可空 = 不写 journal）。批量自定义 kind（SYNC/DELETE/CLONE/
+    /// RESTORE/CREATE/TAG）在 git 写前由 JobEngine 写 STARTED/DONE/FAILED；单仓五键由
+    /// <see cref="RepoActionService"/> 写（同一实例注入）。仅显式 <see cref="AppConfig.JournalRoot"/>
+    /// 非空且未注入时按 config 创建，避免单测写真实用户目录。
+    /// </param>
     public JobEngine(
         AppConfig config,
         SnapshotService snapshots,
@@ -93,11 +101,15 @@ public sealed class JobEngine : IDisposable
         RepoActionService? actions = null,
         OperationAuditService? audit = null,
         JobStore? store = null,
-        Action? onJobFinished = null)
+        Action? onJobFinished = null,
+        OperationJournal? journal = null)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _snapshots = snapshots ?? throw new ArgumentNullException(nameof(snapshots));
-        _actions = actions ?? new RepoActionService(config: config);
+        _git = git ?? new GitCli();
+        _journal = journal
+            ?? (string.IsNullOrWhiteSpace(config.JournalRoot) ? null : new OperationJournal(config));
+        _actions = actions ?? new RepoActionService(config: config, journal: _journal);
         _audit = audit ?? new OperationAuditService(config);
         _store = store ?? new JobStore(config);
         _onJobFinished = onJobFinished;
@@ -122,7 +134,7 @@ public sealed class JobEngine : IDisposable
                 "未配置工作区根目录（config.json 的 workspaceRoot）");
         }
 
-        _batch = new BatchOperationService(config, _actions, git ?? new GitCli(), _paths);
+        _batch = new BatchOperationService(config, _actions, _git, _paths);
         _queue = Channel.CreateUnbounded<JobRecord>(
             new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
         _worker = Task.Run(WorkerLoopAsync);
@@ -379,6 +391,46 @@ public sealed class JobEngine : IDisposable
     }
 
     // ------------------------------------------------------------------ worker / 执行
+
+    /// <summary>
+    /// 启动 journal reconcile 结果回写任务中心（FR-SAFE-04；仅在 journal 条目关联 jobId/jobItemId 时）：
+    /// 更新对应 item 的 message（不改变终态、不重跑、不修改仓库），落盘并推送 JOB_UPDATED。
+    /// </summary>
+    public void AnnotateReconcile(string? jobId, string? jobItemId, string? status)
+    {
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            return;
+        }
+
+        var detail = string.Equals(status, JournalReconciler.NotApplied, StringComparison.Ordinal)
+            ? "NOT_APPLIED（写前 HEAD 未变化，可安全重试）"
+            : "UNKNOWN_APPLIED（写后 HEAD 已变化，请人工核对）";
+
+        EnsureLoaded();
+        JobRecord? job;
+        lock (_sync)
+        {
+            job = FindJobUnsafe(jobId!);
+            if (job is null)
+            {
+                return;
+            }
+
+            var item = job.Items.FirstOrDefault(entry =>
+                string.Equals(entry.Id, jobItemId, StringComparison.Ordinal));
+            if (item is null)
+            {
+                return;
+            }
+
+            var prefix = string.IsNullOrWhiteSpace(item.Message) ? string.Empty : item.Message + "；";
+            item.Message = Truncate(prefix + "journal reconcile: " + detail, 500);
+            PersistUnsafe();
+        }
+
+        Publish(job);
+    }
 
     private async Task WorkerLoopAsync()
     {
@@ -705,31 +757,117 @@ public sealed class JobEngine : IDisposable
                 .ConfigureAwait(false);
         }
 
-        var result = job.Kind switch
-        {
-            "SYNC" => await _batch.SyncAsync(repo, item.ComponentId, item.RepoType, arguments, cancellationToken)
-                .ConfigureAwait(false),
-            "CLONE" => await _batch.CloneAsync(repo, item.ComponentId, item.RepoType, cancellationToken)
-                .ConfigureAwait(false),
-            "DELETE" => await _batch.DeleteAsync(repo, item.ComponentId, item.RepoType, arguments, cancellationToken)
-                .ConfigureAwait(false),
-            "RESTORE" => await _batch.RestoreAsync(repo, item.ComponentId, item.RepoType, arguments, cancellationToken)
-                .ConfigureAwait(false),
-            "CREATE" => await _batch.CreateBranchAsync(repo, item.RepoType, arguments, cancellationToken)
-                .ConfigureAwait(false),
-            "TAG" => await _batch.TagAsync(repo, item.RepoType, arguments, cancellationToken).ConfigureAwait(false),
-            _ => new BatchItemResult(
-                JobItemStates.Failed,
-                BridgeErrorCodes.InvalidArgument,
-                $"不支持的 kind：{job.Kind}")
-        };
+        // FR-SAFE-04 / ADR D-026 M2b-2b：批量自定义 kind（SYNC/CLONE/DELETE/RESTORE/CREATE/TAG）在
+        // git 写前由 JobEngine 落 journal STARTED（含 preHead/localPath/job 关联）；成功 DONE、失败/取消/
+        // 异常 FAILED。单仓五键由 RepoActionService 写，避免重复。
+        var journalEntry = _journal?.Begin(
+            job.Kind,
+            item.ComponentId,
+            item.RepoType,
+            await ReadJournalHeadAsync(repo, cancellationToken).ConfigureAwait(false),
+            ResolveJournalPath(repo, item, job),
+            job.Id,
+            item.Id);
 
-        if (result.State == JobItemStates.Ok && result.PostHead is null)
+        try
         {
-            item.RepoName ??= BatchOperationService.RepoNameFor(repo, item.ComponentId, item.RepoType);
+            var result = job.Kind switch
+            {
+                "SYNC" => await _batch.SyncAsync(repo, item.ComponentId, item.RepoType, arguments, cancellationToken)
+                    .ConfigureAwait(false),
+                "CLONE" => await _batch.CloneAsync(repo, item.ComponentId, item.RepoType, cancellationToken)
+                    .ConfigureAwait(false),
+                "DELETE" => await _batch.DeleteAsync(repo, item.ComponentId, item.RepoType, arguments, cancellationToken)
+                    .ConfigureAwait(false),
+                "RESTORE" => await _batch.RestoreAsync(repo, item.ComponentId, item.RepoType, arguments, cancellationToken)
+                    .ConfigureAwait(false),
+                "CREATE" => await _batch.CreateBranchAsync(repo, item.RepoType, arguments, cancellationToken)
+                    .ConfigureAwait(false),
+                "TAG" => await _batch.TagAsync(repo, item.RepoType, arguments, cancellationToken).ConfigureAwait(false),
+                _ => new BatchItemResult(
+                    JobItemStates.Failed,
+                    BridgeErrorCodes.InvalidArgument,
+                    $"不支持的 kind：{job.Kind}")
+            };
+
+            if (result.State == JobItemStates.Ok)
+            {
+                _journal?.Complete(journalEntry, result.PostHead);
+            }
+            else
+            {
+                _journal?.Fail(journalEntry, result.ErrorCode ?? result.State);
+            }
+
+            if (result.State == JobItemStates.Ok && result.PostHead is null)
+            {
+                item.RepoName ??= BatchOperationService.RepoNameFor(repo, item.ComponentId, item.RepoType);
+            }
+
+            return (result, null, repoState);
+        }
+        catch (OperationCanceledException)
+        {
+            _journal?.Fail(journalEntry, BridgeErrorCodes.Timeout);
+            throw;
+        }
+        catch
+        {
+            _journal?.Fail(journalEntry, BridgeErrorCodes.Internal);
+            throw;
+        }
+    }
+
+    /// <summary>批次 kind 的写前 HEAD（只读；仓不存在/未克隆返回 null = 无 HEAD 可比较）。</summary>
+    private async Task<string?> ReadJournalHeadAsync(RepoRef? repo, CancellationToken cancellationToken)
+    {
+        if (repo is null || !repo.Repo.IsLocal || string.IsNullOrWhiteSpace(repo.Repo.LocalPath))
+        {
+            return null;
         }
 
-        return (result, null, repoState);
+        try
+        {
+            var result = await _git
+                .RunAsync(repo.Repo.LocalPath, new[] { "rev-parse", "HEAD" }, cancellationToken)
+                .ConfigureAwait(false);
+            if (!result.Success)
+            {
+                return null; // EMPTY（unborn HEAD）等：preHead 允许为空。
+            }
+
+            var head = result.TrimmedStdout;
+            return head.Length is > 0 and <= 64 ? head : null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or InvalidOperationException)
+        {
+            HostLog.Warn($"job item 写前 HEAD 读取失败（{ex.GetType().Name}）；journal preHead=null");
+            return null;
+        }
+    }
+
+    /// <summary>批次 kind 的 journal 目标路径（日志/回退用；CLONE/RESTORE 目标可尚未存在）。</summary>
+    private string? ResolveJournalPath(RepoRef? repo, JobItemRecord item, JobRecord job)
+    {
+        if (repo is not null && repo.Repo.IsLocal && !string.IsNullOrWhiteSpace(repo.Repo.LocalPath))
+        {
+            return repo.Repo.LocalPath;
+        }
+
+        if (job.Kind is "CLONE" or "RESTORE" && _paths is not null)
+        {
+            var name = BatchOperationService.RepoNameFor(repo, item.ComponentId, item.RepoType);
+            return _paths.TryResolveWorkspacePath(name, out var full, out _) ? full : null;
+        }
+
+        return null;
     }
 
     private async Task<(BatchItemResult Result, RepoActionExecution? Execution, string RepoState)>
@@ -790,7 +928,9 @@ public sealed class JobEngine : IDisposable
                 parameters,
                 index,
                 cancellationToken,
-                captured => execution = captured)
+                captured => execution = captured,
+                jobId: job.Id,
+                jobItemId: item.Id)
             .ConfigureAwait(false);
 
         if (commandResult.Ok)

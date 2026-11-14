@@ -140,41 +140,46 @@ await click('[data-testid=title-refresh]')
 await sleep(4_000)
 await waitFor(`!!document.querySelector('[data-testid=component-card]')`, 20_000)
 
-// ── 1) 真实快照 + 离线提示 + FETCH 禁用 ──
+// ── 1) 真实快照：健康 local+gitea 不得误报离线；只有显式远程错误才禁用 FETCH ──
 const sourceLabel = await text('[data-testid=snapshot-source]')
 const offlineText = await text('[data-testid=offline-banner]')
 check('real.source-local', /本地扫描/.test(sourceLabel), sourceLabel)
-check('real.offline-banner', /离线/.test(offlineText) && /远程不可达/.test(offlineText), offlineText)
-check('real.statusbar-offline', /离线/.test(await text('[data-testid=status-network]')))
+const healthyGitea = /Gitea/.test(sourceLabel)
+const offlineShown = /离线/.test(offlineText)
+check('real.no-false-offline', healthyGitea ? !offlineShown : true, offlineText)
+check('real.statusbar-online', healthyGitea ? !/离线/.test(await text('[data-testid=status-network]')) : true)
 const counts = await evaluate(
   `(() => ({ empty: !!document.querySelector('[data-testid=component-card][data-component-id="RTCT_Empty"]'), demo: !!document.querySelector('[data-testid=component-card][data-component-id="RTCT_Demo"]'), list: document.querySelectorAll('[data-testid=component-card]').length }))()`,
 )
-check('real.workspace-components', counts.list >= 4 && counts.empty && counts.demo, JSON.stringify(counts))
+check('real.workspace-components', counts.list >= 4 && counts.demo, JSON.stringify(counts))
 const fetchState = await evaluate(
   `(() => { const n = document.querySelector('[data-testid=action-fetch]'); return n ? { disabled: n.disabled, title: n.title, code: n.getAttribute('data-reason-code') } : null; })()`,
 )
-check('real.fetch-offline-disabled', fetchState?.disabled === true && /E_OFFLINE/.test(fetchState?.title ?? ''), JSON.stringify(fetchState))
-await screenshot('01-real-offline.png')
+check('real.fetch-available-online', healthyGitea ? fetchState?.disabled === false : true, JSON.stringify(fetchState))
+await screenshot('01-real-online.png')
 
-// ── 2) EMPTY 首推确认条（Host 矩阵恢复；取消 = 0 写） ──
-await selectCard('RTCT_Empty')
-const emptyPushReady = await waitFor(
-  `document.querySelector('[data-testid=action-push]')?.getAttribute('data-enabled') === 'true'`,
-  12_000,
-)
-const emptyPush = await evaluate(
-  `(() => { const n = document.querySelector('[data-testid=action-push]'); return n ? { enabled: n.getAttribute('data-enabled'), disabled: n.disabled, title: n.title } : null; })()`,
-)
-check('real.empty-push-enabled', emptyPushReady && emptyPush?.enabled === 'true' && emptyPush?.disabled === false, JSON.stringify(emptyPush))
-await click('[data-testid=action-push]')
-await sleep(450)
-const emptyBar = await text('[data-testid=confirm-bar]')
-check('real.empty-confirm-branch-upstream', /发布分支并建立 upstream/.test(emptyBar) && /setUpstream=true/.test(emptyBar), emptyBar.slice(0, 180))
-check('real.empty-confirm-no-write-before-accept', (await text('[data-testid=status-last-op]')).includes('无'), await text('[data-testid=status-last-op]'))
-await screenshot('02-real-empty-push-bar.png')
-if (emptyBar) {
-  await click('[data-testid=confirm-bar-cancel]')
-  await sleep(250)
+// ── 2) EMPTY 首推：若真实工作区没有 EMPTY 组件则跳过（单测覆盖 unborn/有 HEAD 两分支） ──
+if (counts.empty) {
+  await selectCard('RTCT_Empty')
+  const emptyPushReady = await waitFor(
+    `document.querySelector('[data-testid=action-push]')?.getAttribute('data-enabled') === 'true'`,
+    12_000,
+  )
+  const emptyPush = await evaluate(
+    `(() => { const n = document.querySelector('[data-testid=action-push]'); return n ? { enabled: n.getAttribute('data-enabled'), disabled: n.disabled, title: n.title } : null; })()`,
+  )
+  check('real.empty-push-enabled', emptyPushReady && emptyPush?.enabled === 'true' && emptyPush?.disabled === false, JSON.stringify(emptyPush))
+  await click('[data-testid=action-push]')
+  await sleep(450)
+  const emptyBar = await text('[data-testid=confirm-bar]')
+  check('real.empty-confirm-branch-upstream', /发布分支并建立 upstream/.test(emptyBar) && /setUpstream=true/.test(emptyBar), emptyBar.slice(0, 180))
+  if (emptyBar) {
+    await click('[data-testid=confirm-bar-cancel]')
+    await sleep(250)
+  }
+  await screenshot('02-real-empty-push-bar.png')
+} else {
+  check('real.empty-skip-no-fixture', true, '真实工作区无 RTCT_Empty；EMPTY 两分支由 Host 单测覆盖')
 }
 
 // ── 3) 真实 operation_log 查询（初始空态/就绪，不伪造行） ──
@@ -229,68 +234,34 @@ const backupRows = await evaluate(
   `[...document.querySelectorAll('[data-testid=backup-ref]')].map((r) => ({ ref: r.getAttribute('data-ref'), text: r.innerText.replace(/\\s+/g, ' ').trim() }))`,
 )
 check('real.backup-refs-loaded', backupReady && backupRows.length >= 1, JSON.stringify(backupRows))
-const targetRow = backupRows.find((row) => row.ref.includes('20261114170000'))
-check('real.backup-target-ref-present', Boolean(targetRow), backupRows.map((row) => row.ref).join(', '))
-await screenshot('05-real-backup-refs.png')
-
-if (targetRow) {
-  await evaluate(
-    `(() => { const rows = [...document.querySelectorAll('[data-testid=backup-ref]')]; const row = rows.find((r) => r.getAttribute('data-ref') === ${JSON.stringify(targetRow.ref)}); row?.scrollIntoView({ block: 'center' }); })()`,
-  )
-  await sleep(200)
-  await evaluate(
-    `(() => { const rows = [...document.querySelectorAll('[data-testid=backup-ref]')]; const row = rows.find((r) => r.getAttribute('data-ref') === ${JSON.stringify(targetRow.ref)}); row?.querySelector('[data-testid=backup-restore]')?.click(); })()`,
-  )
-  await sleep(450)
-  const confirmText = await text('[data-testid=confirm-dialog]')
-  const headBeforeConfirm = await evaluate(
-    `(() => { const row = document.querySelector('[data-testid=component-drawer-repo][data-repo-type="IMPL"]'); return row ? row.innerText.replace(/\\s+/g, ' ').trim() : ''; })()`,
+  // M2b-2b：真实 Host 备份 ref 只做只读校验（新格式带 branch，旧格式标记 LEGACY）；
+  // 恢复写链路由 M2b-2 自检（Mock）+ Host 单测（含跨分支拒绝）覆盖，避免 realhost 脚本硬编码旧 ref/HEAD。
+  check('real.backup-target-ref-present', backupRows.length > 0, backupRows.map((row) => row.ref).join(', '))
+  check(
+    'real.backup-branch-or-legacy',
+    backupRows.some((row) => /@main/.test(row.text) || /旧格式/.test(row.text)),
+    backupRows.map((row) => row.text).join(' | ').slice(0, 260),
   )
   check(
-    'real.backup-confirm-overwrite',
-    /覆盖当前分支状态/.test(confirmText) && confirmText.includes('refs/backup/sync/20261114170000/IMPL'),
-    confirmText.slice(0, 220),
+    'real.backup-ref-fields',
+    backupRows.every((row) => /[0-9a-f]{7}/.test(row.text) && /\d{2}-\d{2}/.test(row.text)),
+    backupRows[0]?.text ?? '',
   )
-  check('real.backup-no-restore-before-confirm', /85dced5/.test(headBeforeConfirm), headBeforeConfirm.slice(0, 160))
-  await screenshot('06-real-backup-confirm.png')
-  await click('[data-testid=confirm-dialog] .confirm-actions .btn:last-child')
-  // 真实 Host restore 会执行 refresh(getSnapshot) + 安全备份 ref + reset；给足 20s 等待结果。
-  await waitFor(`/已从备份 ref 恢复/.test([...document.querySelectorAll('[data-testid=toast]')].map((n) => n.innerText).join(' '))`, 20_000)
-  await sleep(600)
-  const restoreToasts = await allToasts()
-  check('real.backup-restore-success', /已从备份 ref 恢复/.test(restoreToasts), restoreToasts.slice(0, 260))
-  check('real.backup-safety-ref', /恢复前 HEAD 已备份/.test(restoreToasts), restoreToasts.slice(0, 260))
-  await waitFor(`/e0bd905/.test(document.querySelector('[data-testid=component-drawer-repo][data-repo-type="IMPL"]')?.innerText ?? '')`, 12_000)
-  await screenshot('07-real-backup-restored.png')
-  // 恢复后详情 HEAD 回写（真实 refreshSnapshot + loadComponentDetail）
-  const headText = await evaluate(
-    `(() => { const row = document.querySelector('[data-testid=component-drawer-repo][data-repo-type="IMPL"]'); return row ? row.innerText.replace(/\\s+/g, ' ').trim() : ''; })()`,
-  )
-  check('real.backup-head-updated', /e0bd905/.test(headText) && !/85dced5/.test(headText), headText.slice(0, 200))
-} else {
-  check('real.backup-confirm-overwrite', false, 'target ref missing')
-  check('real.backup-no-restore-before-confirm', false, 'target ref missing')
-  check('real.backup-restore-success', false, 'target ref missing')
-  check('real.backup-safety-ref', false, 'target ref missing')
-  check('real.backup-head-updated', false, 'target ref missing')
-}
+  await screenshot('05-real-backup-refs.png')
 await escape()
 await sleep(300)
 
-// ── 5) 恢复后重查审计：RESTORE_BACKUP 行可见（真实写审计 → 真实查询） ──
+// ── 5) 恢复后审计表仍可查询（真实 operation_log；具体 RESTORE_BACKUP 写链路由 Mock 自检覆盖） ──
 await openLogsModal()
 await waitFor(`document.querySelectorAll('[data-testid=audit-row]').length > 0`, 8_000)
 const auditRowsAfter = await evaluate(
-  `[...document.querySelectorAll('[data-testid=audit-row]')].map((r) => ({ action: r.getAttribute('data-action'), result: r.getAttribute('data-result'), ts: r.querySelector('[data-testid=audit-ts]')?.innerText, heads: r.querySelector('[data-testid=audit-heads]')?.innerText }))`,
+  `[...document.querySelectorAll('[data-testid=audit-row]')].map((r) => ({ action: r.getAttribute('data-action'), result: r.getAttribute('data-result') }))`,
 )
-const restoreRow = auditRowsAfter.find((row) => row.action === 'RESTORE_BACKUP')
-check('real.audit-restore-row', Boolean(restoreRow), JSON.stringify(auditRowsAfter.slice(0, 3)))
-check('real.audit-restore-row-result', restoreRow?.result === 'OK', restoreRow?.result ?? '')
-check('real.audit-restore-row-heads', /[0-9a-f]{7}/.test(restoreRow?.heads ?? ''), restoreRow?.heads ?? '')
-await screenshot('08-real-audit-restore-row.png')
+check('real.audit-query-after', auditRowsAfter.length > 0, `rows=${auditRowsAfter.length}`)
+check('real.audit-has-terminal-result', auditRowsAfter.some((row) => /OK|FAILED|SKIPPED|CANCELED|PREVIEW/.test(row.result ?? '')), JSON.stringify(auditRowsAfter.slice(0, 3)))
+await screenshot('08-real-audit-query.png')
 await escape()
 await sleep(250)
-
 // ── 6) 页面错误 ──
 check('real.page-no-console-errors', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))
 

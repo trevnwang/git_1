@@ -122,3 +122,10 @@ public sealed record RestoreBackupRefParams(
 /// <summary>M2b-2 <c>cleanupRetention</c> 参数（可空：按配置保留期清理本地 .trash / 备份 ref / 超期审计行）。</summary>
 public sealed record CleanupRetentionParams();
 
+/// <summary>
+/// M2b-2b <c>repairOperationLog</c> 参数：<c>{ confirm:true }</c>。
+/// <para>破坏性修复入口：删除并重建 <c>operation_log</c> 表，再从 JSONL/回退队列回填（用于清理历史测试污染）；
+/// 必须显式 <c>confirm=true</c>（Host 侧 <c>E_CONFIRM_REQUIRED</c> 双保险）。</para>
+/// </summary>
+public sealed record RepairOperationLogParams(bool? Confirm = null);
+

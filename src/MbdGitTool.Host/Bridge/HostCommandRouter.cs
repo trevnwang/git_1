@@ -50,9 +50,10 @@ public sealed class HostCommandRouter : IDisposable
             ["cancelJob"] = TimeSpan.FromSeconds(5),
             ["retryFailed"] = TimeSpan.FromSeconds(5),
 
-            // M2b-2：审计查询/导出、备份 ref 列表/恢复、保留清理。
+            // M2b-2：审计查询/导出、备份 ref 列表/恢复、保留清理、审计重建（修复历史污染）。
             ["getOperationLog"] = TimeSpan.FromSeconds(10),
             ["exportOperationLog"] = TimeSpan.FromSeconds(30),
+            ["repairOperationLog"] = TimeSpan.FromSeconds(120),
             ["getBackupRefs"] = TimeSpan.FromSeconds(20),
             ["restoreBackupRef"] = TimeSpan.FromSeconds(120),
             ["cleanupRetention"] = TimeSpan.FromSeconds(120)
@@ -65,6 +66,7 @@ public sealed class HostCommandRouter : IDisposable
     private readonly GitStatusIndex _gitStatus;
     private readonly CommitsService _commits;
     private readonly RepoActionService _actions;
+    private readonly OperationJournal _journal;
     private readonly OperationAuditService _audit;
     private readonly JobEngine _jobs;
     private readonly BackupRefService _backup;
@@ -95,7 +97,9 @@ public sealed class HostCommandRouter : IDisposable
 
         // 单仓操作（M2）：网络类动作凭据由 token 注入（仅环境变量，不进入参数/日志/响应）；
         // P0-1 起 RepoActionService 还会在注入前校验 origin fetch/pushurl 与 Gitea base 的作用域。
-        _actions = new RepoActionService(config: _snapshots.Config);
+        // M2b-2b：写前 journal（FR-SAFE-04）由同一实例注入，单仓五键 git 写前写 STARTED/DONE/FAILED。
+        _journal = new OperationJournal(_snapshots.Config);
+        _actions = new RepoActionService(config: _snapshots.Config, journal: _journal);
 
         // G-P0-2 / AC-OP-33：审计-lite（每次 runRepoAction 成功/失败写 1 行 JSONL；不含 token/output）。
         // M2b-2：同一 OperationAuditService 双写 SQLite operation_log（初始化失败自动降级 JSONL-only）。
@@ -133,7 +137,33 @@ public sealed class HostCommandRouter : IDisposable
             {
                 _deliveredIndex = null;
                 InvalidateCaches();
-            });
+            },
+            journal: _journal);
+
+        // M2b-2b 启动 reconcile（FR-SAFE-04 / ADR D-026）：异步后台扫描写前 journal 中 STARTED 未收口的
+        // 条目，按当前 HEAD 判定 NOT_APPLIED（可安全重试）/ UNKNOWN_APPLIED（不猜成功，提示核对），
+        // 每条写 1 行 action=RECONCILE 审计并回写任务中心 item 文案。只读、绝不修改仓库；失败仅日志。
+        StartupReconcile = Task.Run(() =>
+        {
+            try
+            {
+                var reconciler = new JournalReconciler(
+                    _journal,
+                    _audit,
+                    indexProvider: () => _snapshots.Index,
+                    observer: result =>
+                        _jobs.AnnotateReconcile(result.JobId, result.JobItemId, result.Status));
+                reconciler.Reconcile();
+            }
+            catch (Exception ex) when (ex is IOException
+                or UnauthorizedAccessException
+                or ArgumentException
+                or InvalidOperationException
+                or NotSupportedException)
+            {
+                HostLog.Warn($"启动 journal reconcile 失败（{ex.GetType().Name}）");
+            }
+        });
 
         Func<SnapshotIndex> indexProvider = () => _snapshots.Index;
         _componentDetail = new ComponentDetailService(indexProvider, _actions);
@@ -175,6 +205,14 @@ public sealed class HostCommandRouter : IDisposable
     /// 结果与 <c>cleanupRetention</c> 命令一致，失败只记日志不抛异常）。
     /// </summary>
     public Task StartupRetention { get; }
+
+    /// <summary>
+    /// M2b-2b 启动 journal reconcile 任务（构造时后台执行；诊断/测试可 await 其完成）。
+    /// <para>扫描写前 journal 的 STARTED 未收口条目 → 只读判定 NOT_APPLIED/UNKNOWN_APPLIED →
+    /// 每条写 1 行 <c>action=RECONCILE</c> 审计 → 关联 job 时回写任务中心 item 文案；不修改仓库。
+    /// 失败仅日志，不抛异常。</para>
+    /// </summary>
+    public Task StartupReconcile { get; }
 
     /// <summary>
     /// M2b 作业事件出口（由 <c>WebViewBridge</c> 在初始化后设置）：参数固定为
@@ -450,6 +488,17 @@ public sealed class HostCommandRouter : IDisposable
                 var parsed = ParseParams<ExportOperationLogParams>(parameters);
                 return await RunIoAsync(
                         () => _audit.ExportOperationLog(parsed),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            case "repairOperationLog":
+            {
+                // M2b-2b / ADR D-026 P1-4：删除并重建 operation_log 后从 JSONL/回退队列回填
+                // （清理历史测试污染）；必须 args.confirm=true；自身审计 1 行且不写回退。
+                var parsed = ParseParams<RepairOperationLogParams>(parameters);
+                return await RunIoAsync(
+                        () => _audit.RepairOperationLog(parsed),
                         cancellationToken)
                     .ConfigureAwait(false);
             }

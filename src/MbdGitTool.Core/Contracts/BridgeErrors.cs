@@ -45,6 +45,12 @@ public static class BridgeErrorCodes
 
     /// <summary>M2b：getJob/cancelJob/retryFailed 的 jobId 不存在（或已被 200 条上限淘汰）。</summary>
     public const string JobNotFound = "E_JOB_NOT_FOUND";
+
+    /// <summary>
+    /// M2b-2b：崩溃 reconcile 判定为 <c>UNKNOWN_APPLIED</c>（journal STARTED 无收口且当前 HEAD 已变化，
+    /// 无法证明写操作未应用）；不猜测成功，需人工核对。
+    /// </summary>
+    public const string ReconcileUnknown = "E_RECONCILE_UNKNOWN";
 }
 
 /// <summary>桥错误：<c>code</c> 稳定错误码 + 人类可读 <c>message</c> + 可选 <c>details</c>（诊断/确认流程）。</summary>

@@ -55,6 +55,13 @@ public sealed record AppConfig
     public string? ExportsRoot { get; init; }
 
     /// <summary>
+    /// M2b-2b 写前 journal 目录（FR-SAFE-04；文件 <c>operations.jsonl</c>）；为空时使用默认
+    /// <c>%LOCALAPPDATA%\MbdGitTool\journal</c>；仅注入 <see cref="AuditRoot"/> 时落在其 <c>journal</c> 子目录。
+    /// <para>仅供测试注入临时目录（避免单测污染真实用户数据）。</para>
+    /// </summary>
+    public string? JournalRoot { get; init; }
+
+    /// <summary>
     /// 审计保留天数（<c>audit.keepDays</c> / config.json <c>auditRetentionDays</c>，默认 90，范围 1–3650）：
     /// <c>operation_log</c> / JSONL 中早于该天数的行由保留清理任务删除（SRS FR-OP-09 要求 ≥90 天）。
     /// </summary>

@@ -33,8 +33,9 @@ public sealed record GitResult(int ExitCode, string Stdout, string Stderr)
 /// <para>固定加 <c>--no-optional-locks</c> 与 <c>-C &lt;path&gt;</c>，设置 <c>GIT_TERMINAL_PROMPT=0</c>；</para>
 /// <para>默认超时 20s（只读探测）；写操作由调用方传更长超时（fetch/pull/push 120s，commit/checkout 60s）；</para>
 /// <para><b>凭据</b>：可选 <c>extraEnvironment</c> 注入（如 <c>GIT_CONFIG_COUNT/KEY/VALUE</c> 的 http.extraHeader），不对参数或日志输出 token。</para>
+/// <para>非 sealed/虚方法：单测可注入故障（如 git 写前抛异常）验证 journal/reconcile 收口，不改变生产调用路径。</para>
 /// </summary>
-public sealed class GitCli
+public class GitCli
 {
     /// <summary>只读命令默认超时（M1 只做只读探测，超时即判失败并杀进程树）。</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(20);
@@ -50,7 +51,7 @@ public sealed class GitCli
     /// <param name="cancellationToken">协作式取消；取消后杀进程树并返回 <see cref="GitResult.Canceled"/>。</param>
     /// <param name="timeout">本次调用超时；null = <see cref="DefaultTimeout"/>（20s）。</param>
     /// <param name="extraEnvironment">额外环境变量（可空；凭据配置用，禁止写入日志/响应）。</param>
-    public async Task<GitResult> RunAsync(
+    public virtual async Task<GitResult> RunAsync(
         string workingDirectory,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken = default,

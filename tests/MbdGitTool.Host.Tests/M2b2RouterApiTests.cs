@@ -134,6 +134,8 @@ public sealed class M2b2RouterApiTests
         var found = Assert.Single(refs, reference => reference.Ref == backupRef);
         Assert.Equal(backupTarget, found.Sha);
         Assert.Equal("IMPL", found.RepoType);
+        Assert.Null(found.Branch); // 旧格式：无分支身份
+        Assert.Equal(BackupRefFormats.Legacy, found.Format);
 
         var noConfirm = await DispatchAsync(router, "restoreBackupRef", new
         {
@@ -160,6 +162,7 @@ public sealed class M2b2RouterApiTests
         Assert.Equal(backupTarget, restoredData.PostHead);
         Assert.NotNull(restoredData.SafetyRef);
         Assert.Equal(preRestoreHead, TestGit.Capture(fixture.CloneB, "rev-parse", restoredData.SafetyRef!));
+        Assert.Contains("旧备份无分支身份，请确认当前分支", restoredData.Message, StringComparison.Ordinal);
 
         var audit = await DispatchAsync(router, "getOperationLog", new
         {
@@ -173,6 +176,55 @@ public sealed class M2b2RouterApiTests
         Assert.Equal(backupRef, row.BackupRef);
         Assert.Equal(preRestoreHead, row.Before!.Value.GetProperty("head").GetString());
         Assert.Equal(backupTarget, row.After!.Value.GetProperty("head").GetString());
+    }
+
+    [Fact]
+    public async Task GetBackupRefsAndRestore_NewFormatBranch_ReturnsBranchAndBlocksCrossBranchRestore()
+    {
+        using var fixture = GitRemoteFixture.Create();
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await router.StartupRetention;
+        Assert.True((await DispatchAsync(router, "getSnapshot", null)).Ok);
+
+        var head = GitRemoteFixture.Head(fixture.CloneB);
+        var current = GitRemoteFixture.Branch(fixture.CloneB);
+        var stamp = DateTime.UtcNow.AddDays(-1).ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        var sameBranchRef = $"refs/backup/sync/{stamp}/{Uri.EscapeDataString(current)}/IMPL";
+        TestGit.Run(fixture.CloneB, "update-ref", sameBranchRef, head);
+        var otherBranchRef = $"refs/backup/sync/{stamp}/other-branch/IMPL";
+        TestGit.Run(fixture.CloneB, "update-ref", otherBranchRef, head);
+
+        var list = await DispatchAsync(router, "getBackupRefs", new
+        {
+            componentId = "CF100A_Demo",
+            repoType = "IMPL"
+        });
+        Assert.True(list.Ok, list.Error?.Code);
+        var refs = Assert.IsType<BackupRefsDto>(list.Data).Refs;
+        var sameBranch = Assert.Single(refs, reference => reference.Ref == sameBranchRef);
+        Assert.Equal(current, sameBranch.Branch);
+        Assert.Equal(BackupRefFormats.Branch, sameBranch.Format);
+        var otherBranch = Assert.Single(refs, reference => reference.Ref == otherBranchRef);
+        Assert.Equal("other-branch", otherBranch.Branch);
+
+        // 跨分支恢复：E_ACTION_NOT_ALLOWED 且零写（HEAD/备份 ref 不变、无私自创建安全备份 ref）。
+        var refsBefore = TestGit.Capture(fixture.CloneB, "for-each-ref", "--format=%(refname)", "refs/backup/");
+        var blocked = await DispatchAsync(router, "restoreBackupRef", new
+        {
+            componentId = "CF100A_Demo",
+            repoType = "IMPL",
+            @ref = otherBranchRef,
+            confirm = true
+        });
+        Assert.False(blocked.Ok);
+        Assert.Equal(BridgeErrorCodes.ActionNotAllowed, blocked.Error!.Code);
+        Assert.Equal("other-branch", blocked.Error.Details!["expected"] as string);
+        Assert.Equal(current, blocked.Error.Details!["current"] as string);
+        Assert.Equal(head, GitRemoteFixture.Head(fixture.CloneB));
+        Assert.Equal(refsBefore, TestGit.Capture(fixture.CloneB, "for-each-ref", "--format=%(refname)", "refs/backup/"));
+        Assert.Equal(string.Empty, TestGit.Capture(fixture.CloneB, "status", "--porcelain"));
     }
 
     [Fact]

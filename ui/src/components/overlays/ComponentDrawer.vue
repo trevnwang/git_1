@@ -253,6 +253,8 @@ function trapTab(event: KeyboardEvent): void {
                 :data-repo-type="item.repoType"
               >
                 <span class="mono truncate backup-ref-name" :title="item.ref">{{ item.ref }}</span>
+                <span v-if="item.branch" class="backup-branch" :title="`来源分支：${item.branch}（${item.format}）`">@{{ item.branch }}</span>
+                <span v-else class="backup-branch legacy" title="旧备份无分支身份；恢复前请确认当前分支">旧格式</span>
                 <span class="mono backup-sha" :title="item.sha">{{ shortSha(item.sha) }}</span>
                 <span class="muted backup-at" :title="item.createdAt">{{ formatStamp(item.createdAt) }}</span>
                 <button
@@ -473,6 +475,8 @@ function trapTab(event: KeyboardEvent): void {
 }
 .backup-row:last-child { border-bottom: 0; }
 .backup-ref-name { color: var(--text-2); }
+.backup-branch { font-size: 10px; color: var(--st-info-fg); max-width: 86px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.backup-branch.legacy { color: var(--text-2); }
 .backup-sha { color: var(--focus); }
 .backup-at { white-space: nowrap; }
 .backup-restore { height: 22px; padding: 0 6px; font-size: 10px; }

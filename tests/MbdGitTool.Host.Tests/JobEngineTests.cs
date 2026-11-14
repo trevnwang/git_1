@@ -582,6 +582,21 @@ public sealed class JobEngineTests
         Assert.True(item.BackupRef!.StartsWith(BatchOperationService.BackupRefPrefix, StringComparison.Ordinal), item.BackupRef);
         Assert.True(item.BackupRef!.EndsWith("/IMPL", StringComparison.Ordinal), item.BackupRef);
 
+        // M2b-2b（ADR D-026 P1-2）：备份 ref 携带来源分支身份 <ts>/<branch>/<TYPE>。
+        Assert.True(
+            BackupRefService.TryParseBackupRef(
+                item.BackupRef!,
+                out _,
+                out _,
+                out var backupBranch,
+                out var backupType,
+                out var backupFormat),
+            item.BackupRef);
+        Assert.Equal("main", backupBranch);
+        Assert.Equal("IMPL", backupType);
+        Assert.Equal(BackupRefFormats.Branch, backupFormat);
+        Assert.Contains("/main/IMPL", item.BackupRef!, StringComparison.Ordinal);
+
         // 备份 ref 指向 preHead（含本地未推送 commit）；HEAD 已 reset 到 origin/main。
         Assert.Equal(preHead, TestGit.Capture(fixture.CloneB, "rev-parse", item.BackupRef!));
         Assert.Equal(remoteHead, GitRemoteFixture.Head(fixture.CloneB));

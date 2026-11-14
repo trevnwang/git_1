@@ -27,7 +27,7 @@ public sealed record BatchItemResult(
 /// CLONE 的 PAT 仅经 URL 作用域 <c>http.&lt;base&gt;.extraHeader</c> 环境注入（不进 argv/日志/响应）；</para>
 /// <para>DELETE 只做 <c>Directory.Move</c> 到 <c>&lt;workspace&gt;\.trash\&lt;UTC yyyyMMddHHmmss&gt;\&lt;repoName&gt;</c>
 /// （跨卷回退复制+删除），禁止直接递归删除工作区仓库；SYNC 必须先成功创建
-/// <c>refs/backup/sync/&lt;stamp&gt;/&lt;repoType&gt;</c> 再 <c>reset --hard</c>（备份失败则不 reset）。</para>
+/// <c>refs/backup/sync/&lt;stamp&gt;/&lt;branch-encoded&gt;/&lt;repoType&gt;</c> 再 <c>reset --hard</c>（备份失败则不 reset）。</para>
 /// <para>方法不抛非取消异常：所有失败映射为 <see cref="BatchItemResult"/>；取消时抛
 /// <see cref="OperationCanceledException"/>（由 JobEngine 记 CANCELED/INTERRUPTED）。</para>
 /// </summary>
@@ -82,7 +82,7 @@ public sealed partial class BatchOperationService
     /// DIVERGED 默认阻断，需 <c>args.confirmText==componentId</c> 强确认；AHEAD/UNMERGED/IN_PROGRESS/INVALID/
     /// MISSING/EMPTY/DETACHED/NO_UPSTREAM/UNKNOWN 拒绝）；</para>
     /// <para><b>执行顺序</b>：CAS（快照 HEAD vs 磁盘 HEAD）→ <c>fetch --prune</c> → 远端分支存在 → fetch 后 HEAD
-    /// 未变（外部改动零写拒绝）→ 备份 <c>refs/backup/sync/&lt;stamp&gt;/&lt;repoType&gt;</c> → dirty 时 <c>stash -u</c> →
+    /// 未变（外部改动零写拒绝）→ 备份 <c>refs/backup/sync/&lt;stamp&gt;/&lt;branch&gt;/&lt;repoType&gt;</c> → dirty 时 <c>stash -u</c> →
     /// <c>reset --hard origin/&lt;branch&gt;</c>；任一步失败即停止且不 reset。备份 ref 创建失败 = item FAILED。</para>
     /// </summary>
     public async Task<BatchItemResult> SyncAsync(
@@ -207,9 +207,13 @@ public sealed partial class BatchOperationService
                 "仓库无 HEAD（空仓），无法创建备份 ref；已拒绝 reset");
         }
 
+        // M2b-2b（ADR D-026 P1-2）：ref 携带分支身份
+        // refs/backup/sync/<UTC yyyyMMddHHmmss>/<branch-encoded>/<TYPE>（分支安全编码；空/非法 → DETACHED）。
         var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
         var backupRef = BackupRefPrefix
             + stamp
+            + "/"
+            + BackupRefService.EncodeBranchSegment(branch)
             + "/"
             + (string.IsNullOrWhiteSpace(repo.Repo.RepoType) ? repoType : repo.Repo.RepoType).ToUpperInvariant();
         var updateRef = await _git
