@@ -1,36 +1,36 @@
 {
-  "commit": "527ab76",
-  "generatedAt": "2026-11-14T23:38:40.797Z",
+  "commit": "0f3a60f",
+  "generatedAt": "2026-11-14T23:40:05.823Z",
   "suite": [
     {
       "name": "cdp-m2a-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2a-selfcheck.mjs",
-      "startedAt": "2026-11-14T23:37:21.069Z",
-      "finishedAt": "2026-11-14T23:37:24.772Z",
+      "startedAt": "2026-11-14T23:38:45.532Z",
+      "finishedAt": "2026-11-14T23:38:49.231Z",
       "result": "PASS",
       "artifact": "artifacts/m2a-selfcheck/result.json"
     },
     {
       "name": "cdp-m2b1-fix-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2b1-fix-selfcheck.mjs",
-      "startedAt": "2026-11-14T23:37:24.772Z",
-      "finishedAt": "2026-11-14T23:37:55.528Z",
+      "startedAt": "2026-11-14T23:38:49.231Z",
+      "finishedAt": "2026-11-14T23:39:20.135Z",
       "result": "FAIL",
       "artifact": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
       "name": "cdp-m2b2-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2b2-selfcheck.mjs",
-      "startedAt": "2026-11-14T23:37:55.528Z",
-      "finishedAt": "2026-11-14T23:38:28.052Z",
+      "startedAt": "2026-11-14T23:39:20.135Z",
+      "finishedAt": "2026-11-14T23:39:53.075Z",
       "result": "PASS",
       "artifact": "artifacts/m2b2-selfcheck/result.json"
     },
     {
       "name": "cdp-m2b2-realhost-check.mjs",
       "command": "node ui/scripts/cdp-m2b2-realhost-check.mjs",
-      "startedAt": "2026-11-14T23:38:28.089Z",
-      "finishedAt": "2026-11-14T23:38:40.737Z",
+      "startedAt": "2026-11-14T23:39:53.113Z",
+      "finishedAt": "2026-11-14T23:40:05.767Z",
       "result": "PASS",
       "artifact": "artifacts/m2b2-realhost/result.json"
     }
