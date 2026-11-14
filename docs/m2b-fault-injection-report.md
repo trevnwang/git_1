@@ -14,14 +14,14 @@
 | 真机 reconcile（NOT_APPLIED） | 追加 STARTED 无 DONE → 重启 Host | 审计 `RECONCILE result=NOT_APPLIED`（历史 id=452，actor=journal-reconciler） | PASS（历史演练） |
 | 真机 reconcile（AFTER_WRITE/UNKNOWN_APPLIED） | 未演练 | — | GAP |
 | `GIT_NET_AUTH_401` | Debug 注入 GitCli 网络命令 | `Clone_NetAuth401Injection_ReturnsAuthFailed`：E_AUTH_FAILED | PASS |
-| `GIT_NET_404` | 已实现 GitCli 注入 | 无专项用例 | PARTIAL |
-| `GIT_NET_TIMEOUT` | 已实现 GitCli 注入 | 无专项用例 | PARTIAL |
+| `GIT_NET_404` | 已实现 GitCli 注入 | `Clone_NetInjection_ClassifiesError(404)` → E_REMOTE_NOT_FOUND | PASS |
+| `GIT_NET_TIMEOUT` | 已实现 GitCli 注入 | `Clone_NetInjection_ClassifiesError(timeout)` → E_NETWORK | PASS |
 | `DISK_SPACE_LOW` | Debug 注入 Clone 预检 | `Clone_DiskSpaceLowInjection_ReturnsDiskFull`：E_DISK_FULL、零目录 | PASS |
 | `GIT_SLOW`（取消确定性） | 已实现 2s delay（Debug） | 取消测试仍为通用用例 | PARTIAL |
 | `DISK_WRITE_FAIL` | 未实现 | — | GAP |
 | `CRASH_BEFORE_WRITE` / `CRASH_AFTER_WRITE` | 未实现真实注入 | — | GAP |
-| `G-WIRE-REST` | 未实现 WireMock 桩 | — | GAP |
-| `G-WIRE-GIT` | 未实现 git smart-HTTP 代理 | — | GAP |
+| `G-WIRE-REST` | 测试内 HttpListener Gitea REST 桩 | `Bind_UsesGiteaRestAndReportsMissingRepos`：两仓返回/缺仓 2；只记录 method/url/status | PASS |
+| `G-WIRE-GIT` | 测试内 git http-backend 代理 | `GWireGit_CloneThroughProxy...`：clone 成功、记录 GET smart-HTTP、不记录凭据 | PASS |
 
 ## 2. AC-SAFE 覆盖
 

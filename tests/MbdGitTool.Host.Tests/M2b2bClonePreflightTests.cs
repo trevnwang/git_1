@@ -41,6 +41,35 @@ public sealed class M2b2bClonePreflightTests
         }
     }
 
+    [Theory]
+    [InlineData("GIT_NET_404", "E_REMOTE_NOT_FOUND")]
+    [InlineData("GIT_NET_TIMEOUT", "E_NETWORK")]
+    public async Task Clone_NetInjection_ClassifiesError(string fault, string expectedCode)
+    {
+        using var workspace = new TempWorkspace();
+        var config = new AppConfig
+        {
+            WorkspaceRoot = workspace.Root,
+            AuditRoot = TestAudit.NewRoot(),
+            JobsRoot = TestAudit.NewJobsRoot(),
+            DatabasePath = TestAudit.NewDatabasePath(),
+            ExportsRoot = TestAudit.NewExportsRoot(),
+            GiteaBaseUrl = "https://example.test",
+            GiteaOrg = "RTCRepos",
+        };
+        var batch = new BatchOperationService(config, new RepoActionService(config: config), paths: new PathPolicy(workspace.Root));
+        Environment.SetEnvironmentVariable("MBD_FAULT_INJECT", fault);
+        try
+        {
+            var result = await batch.CloneAsync(null, "CF212A_Net", "IMPL", CancellationToken.None);
+            Assert.Equal(JobItemStates.Failed, result.State);
+            Assert.Equal(expectedCode, result.ErrorCode);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("MBD_FAULT_INJECT", null);
+        }
+    }
     [Fact]
     public async Task Clone_NetAuth401Injection_ReturnsAuthFailed()
     {
