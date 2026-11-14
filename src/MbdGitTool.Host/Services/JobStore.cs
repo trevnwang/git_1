@@ -218,4 +218,5 @@ public sealed record StoredJobArguments(
     string? TrashStamp,
     string? ConfirmText = null,
     bool CleanUntracked = false,
-    string? Mode = null);
+    string? Mode = null,
+    string? SourceJobId = null);

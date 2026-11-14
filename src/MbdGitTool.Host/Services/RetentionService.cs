@@ -1,5 +1,7 @@
 using System;
 using System.Diagnostics;
+using System.Globalization;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using MbdGitTool.Core.Contracts;
@@ -49,6 +51,7 @@ public sealed class RetentionService
 
         var trashRemoved = CleanupTrash();
         var deletePendingRemoved = new DeletePendingService(_config).CleanupExpired(TrashRetentionDays);
+        var createBaselinesRemoved = await CleanupCreateBaselinesAsync(cancellationToken).ConfigureAwait(false);
         var backupRefsRemoved = 0;
         try
         {
@@ -79,7 +82,7 @@ public sealed class RetentionService
             WorkspaceAvailable: _config.HasWorkspace);
 
         HostLog.Info(
-            $"保留清理完成：trash={trashRemoved}/pending={deletePendingRemoved}（{TrashRetentionDays} 天）backupRefs={backupRefsRemoved}"
+            $"保留清理完成：trash={trashRemoved}/pending={deletePendingRemoved}/createBaselines={createBaselinesRemoved}（{TrashRetentionDays} 天）backupRefs={backupRefsRemoved}"
             + $"（{_config.EffectiveBackupRetentionDays} 天）auditDb={auditRowsRemoved}/jsonl={auditJsonlRowsRemoved}"
             + $"（{_config.EffectiveAuditRetentionDays} 天）ms={stopwatch.ElapsedMilliseconds}");
 
@@ -103,6 +106,37 @@ public sealed class RetentionService
         return result;
     }
 
+    /// <summary>AC-OP-25：清理 30 天前的 refs/baseline/create/*（仅本地，不触远端）。</summary>
+    private async Task<int> CleanupCreateBaselinesAsync(CancellationToken cancellationToken)
+    {
+        if (!_config.HasWorkspace) return 0;
+        var root = _config.WorkspaceRoot!;
+        var cutoff = DateTime.UtcNow.AddDays(-TrashRetentionDays);
+        var git = new GitCli();
+        var removed = 0;
+        try
+        {
+            foreach (var repo in Directory.EnumerateDirectories(root))
+            {
+                if (!Directory.Exists(Path.Combine(repo, ".git"))) continue;
+                var refs = await git.RunAsync(repo, new[] { "for-each-ref", "--format=%(refname)", "refs/baseline/create" }, cancellationToken).ConfigureAwait(false);
+                if (!refs.Success) continue;
+                foreach (var reference in refs.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    var parts = reference.Split('/');
+                    if (parts.Length < 5 || !DateTime.TryParseExact(parts[3], "yyyyMMddHHmmss", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var stamp)) continue;
+                    if (stamp > cutoff) continue;
+                    var delete = await git.RunAsync(repo, new[] { "update-ref", "-d", reference }, cancellationToken, TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+                    if (delete.Success) removed++;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            HostLog.Warn($"CREATE 基线 ref 清理失败（{ex.GetType().Name}）");
+        }
+        return removed;
+    }
     private int CleanupTrash()
     {
         if (!_config.HasWorkspace)

@@ -49,14 +49,14 @@ public sealed class JobEngine : IDisposable
     /// <summary>允许的批量 kind（SRS §8.1 job.kind CHECK 子集；REPAIR 等修复类不在本轮实现）。</summary>
     private static readonly string[] KindWhitelist =
     {
-        "FETCH", "PULL", "CHKOUT", "COMMIT", "PUSH", "SYNC", "CLONE", "DELETE", "RESTORE", "CREATE", "TAG", "REPAIR", "RECLONE", "FIX_UPSTREAM", "FIX_DETACHED"
+        "FETCH", "PULL", "CHKOUT", "COMMIT", "PUSH", "SYNC", "CLONE", "DELETE", "RESTORE", "CREATE", "TAG", "REPAIR", "RECLONE", "FIX_UPSTREAM", "FIX_DETACHED", "CREATE_UNDO"
     };
 
     /// <summary>单仓五键（复用 <see cref="RepoActionService"/> 的矩阵/确认/工具链）。</summary>
     private static readonly string[] RepoActionKinds = { "FETCH", "PULL", "CHKOUT", "COMMIT", "PUSH" };
 
     /// <summary>必须 <c>args.confirm=true</c> 才执行的“强写”kind（批量入口 UI 二次确认 + Host 门禁双保险）。</summary>
-    private static readonly string[] ConfirmRequiredKinds = { "COMMIT", "PUSH", "SYNC", "DELETE", "RESTORE", "CREATE", "TAG", "REPAIR", "RECLONE", "FIX_UPSTREAM", "FIX_DETACHED", "FIX_UPSTREAM", "FIX_DETACHED" };
+    private static readonly string[] ConfirmRequiredKinds = { "COMMIT", "PUSH", "SYNC", "DELETE", "RESTORE", "CREATE", "TAG", "REPAIR", "RECLONE", "FIX_UPSTREAM", "FIX_DETACHED", "CREATE_UNDO", "FIX_UPSTREAM", "FIX_DETACHED" };
 
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
@@ -192,6 +192,38 @@ public sealed class JobEngine : IDisposable
         return CommandResult.Success(new RunBatchResultDto(job.Id, true, job.Items.Count, preSkipped));
     }
 
+    /// <summary>AC-OP-25：把 CREATE 作业的撤销提交为 CREATE_UNDO job（任务中心可见、可取消/审计）。</summary>
+    public CommandResult RunCreateUndo(string? sourceJobId)
+    {
+        EnsureLoaded();
+        var id = sourceJobId?.Trim();
+        if (string.IsNullOrWhiteSpace(id)) return CommandResult.Failure(BridgeErrorCodes.InvalidArgument, "缺少 jobId");
+        JobRecord? original;
+        lock (_sync) original = FindJobUnsafe(id);
+        if (original is null) return CommandResult.Failure(BridgeErrorCodes.JobNotFound, "作业不存在");
+        if (!string.Equals(original.Kind, "CREATE", StringComparison.Ordinal))
+            return CommandResult.Failure(BridgeErrorCodes.ActionNotAllowed, "只有 CREATE 作业可撤销");
+        var branch = original.Arguments.Branch;
+        if (string.IsNullOrWhiteSpace(branch)) return CommandResult.Failure(BridgeErrorCodes.InvalidArgument, "原 CREATE 作业缺少分支名");
+        var items = original.Items
+            .Where(item => item.State == JobItemStates.Ok && !string.IsNullOrWhiteSpace(item.BaselineRef))
+            .Select(item => new JobItemRecord
+            {
+                Id = string.Empty,
+                ComponentId = item.ComponentId,
+                RepoType = item.RepoType,
+                RepoName = item.RepoName,
+                State = JobItemStates.Pending,
+                BaselineRef = item.BaselineRef
+            })
+            .ToList();
+        if (items.Count == 0) return CommandResult.Failure(BridgeErrorCodes.ActionNotAllowed, "原 CREATE 作业没有可撤销的已创建分支");
+        var arguments = new StoredJobArguments(branch, null, null, true, false, false, false, false, false, null, null, false, null, original.Id);
+        var job = CreateJob("CREATE_UNDO", arguments, items, Environment.UserName, Guid.NewGuid().ToString("N"));
+        Enqueue(job);
+        Publish(job);
+        return CommandResult.Success(new RunBatchResultDto(job.Id, true, job.Items.Count, 0));
+    }
     /// <summary><c>getJobs</c>：返回最近作业（创建时间倒序，limit 默认 50 / 上限 200）。</summary>
     public CommandResult GetJobs(GetJobsParams parameters)
     {
@@ -809,6 +841,7 @@ public sealed class JobEngine : IDisposable
                 "RECLONE" => await _batch.RecloneAsync(repo, item.ComponentId, item.RepoType, arguments, cancellationToken).ConfigureAwait(false),
                 "FIX_UPSTREAM" => await _batch.FixUpstreamAsync(repo, item.RepoType, arguments, cancellationToken).ConfigureAwait(false),
                 "FIX_DETACHED" => await _batch.FixDetachedAsync(repo, item.RepoType, arguments, cancellationToken).ConfigureAwait(false),
+                "CREATE_UNDO" => await UndoCreateItemAsync(repo, item, arguments, cancellationToken).ConfigureAwait(false),
                 _ => new BatchItemResult(
                     JobItemStates.Failed,
                     BridgeErrorCodes.InvalidArgument,
@@ -843,6 +876,23 @@ public sealed class JobEngine : IDisposable
         }
     }
 
+    private async Task<BatchItemResult> UndoCreateItemAsync(
+        RepoRef? repo,
+        JobItemRecord item,
+        StoredJobArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        var path = repo?.Repo.LocalPath;
+        if (string.IsNullOrWhiteSpace(path) && _paths is not null)
+        {
+            var name = BatchOperationService.RepoNameFor(repo, item.ComponentId, item.RepoType);
+            if (_paths.TryResolveWorkspacePath(name, out var full, out _)) path = full;
+        }
+        if (string.IsNullOrWhiteSpace(path)) return new BatchItemResult(JobItemStates.Failed, BridgeErrorCodes.PathInvalid, "本地仓库不存在，无法撤销");
+        if (string.IsNullOrWhiteSpace(item.BaselineRef)) return new BatchItemResult(JobItemStates.Failed, BridgeErrorCodes.InvalidArgument, "缺少 baseline_ref");
+        if (string.IsNullOrWhiteSpace(arguments.Branch)) return new BatchItemResult(JobItemStates.Failed, BridgeErrorCodes.InvalidArgument, "缺少分支名");
+        return await _batch.UndoCreateAsync(path!, arguments.Branch!, item.BaselineRef!, cancellationToken).ConfigureAwait(false);
+    }
     /// <summary>批次 kind 的写前 HEAD（只读；仓不存在/未克隆返回 null = 无 HEAD 可比较）。</summary>
     private async Task<string?> ReadJournalHeadAsync(RepoRef? repo, CancellationToken cancellationToken)
     {

@@ -436,40 +436,7 @@ public sealed class HostCommandRouter : IDisposable
             case "undoCreate":
             {
                 var parsedUndo = ParseParams<UndoCreateParams>(parameters);
-                var jobId = parsedUndo.JobId?.Trim();
-                if (string.IsNullOrWhiteSpace(jobId))
-                    return CommandResult.Failure(BridgeErrorCodes.InvalidArgument, "缺少 jobId");
-                var storedJob = _jobStore.Load().FirstOrDefault(job => string.Equals(job.Id, jobId, StringComparison.Ordinal));
-                if (storedJob is null) return CommandResult.Failure(BridgeErrorCodes.JobNotFound, "作业不存在");
-                if (!string.Equals(storedJob.Kind, "CREATE", StringComparison.Ordinal))
-                    return CommandResult.Failure(BridgeErrorCodes.ActionNotAllowed, "只有 CREATE 作业可撤销");
-                var branch = storedJob.Arguments?.Branch;
-                if (string.IsNullOrWhiteSpace(branch)) return CommandResult.Failure(BridgeErrorCodes.InvalidArgument, "原 CREATE 作业缺少分支名");
-                var batch = new BatchOperationService(_snapshots.Config, new RepoActionService(config: _snapshots.Config));
-                var results = new List<object>();
-                foreach (var item in storedJob.Items)
-                {
-                    var baselineRef = item.BaselineRef;
-                    if (string.IsNullOrWhiteSpace(baselineRef))
-                    {
-                        var match = System.Text.RegularExpressions.Regex.Match(item.Message ?? string.Empty, @"基线\s+(refs/baseline/create/\S+)");
-                        baselineRef = match.Success ? match.Groups[1].Value : null;
-                    }
-                    if (string.IsNullOrWhiteSpace(baselineRef)) { results.Add(new { item.ComponentId, item.RepoType, state = "SKIPPED", message = "缺少基线 ref，无法撤销" }); continue; }
-                    var undoPath = Path.Combine(_snapshots.Config.WorkspaceRoot ?? string.Empty, item.ComponentId + "_" + item.RepoType);
-                    if (!Directory.Exists(undoPath))
-                    { results.Add(new { item.ComponentId, item.RepoType, state = "SKIPPED", message = "本地仓库不存在" }); continue; }
-                    var journalEntry = _journal?.Begin("CREATE_UNDO", item.ComponentId, item.RepoType, null, undoPath, jobId, null);
-                    var result = await batch.UndoCreateAsync(undoPath, branch!, baselineRef, cancellationToken).ConfigureAwait(false);
-                    if (result.State == JobItemStates.Ok) _journal?.Complete(journalEntry, result.PostHead);
-                    else _journal?.Fail(journalEntry, result.ErrorCode);
-                    _audit.Record("CREATE_UNDO", item.ComponentId, item.RepoType, null, null,
-                        result.PostHead, ok: result.State == JobItemStates.Ok, result.ErrorCode, 0,
-                        actor: Environment.UserName, requestId: Guid.NewGuid().ToString("N"), jobId: jobId,
-                        result: result.State);
-                    results.Add(new { item.ComponentId, item.RepoType, state = result.State, message = result.Message });
-                }
-                return CommandResult.Success(new { jobId, branch, results });
+                return _jobs.RunCreateUndo(parsedUndo.JobId);
             }
             case "getComponentManagement":
                 return CommandResult.Success(new { items = _management.List() });

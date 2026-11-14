@@ -1001,6 +1001,11 @@ export const JOB_KIND_LABEL: Record<string, string> = {
   CHKOUT: '批量 CHKOUT',
   COMMIT: '批量 COMMIT',
   PUSH: '批量 PUSH',
+  REPAIR: '修复仓库',
+  RECLONE: 'Re-clone',
+  FIX_UPSTREAM: '修复 upstream',
+  FIX_DETACHED: 'Detached 建分支',
+  CREATE_UNDO: '撤销创建',
 }
 
 export function jobKindLabel(kind: string): string {

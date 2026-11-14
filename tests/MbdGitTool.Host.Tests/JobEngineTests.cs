@@ -1476,6 +1476,10 @@ public sealed class JobEngineTests
 
         var undo = await DispatchAsync(router, "undoCreate", new { jobId = accepted.JobId });
         Assert.True(undo.Ok, undo.Error?.Code);
+        var undoAccepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(undo).Data);
+        var undoJob = await WaitJobAsync(router, undoAccepted.JobId);
+        Assert.Equal("SUCCESS", undoJob.State);
+        Assert.Equal("CREATE_UNDO", undoJob.Kind);
         Assert.All(fixture.Clones.Values, clone =>
         {
             var verify = TestGit.Capture(clone, "for-each-ref", "--format=%(refname)", "refs/heads/release/undo");
