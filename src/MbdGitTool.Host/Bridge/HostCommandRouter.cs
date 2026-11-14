@@ -34,6 +34,7 @@ public sealed class HostCommandRouter : IDisposable
     ["bindComponent"] = TimeSpan.FromSeconds(45),
     ["unbindComponent"] = TimeSpan.FromSeconds(10),
     ["getComponentManagement"] = TimeSpan.FromSeconds(5),
+    ["undoCreate"] = TimeSpan.FromSeconds(60),
             ["refresh"] = TimeSpan.FromSeconds(120),
             ["getComponentDetail"] = TimeSpan.FromSeconds(45),
             ["getRepoDetail"] = TimeSpan.FromSeconds(10),
@@ -75,6 +76,7 @@ public sealed class HostCommandRouter : IDisposable
     private readonly BackupRefService _backup;
     private readonly RetentionService _retention;
     private readonly ComponentManagementService _management;
+    private readonly JobStore _jobStore;
     private readonly RemoteRefsService _remoteRefs;
     private readonly ComponentDetailService _componentDetail;
     private readonly RepoDetailService _repoDetail;
@@ -115,6 +117,7 @@ public sealed class HostCommandRouter : IDisposable
         // M2b-2：本地保留清理（.trash 30 天 / 备份 ref backup.retentionDays / 审计 auditRetentionDays）。
         _retention = new RetentionService(_snapshots.Config, _audit, _backup);
         _management = new ComponentManagementService(_snapshots.Config);
+        _jobStore = new JobStore(_snapshots.Config);
 
         // 启动保留清理：后台执行，避免阻塞 Host 首屏（命令 cleanupRetention 可同步触发）。
         StartupRetention = Task.Run(async () =>
@@ -383,6 +386,36 @@ public sealed class HostCommandRouter : IDisposable
                 return CommandResult.Success(new { componentId, mode = "STOP_MANAGE", isManaged = false, isDeleted = false });
             }
 
+            case "undoCreate":
+            {
+                var parsedUndo = ParseParams<UndoCreateParams>(parameters);
+                var jobId = parsedUndo.JobId?.Trim();
+                if (string.IsNullOrWhiteSpace(jobId))
+                    return CommandResult.Failure(BridgeErrorCodes.InvalidArgument, "缺少 jobId");
+                var storedJob = _jobStore.Load().FirstOrDefault(job => string.Equals(job.Id, jobId, StringComparison.Ordinal));
+                if (storedJob is null) return CommandResult.Failure(BridgeErrorCodes.JobNotFound, "作业不存在");
+                if (!string.Equals(storedJob.Kind, "CREATE", StringComparison.Ordinal))
+                    return CommandResult.Failure(BridgeErrorCodes.ActionNotAllowed, "只有 CREATE 作业可撤销");
+                var branch = storedJob.Arguments?.Branch;
+                if (string.IsNullOrWhiteSpace(branch)) return CommandResult.Failure(BridgeErrorCodes.InvalidArgument, "原 CREATE 作业缺少分支名");
+                var batch = new BatchOperationService(_snapshots.Config, new RepoActionService(config: _snapshots.Config));
+                var results = new List<object>();
+                foreach (var item in storedJob.Items)
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(item.Message ?? string.Empty, @"基线\s+(refs/baseline/create/\S+)");
+                    if (!match.Success) { results.Add(new { item.ComponentId, item.RepoType, state = "SKIPPED", message = "缺少基线 ref，无法撤销" }); continue; }
+                    var undoPath = Path.Combine(_snapshots.Config.WorkspaceRoot ?? string.Empty, item.ComponentId + "_" + item.RepoType);
+                    if (!Directory.Exists(undoPath))
+                    { results.Add(new { item.ComponentId, item.RepoType, state = "SKIPPED", message = "本地仓库不存在" }); continue; }
+                    var result = await batch.UndoCreateAsync(undoPath, branch!, match.Groups[1].Value, cancellationToken).ConfigureAwait(false);
+                    _audit.Record("CREATE_UNDO", item.ComponentId, item.RepoType, null, null,
+                        result.PostHead, ok: result.State == JobItemStates.Ok, result.ErrorCode, 0,
+                        actor: Environment.UserName, requestId: Guid.NewGuid().ToString("N"), jobId: jobId,
+                        result: result.State);
+                    results.Add(new { item.ComponentId, item.RepoType, state = result.State, message = result.Message });
+                }
+                return CommandResult.Success(new { jobId, branch, results });
+            }
             case "getComponentManagement":
                 return CommandResult.Success(new { items = _management.List() });
             case "getHostInfo":

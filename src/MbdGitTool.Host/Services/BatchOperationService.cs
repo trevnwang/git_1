@@ -419,6 +419,27 @@ public sealed partial class BatchOperationService
             null);
     }
 
+    /// <summary>AC-OP-25：撤销本 job 创建的分支（仅本地，需要 baseline ref 仍指向分支）。</summary>
+    public async Task<BatchItemResult> UndoCreateAsync(
+        string localPath,
+        string branch,
+        string baselineRef,
+        CancellationToken cancellationToken)
+    {
+        var branchRef = "refs/heads/" + branch;
+        var branchSha = await _git.RunAsync(localPath, new[] { "rev-parse", "--verify", "--quiet", branchRef }, cancellationToken).ConfigureAwait(false);
+        if (!branchSha.Success || branchSha.TrimmedStdout.Length == 0)
+            return Skip(BridgeErrorCodes.RefNotFound, $"分支不存在，无法撤销：{branch}");
+        var baselineSha = await _git.RunAsync(localPath, new[] { "rev-parse", "--verify", "--quiet", baselineRef }, cancellationToken).ConfigureAwait(false);
+        if (!baselineSha.Success || !string.Equals(branchSha.TrimmedStdout, baselineSha.TrimmedStdout, StringComparison.OrdinalIgnoreCase))
+            return Skip(BridgeErrorCodes.ActionNotAllowed, $"分支 {branch} 已移动/有新提交，拒绝撤销");
+        var current = await _git.RunAsync(localPath, new[] { "rev-parse", "--abbrev-ref", "HEAD" }, cancellationToken).ConfigureAwait(false);
+        if (current.Success && string.Equals(current.TrimmedStdout, branch, StringComparison.Ordinal))
+            return Skip(BridgeErrorCodes.ActionNotAllowed, $"分支 {branch} 当前被检出，拒绝撤销");
+        var delete = await _git.RunAsync(localPath, new[] { "branch", "-D", branch }, cancellationToken, WriteTimeout).ConfigureAwait(false);
+        if (!delete.Success) return MapGitFailure("CREATE_UNDO", delete, cancellationToken);
+        return new BatchItemResult(JobItemStates.Ok, null, $"已撤销创建的分支 {branch}（仅本地）；基线 {baselineRef}", null, null, null);
+    }
     // ---------------------------------------------------------------- REPAIR / RECLONE
 
     /// <summary>AC-REPO-08 / AC-OP-05：非 git 目录修复或 origin 不匹配时 Re-clone。</summary>

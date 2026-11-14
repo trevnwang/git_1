@@ -15,6 +15,9 @@ public sealed record BindComponentParams(string? ComponentId = null, string? Dis
 /// <summary>M2b 组件移出参数（AC-OP-32）。</summary>
 public sealed record UnbindComponentParams(string? ComponentId = null, string? Mode = null);
 
+/// <summary>M2b CREATE 撤销参数（AC-OP-25）。</summary>
+public sealed record UndoCreateParams(string? JobId = null);
+
 public sealed record GetRepoDetailParams(string? ComponentId = null, string? RepoType = null);
 
 public sealed record GetCommitsParams(

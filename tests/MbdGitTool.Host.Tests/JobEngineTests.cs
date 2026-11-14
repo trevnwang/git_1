@@ -1427,6 +1427,35 @@ public sealed class JobEngineTests
         Assert.Empty(Directory.GetFiles(pending, "*-CF207A_Pending_IMPL.json"));
     }
     [Fact]
+    public async Task RunBatch_Create_UndoRemovesCreatedBranches()
+    {
+        using var fixture = BatchWorkspace.Create("CF209A_Undo_IMPL", "CF209A_Undo_SIL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var create = await DispatchAsync(router, "runBatch", new
+        {
+            kind = "CREATE",
+            componentIds = new[] { "CF209A_Undo" },
+            repoTypes = new[] { "IMPL", "SIL" },
+            args = new { branch = "release/undo", confirm = true }
+        });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(create).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+        Assert.Equal("SUCCESS", job.State);
+        Assert.All(fixture.Clones.Values, clone => Assert.Equal("release/undo", TestGit.Capture(clone, "rev-parse", "--abbrev-ref", "refs/heads/release/undo")));
+
+        var undo = await DispatchAsync(router, "undoCreate", new { jobId = accepted.JobId });
+        Assert.True(undo.Ok, undo.Error?.Code);
+        Assert.All(fixture.Clones.Values, clone =>
+        {
+            var verify = TestGit.Capture(clone, "for-each-ref", "--format=%(refname)", "refs/heads/release/undo");
+            Assert.Equal(string.Empty, verify);
+        });
+    }
+    [Fact]
     public async Task ComponentManagement_StopManage_FiltersSnapshotAndListsState()
     {
         using var fixture = BatchWorkspace.Create("CF208A_Mgmt_IMPL");
