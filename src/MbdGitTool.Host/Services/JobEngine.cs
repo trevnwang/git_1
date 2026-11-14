@@ -1635,6 +1635,12 @@ public sealed class JobEngine : IDisposable
             return error;
         }
 
+        error = ReadBool(raw, "cleanUntracked", out var cleanUntracked);
+        if (error is not null)
+        {
+            return error;
+        }
+
         arguments = new StoredJobArguments(
             branch,
             tag,
@@ -1646,7 +1652,8 @@ public sealed class JobEngine : IDisposable
             stash,
             stageAll,
             trashStamp,
-            confirmText);
+            confirmText,
+            cleanUntracked);
         return null;
     }
 

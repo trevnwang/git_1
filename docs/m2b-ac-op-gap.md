@@ -1,7 +1,7 @@
 # M2b AC-OP 全量证据矩阵（截至 m2b-2b / 2026-11-14）
 
 > 用途：M2b final 的逐条验收台账。状态：**COVERED**=有自动化/真实证据；**PARTIAL**=有实现/部分用例但缺 AC 指定断言；**GAP**=未实现或无从验证。
-> 当前结论：**M2b 未完成**；`m2b-2b` 只是阶段 tag。测试基线 395/395；真机 reconcile NOT_APPLIED 已验证。证据来源：`tests/MbdGitTool.Host.Tests`、`ui/scripts/cdp-*.mjs`、`docs/m2b*.md`。
+> 当前结论：**M2b 未完成**；`m2b-2b` 只是阶段 tag。测试基线 397/397；真机 reconcile NOT_APPLIED 已验证。证据来源：`tests/MbdGitTool.Host.Tests`、`ui/scripts/cdp-*.mjs`、`docs/m2b*.md`。
 
 | AC | 主题 | 状态 | 现有证据 | 缺口/下一步 |
 |---|---|---|---|---|
@@ -20,16 +20,16 @@
 | AC-OP-13 | Tag 被移动 fetch --force + 告警 | PARTIAL | 已实现 `fetch --force origin tag`、旧/新 SHA 比较并输出 tag_moved | 专项移动 tag 用例 |
 | AC-OP-14 | annotated tag `^{commit}`/tag_present | PARTIAL | `^{commit}` 解引用并 checkout；`RunBatch_Tag_AnnotatedTag...` | tag_present 字段/DB 记录 |
 | AC-OP-15 | SYNC BEHIND/DIRTY：备份→stash→确认→reset | COVERED | `RunBatch_Sync_Diverged...`、`DryRun_Sync...` | LFS pull 未覆盖 |
-| AC-OP-16 | SYNC DIVERGED 丢失清单/typed confirm/可恢复 | PARTIAL | `Sync_Diverged_DefaultBlocked...`、backup ref 恢复 | dry-run 表四字段逐项断言 |
+| AC-OP-16 | SYNC DIVERGED 丢失清单/typed confirm/可恢复 | COVERED | `SyncPreview_Diverged_ShowsLossListFields`：未推送 commit 列表/untracked 列表/stash 条数/影响仓；typed confirm、备份 ref 恢复已有用例 | 四仓聚合展示（当前逐仓 message） |
 | AC-OP-17 | SYNC 跳过表 UNMERGED/IN_PROGRESS/… | COVERED | `Sync_Preflight_MatrixBlockedStates...`、单源矩阵 | — |
-| AC-OP-18 | SYNC untracked 默认保留/显式删除 dry-run | PARTIAL | stash -u/untracked 保护测试 | 显式删除入口未实现 |
+| AC-OP-18 | SYNC untracked 默认保留/显式删除 dry-run | PARTIAL | 默认 stash -u 保留；`cleanUntracked` 显式清理需输入组件 ID 强确认（`Sync_Untracked...`）；dry-run 列出 untracked | UI 勾选项未接 |
 | AC-OP-19 | 拒绝覆盖本地独有分支/UPSTREAM_GONE | GAP | 无 | 分支/上游场景 |
 | AC-OP-20 | 删除到 `.trash` 30 天可恢复/realpath | COVERED | `RunBatch_DeleteMovesToTrash_AndRestoreRoundTrips` | — |
 | AC-OP-21 | 删除预检四项阻断 | COVERED | `Delete_Preflight_DirtyUntrackedAheadStash...` | — |
 | AC-OP-22 | `.trash` 保留可配 + 清理 + 扫描排除 | COVERED | `RetentionService_...`、`CleanupExpired...` | 扫描排除断言 |
 | AC-OP-23 | 占用文件 DELETE_PENDING 保留 | GAP | 无 | Windows 占用场景 |
-| AC-OP-24 | CREATE dry-run 字段 + check-ref-format | PARTIAL | `RunBatch_ValidationErrors` | dry-run 表逐字段 |
-| AC-OP-25 | CREATE 逐仓/重名预览/撤销/基线 ref | PARTIAL | `RunBatch_CreateBranchAndTag...` | 撤销已创建、基线 ref |
+| AC-OP-24 | CREATE dry-run 字段 + check-ref-format | PARTIAL | dry-run 输出目标分支/本地重名/远程存在/基线 HEAD/非法名提示；`RunBatch_CreateBranchAndTag...` 断言 | 各仓状态/超前落后完整表 |
+| AC-OP-25 | CREATE 逐仓/重名预览/撤销/基线 ref | PARTIAL | 创建基线 `refs/baseline/create/<ts>/<branch>/<TYPE>` 并测试；重名 SKIPPED | “撤销已创建分支”入口/API |
 | AC-OP-26 | 任务中心队列/持久化/重试/重启不重复 | COVERED | `JobEngineTests`、`M2b-1 selfcheck 68/68` | — |
 | AC-OP-27 | 合作式取消/CANCELLED/未开始原状/重扫 | COVERED | `Cancel_*`、M2b-1 realhost | — |
 | AC-OP-28 | 审计字段/查询/导出/90 天 | COVERED | `M2b2RouterApiTests`、`M2b2bAuditJournalTests`、realhost | 故障注入证据 |

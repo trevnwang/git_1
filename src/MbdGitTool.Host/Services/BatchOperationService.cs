@@ -236,6 +236,33 @@ public sealed partial class BatchOperationService
             return MapGitFailure("SYNC", status, cancellationToken);
         }
 
+        var untrackedCount = status.Stdout
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Count(line => line.StartsWith("?? ", StringComparison.Ordinal));
+        string? cleanNote = null;
+        if (arguments.CleanUntracked && untrackedCount > 0)
+        {
+            if (!MatchesTypedConfirm(arguments.ConfirmText, componentId))
+            {
+                return Skip(
+                    BridgeErrorCodes.ConfirmRequired,
+                    $"SYNC 清理未跟踪文件需输入组件 ID「{componentId.Trim()}」强确认（dry-run 已列出 {untrackedCount} 项）；"
+                    + "未确认不删除任何文件");
+            }
+
+            var clean = await _git
+                .RunAsync(localPath, new[] { "clean", "-fd" }, cancellationToken, WriteTimeout)
+                .ConfigureAwait(false);
+            if (!clean.Success)
+            {
+                return Failed(
+                    BridgeErrorCodes.GitFailed,
+                    "清理未跟踪文件失败；已拒绝 reset（备份 ref " + backupRef + " 保留）");
+            }
+
+            cleanNote = $"；已按确认清理 {untrackedCount} 个未跟踪项";
+        }
+
         if (status.Stdout.Trim().Length > 0)
         {
             var stash = await _git
@@ -266,7 +293,8 @@ public sealed partial class BatchOperationService
 
         var postHead = await ReadHeadAsync(localPath, cancellationToken).ConfigureAwait(false) ?? preHead;
         var message = $"SYNC 完成（{branch} → origin/{branch}）；备份 {backupRef}"
-            + (stashRef is null ? string.Empty : "；本地改动已 stash（" + stashRef + "）");
+            + (stashRef is null ? string.Empty : "；本地改动已 stash（" + stashRef + "）")
+            + (cleanNote ?? string.Empty);
         HostLog.Info($"job SYNC {repo.ComponentId}/{RepoTypeOf(repo, repoType)} ok=true backup={backupRef}");
         return new BatchItemResult(JobItemStates.Ok, null, message, preHead, postHead, backupRef);
     }
@@ -641,11 +669,7 @@ public sealed partial class BatchOperationService
                         notes.Add($"本地改动 {dirty} 项 / 未跟踪 {untracked} 项将 stash -u（备份 ref 保留）");
                     }
 
-                    var unpushed = await CountUnpushedAsync(localPath, cancellationToken).ConfigureAwait(false);
-                    if (unpushed is not null)
-                    {
-                        notes.Add($"未推送提交 {unpushed} 个");
-                    }
+                    notes.AddRange(await BuildSyncLossNotesAsync(localPath, repo.Repo.Branch, cancellationToken).ConfigureAwait(false));
                 }
 
                 break;
@@ -707,13 +731,37 @@ public sealed partial class BatchOperationService
             }
 
             case "CREATE":
+            {
+                var branchName = arguments.Branch;
+                if (branchName is null)
+                {
+                    notes.Add("缺少 branch 参数");
+                    break;
+                }
+
+                notes.Add($"目标分支：refs/heads/{branchName}");
+                var localBranch = await _git
+                    .RunAsync(localPath!, new[] { "rev-parse", "--verify", "--quiet", "refs/heads/" + branchName }, cancellationToken)
+                    .ConfigureAwait(false);
+                notes.Add(localBranch.Success
+                    ? "本地重名：是 → 实际执行 SKIPPED（已存在不覆盖）"
+                    : "本地重名：否");
+                var remoteBranch = await _git
+                    .RunAsync(localPath!, new[] { "rev-parse", "--verify", "--quiet", "refs/remotes/origin/" + branchName }, cancellationToken)
+                    .ConfigureAwait(false);
+                notes.Add(remoteBranch.Success ? "远程存在：是（可能落后/领先）" : "远程存在：否");
+                var headForCreate = await ReadHeadAsync(localPath!, cancellationToken).ConfigureAwait(false);
+                notes.Add("基线 HEAD：" + (headForCreate ?? "<unborn>"));
+                notes.Add("非法分支名将由 git check-ref-format 在执行前拒绝");
+                break;
+            }
+
             case "TAG":
             {
-                var refType = kind == "CREATE" ? "refs/heads/" : "refs/tags/";
-                var refName = kind == "CREATE" ? arguments.Branch : arguments.Tag;
-                notes.Add(refName is null
-                    ? $"缺少 {(kind == "CREATE" ? "branch" : "tag")} 参数"
-                    : $"将写入 {refType}{refName}（已存在则 SKIPPED）");
+                var tagName = arguments.Tag;
+                notes.Add(tagName is null
+                    ? "缺少 tag 参数"
+                    : $"将切 Tag refs/tags/{tagName}（remote 不存在则 SKIPPED + TAG_DRIFT）");
                 break;
             }
 
@@ -972,10 +1020,22 @@ public sealed partial class BatchOperationService
             return MapGitFailure("CREATE", create, cancellationToken);
         }
 
+        // AC-OP-25：记录创建基线 ref（可审计/可撤销依据），仅本地。
+        var baselineStamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        var branchSegment = BackupRefService.EncodeBranchSegment(branch);
+        var baselineRef = "refs/baseline/create/" + baselineStamp + "/" + branchSegment + "/"
+            + repoType.ToUpperInvariant();
+        var baseline = await _git
+            .RunAsync(local.Path!, new[] { "update-ref", baselineRef, preHead }, cancellationToken, WriteTimeout)
+            .ConfigureAwait(false);
+        var baselineNote = baseline.Success
+            ? $"；基线 {baselineRef}"
+            : "；基线 ref 记录失败（分支已创建，可人工补记）";
+
         return new BatchItemResult(
             JobItemStates.Ok,
             null,
-            $"已从当前 HEAD 创建分支 {branch}（未切换）",
+            $"已从当前 HEAD 创建分支 {branch}（未切换）" + baselineNote,
             preHead,
             preHead,
             null);
@@ -1098,6 +1158,51 @@ public sealed partial class BatchOperationService
         return Failed(
             code,
             $"CLONE 远端预检失败（{code}）：{repoName}；{(retryable ? "网络类错误可重试" : "凭据/仓库不存在不自动重试")}");
+    }
+    /// <summary>AC-OP-16：SYNC dry-run 丢失清单（未推送 commit/untracked/stash/影响仓）。</summary>
+    private async Task<IReadOnlyList<string>> BuildSyncLossNotesAsync(
+        string localPath,
+        string? branch,
+        CancellationToken cancellationToken)
+    {
+        var notes = new List<string>();
+        if (!string.IsNullOrWhiteSpace(branch))
+        {
+            var log = await _git
+                .RunAsync(
+                    localPath,
+                    new[] { "log", "--format=%h|%an|%s", "-n", "20", "origin/" + branch + "..HEAD" },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            var commits = log.Success
+                ? log.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line.Trim()).ToList()
+                : new List<string>();
+            notes.Add(commits.Count == 0
+                ? "未推送提交：0 个"
+                : $"未推送提交：{commits.Count} 个 → " + string.Join("；", commits.Take(10)));
+        }
+
+        var status = await _git
+            .RunAsync(localPath, new[] { "status", "--porcelain", "--untracked-files=all" }, cancellationToken)
+            .ConfigureAwait(false);
+        var untracked = status.Success
+            ? status.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.StartsWith("?? ", StringComparison.Ordinal))
+                .Select(line => line[3..].Trim())
+                .ToList()
+            : new List<string>();
+        notes.Add(untracked.Count == 0
+            ? "untracked：0 个"
+            : $"untracked：{untracked.Count} 个 → " + string.Join(", ", untracked.Take(10)));
+
+        var stash = await _git
+            .RunAsync(localPath, new[] { "stash", "list" }, cancellationToken)
+            .ConfigureAwait(false);
+        var stashCount = stash.Success
+            ? stash.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length
+            : 0;
+        notes.Add($"stash：{stashCount} 条；影响仓：1（本仓）");
+        return notes;
     }
     // ---------------------------------------------------------------- .trash 保留期清理
 

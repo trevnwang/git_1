@@ -1249,7 +1249,23 @@ public sealed class JobEngineTests
             Assert.Equal(
                 "feature/m2b",
                 TestGit.Capture(clone, "rev-parse", "--abbrev-ref", "refs/heads/feature/m2b"));
+            Assert.NotEmpty(TestGit.Capture(clone, "for-each-ref", "--format=%(refname)", "refs/baseline/create"));
         }
+
+        // AC-OP-24 dry-run 字段：重名/远程存在/基线 HEAD/非法校验提示，零写。
+        var preview = await DispatchAsync(router, "runBatch", new
+        {
+            kind = "CREATE",
+            componentIds = new[] { "CF100A_Demo" },
+            repoTypes = new[] { "IMPL" },
+            args = new { branch = "feature/m2b", dryRun = true }
+        });
+        var previewAccepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(preview).Data);
+        var previewJob = await WaitJobAsync(router, previewAccepted.JobId);
+        var previewItem = Assert.Single(previewJob.Items);
+        Assert.Equal("PREVIEW", previewItem.State);
+        Assert.Contains("本地重名：是", previewItem.Message ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("基线 HEAD", previewItem.Message ?? string.Empty, StringComparison.Ordinal);
 
         // 已存在 → SKIPPED（不失败）。
         var createAgain = await DispatchAsync(
@@ -1296,6 +1312,82 @@ public sealed class JobEngineTests
         }
     }
 
+    [Fact]
+    public async Task SyncPreview_Diverged_ShowsLossListFields()
+    {
+        using var fixture = BatchWorkspace.Create("CF205A_Loss_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        var clone = fixture.Clones["CF205A_Loss_IMPL"];
+        for (var i = 0; i < 2; i++)
+        {
+            File.WriteAllText(Path.Combine(clone, "local-" + i + ".txt"), "local");
+            TestGit.CommitAll(clone, "local " + i);
+        }
+        File.WriteAllText(Path.Combine(clone, "untracked.txt"), "untracked");
+        File.WriteAllText(Path.Combine(clone, "stash.txt"), "stash me");
+        TestGit.Run(clone, "stash", "push", "-u", "-m", "test stash");
+        File.WriteAllText(Path.Combine(clone, "untracked-after-stash.txt"), "untracked2");
+
+        var head = TestGit.Capture(clone, "rev-parse", "HEAD");
+        var repoRef = MakeRepoRef("CF205A_Loss", "IMPL", clone, "DIVERGED", head);
+        var batch = new BatchOperationService(config, new RepoActionService(config: config), paths: new PathPolicy(fixture.Root));
+        var arguments = new StoredJobArguments(null, null, null, false, true, false, false, false, false, null, "CF205A_Loss");
+        var preview = await batch.PreviewAsync("SYNC", repoRef, "CF205A_Loss", "IMPL", arguments, CancellationToken.None);
+
+        Assert.Equal(JobItemStates.Preview, preview.State);
+        var message = preview.Message ?? string.Empty;
+        Assert.Contains("未推送提交：2 个", message, StringComparison.Ordinal);
+        Assert.Contains("untracked", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("untracked-after-stash.txt", message, StringComparison.Ordinal);
+        Assert.Contains("stash：1 条", message, StringComparison.Ordinal);
+        Assert.Contains("影响仓", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Sync_Untracked_DefaultStashes_ExplicitCleanRequiresTypedConfirm()
+    {
+        using var fixture = BatchWorkspace.Create("CF206A_Untracked_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        var clone = fixture.Clones["CF206A_Untracked_IMPL"];
+
+        // 远端前进，使 SYNC 有实际 reset 动作。
+        var seedRoot = Path.Combine(Path.GetTempPath(), "MbdGitToolTests", "untracked-seed-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(seedRoot);
+        try
+        {
+            var seed = Path.Combine(seedRoot, "seed");
+            TestGit.Run(seedRoot, "clone", "-q", fixture.Bares["CF206A_Untracked_IMPL"], seed);
+            TestGit.ConfigureIdentity(seed);
+            File.WriteAllText(Path.Combine(seed, "remote.txt"), "remote");
+            TestGit.CommitAll(seed, "remote");
+            TestGit.Run(seed, "push", "-q", "origin", "main");
+
+            var repoRef = MakeRepoRef("CF206A_Untracked", "IMPL", clone, "BEHIND", TestGit.Capture(clone, "rev-parse", "HEAD"));
+            var batch = new BatchOperationService(config, new RepoActionService(config: config), paths: new PathPolicy(fixture.Root));
+            var untracked = Path.Combine(clone, "keep-untracked.txt");
+            File.WriteAllText(untracked, "keep");
+
+            // 默认：untracked 不删除（stash -u 保存）。
+            var defaultArgs = new StoredJobArguments(null, null, null, true, false, false, false, false, false, null, "CF206A_Untracked");
+            var defaultResult = await batch.SyncAsync(repoRef, "CF206A_Untracked", "IMPL", defaultArgs, CancellationToken.None);
+            Assert.Equal(JobItemStates.Ok, defaultResult.State);
+            Assert.False(File.Exists(untracked));
+
+            // 无强确认的显式清理：SKIPPED 且文件保留。
+            File.WriteAllText(untracked, "keep-again");
+            var unconfirmed = new StoredJobArguments(null, null, null, true, false, false, false, false, false, null, null, CleanUntracked: true);
+            var blocked = await batch.SyncAsync(
+                MakeRepoRef("CF206A_Untracked", "IMPL", clone, "BEHIND", TestGit.Capture(clone, "rev-parse", "HEAD")),
+                "CF206A_Untracked", "IMPL", unconfirmed, CancellationToken.None);
+            Assert.Equal(JobItemStates.Skipped, blocked.State);
+            Assert.Equal(BridgeErrorCodes.ConfirmRequired, blocked.ErrorCode);
+            Assert.True(File.Exists(untracked));
+        }
+        finally
+        {
+            try { Directory.Delete(seedRoot, recursive: true); } catch { /* ignore */ }
+        }
+    }
     [Fact]
     public async Task RunBatch_ExternalIndexLock_ReturnsBusyWithoutWriteOrDeletingLock()
     {

@@ -214,4 +214,5 @@ public sealed record StoredJobArguments(
     bool Stash,
     bool StageAll,
     string? TrashStamp,
-    string? ConfirmText = null);
+    string? ConfirmText = null,
+    bool CleanUntracked = false);
