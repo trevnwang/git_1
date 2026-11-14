@@ -536,44 +536,19 @@ check(
 )
 await screenshot('01-offline-banner-fetch-disabled.png')
 
-// ── 2) EMPTY 首推确认条（M2a/M2b 回归） ──
-const actionBoxesBefore = await evaluate(
-  `[...document.querySelectorAll('[data-testid^=action-]')].map((b) => { const r = b.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })`,
-)
-const lastOpBefore = await text('[data-testid=status-last-op]')
-const pushReady = await waitFor(
-  `document.querySelector('[data-testid=action-push]')?.getAttribute('data-enabled') === 'true'`,
-  8_000,
-)
-check('empty.push-enabled-by-host-matrix', pushReady)
+// ── 2) EMPTY unborn：无 HEAD 必须禁用 PUSH（E_REF_NOT_FOUND），不得给出成功式确认 ──
+await selectCard('TEST_A_EMPTY')
+const emptyPush = await evaluate(`(() => {
+  const b = document.querySelector('[data-testid=action-push]');
+  return b ? { disabled: b.disabled, enabled: b.getAttribute('data-enabled'), title: b.title } : null;
+})()`)
+check('empty.unborn-push-disabled', emptyPush?.disabled === true, JSON.stringify(emptyPush))
+check('empty.unborn-tooltip-e-ref-not-found', /E_REF_NOT_FOUND/.test(emptyPush?.title ?? ''), emptyPush?.title ?? '')
 await click('[data-testid=action-push]')
-await sleep(450)
-let emptyBar = await evaluate(
-  `(() => { const b = document.querySelector('[data-testid=confirm-bar]'); if (!b) return null; const r = b.getBoundingClientRect(); return { h: r.height, text: b.innerText.replace(/\\s+/g, ' ').trim(), action: b.getAttribute('data-confirm-action') }; })()`,
-)
-if (!emptyBar) {
-  // 一次重试：避免 Host actions 重载窗口内点击落空（不改变断言目标）。
-  await click('[data-testid=action-push]')
-  await sleep(500)
-  emptyBar = await evaluate(
-    `(() => { const b = document.querySelector('[data-testid=confirm-bar]'); if (!b) return null; const r = b.getBoundingClientRect(); return { h: r.height, text: b.innerText.replace(/\\s+/g, ' ').trim(), action: b.getAttribute('data-confirm-action') }; })()`,
-  )
-}
-check('empty.confirm-bar-open', Boolean(emptyBar), emptyBar ? emptyBar.text.slice(0, 140) : 'no bar')
-check('empty.confirm-bar-branch-upstream', /发布分支并建立 upstream/.test(emptyBar?.text ?? ''), emptyBar?.text ?? '')
-check('empty.confirm-bar-setupstream', /setUpstream=true/.test(emptyBar?.text ?? ''), emptyBar?.text ?? '')
-check('empty.confirm-bar-height', (emptyBar?.h ?? 999) <= 48, `h=${emptyBar?.h}`)
-const actionBoxesAfter = await evaluate(
-  `[...document.querySelectorAll('[data-testid^=action-]')].map((b) => { const r = b.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })`,
-)
-check('empty.confirm-bar-bbox-stable', JSON.stringify(actionBoxesBefore) === JSON.stringify(actionBoxesAfter))
-check('empty.no-write-before-accept', lastOpBefore === (await text('[data-testid=status-last-op]')))
-await screenshot('02-empty-push-confirm-bar.png')
-if (emptyBar) {
-  await click('[data-testid=confirm-bar-cancel]')
-  await sleep(250)
-}
-
+await sleep(350)
+const emptyBar = await evaluate(`document.querySelector('[data-testid=confirm-bar]') !== null`)
+check('empty.unborn-no-confirm-bar', emptyBar === false)
+await screenshot('02-empty-unborn-push-disabled.png')
 // ── 3) NO_UPSTREAM 保真（不破坏） ──
 await selectCard('TEST_B_NOUP')
 await waitFor(`document.querySelector('[data-testid=action-push]')?.getAttribute('data-enabled') === 'true'`, 8_000)
