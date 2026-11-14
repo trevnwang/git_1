@@ -102,7 +102,8 @@ public sealed class JobEngine : IDisposable
         OperationAuditService? audit = null,
         JobStore? store = null,
         Action? onJobFinished = null,
-        OperationJournal? journal = null)
+        OperationJournal? journal = null,
+        BaselineSnapshotService? baseline = null)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _snapshots = snapshots ?? throw new ArgumentNullException(nameof(snapshots));
@@ -134,7 +135,7 @@ public sealed class JobEngine : IDisposable
                 "未配置工作区根目录（config.json 的 workspaceRoot）");
         }
 
-        _batch = new BatchOperationService(config, _actions, _git, _paths);
+        _batch = new BatchOperationService(config, _actions, _git, _paths, baseline);
         _queue = Channel.CreateUnbounded<JobRecord>(
             new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
         _worker = Task.Run(WorkerLoopAsync);

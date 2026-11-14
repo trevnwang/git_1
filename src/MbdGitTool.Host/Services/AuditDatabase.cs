@@ -75,7 +75,7 @@ public sealed class AuditDatabase
     public const string DatabaseFileName = "mbd.db";
 
     /// <summary>当前 schema 版本（<c>PRAGMA user_version</c>）。</summary>
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = 2;
 
     /// <summary>默认库目录：<c>%LOCALAPPDATA%\MbdGitTool\db</c>。</summary>
     public static string DefaultDirectory => Path.Combine(
@@ -85,6 +85,27 @@ public sealed class AuditDatabase
 
     /// <summary>默认库文件：<c>%LOCALAPPDATA%\MbdGitTool\db\mbd.db</c>。</summary>
     public static string DefaultFilePath => Path.Combine(DefaultDirectory, DatabaseFileName);
+
+    private const string AuxTablesSql = """
+        CREATE TABLE IF NOT EXISTS baseline_snapshot (
+            component_id   TEXT NOT NULL,
+            tag            TEXT NOT NULL,
+            repo_type      TEXT NOT NULL,
+            commit_sha     TEXT NULL,
+            tag_object_sha TEXT NULL,
+            tag_present    INTEGER NOT NULL,
+            captured_at    TEXT NOT NULL,
+            PRIMARY KEY (component_id, tag, repo_type)
+        );
+        CREATE TABLE IF NOT EXISTS component_management (
+            component_id TEXT PRIMARY KEY,
+            display_name TEXT NULL,
+            is_managed   INTEGER NOT NULL DEFAULT 1,
+            is_deleted   INTEGER NOT NULL DEFAULT 0,
+            updated_at   TEXT NOT NULL
+        );
+        """;
+
 
     private const string CreateTableSql = """
         CREATE TABLE IF NOT EXISTS operation_log (
@@ -613,13 +634,12 @@ public sealed class AuditDatabase
             return true;
         }
 
-        // version == 0：首次建库。后续版本迁移（>1）在提升 SchemaVersion 时在此追加，迁移前按 SRS §8.2
-        // 使用 VACUUM INTO 备份旧库并在失败时回滚。
+        // version < 2：建 operation_log + baseline_snapshot + component_management（IF NOT EXISTS，兼容 v1）。
         using var transaction = connection.BeginTransaction();
         using (var createTable = connection.CreateCommand())
         {
             createTable.Transaction = transaction;
-            createTable.CommandText = CreateTableSql;
+            createTable.CommandText = CreateTableSql + AuxTablesSql;
             createTable.ExecuteNonQuery();
         }
 
@@ -647,6 +667,135 @@ public sealed class AuditDatabase
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
         return Convert.ToInt32(command.ExecuteScalar() ?? 0, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>baseline_snapshot 行（AC-OP-11/12/13/14）。</summary>
+    public sealed record BaselineSnapshotRecord(
+        string ComponentId, string Tag, string RepoType, string? CommitSha,
+        string? TagObjectSha, bool TagPresent, string CapturedAt);
+
+    /// <summary>component_management 行（AC-OP-31/32）。</summary>
+    public sealed record ComponentManagementRecord(
+        string ComponentId, string? DisplayName, bool IsManaged, bool IsDeleted, string UpdatedAt);
+
+    public bool UpsertBaselineSnapshot(BaselineSnapshotRecord row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (!_available) return false;
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO baseline_snapshot(component_id,tag,repo_type,commit_sha,tag_object_sha,tag_present,captured_at)
+                VALUES($c,$t,$r,$cs,$os,$p,$at)
+                ON CONFLICT(component_id,tag,repo_type) DO UPDATE SET
+                  commit_sha=excluded.commit_sha, tag_object_sha=excluded.tag_object_sha,
+                  tag_present=excluded.tag_present, captured_at=excluded.captured_at;
+                """;
+            command.Parameters.AddWithValue("$c", row.ComponentId);
+            command.Parameters.AddWithValue("$t", row.Tag);
+            command.Parameters.AddWithValue("$r", row.RepoType);
+            command.Parameters.AddWithValue("$cs", (object?)row.CommitSha ?? DBNull.Value);
+            command.Parameters.AddWithValue("$os", (object?)row.TagObjectSha ?? DBNull.Value);
+            command.Parameters.AddWithValue("$p", row.TagPresent ? 1 : 0);
+            command.Parameters.AddWithValue("$at", row.CapturedAt);
+            command.ExecuteNonQuery();
+            return true;
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException or InvalidOperationException)
+        {
+            HostLog.Warn($"baseline_snapshot 写入失败（{ex.GetType().Name}）");
+            return false;
+        }
+    }
+
+    public IReadOnlyList<BaselineSnapshotRecord> QueryBaselineSnapshots(string componentId)
+    {
+        var rows = new List<BaselineSnapshotRecord>();
+        if (!_available) return rows;
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT component_id,tag,repo_type,commit_sha,tag_object_sha,tag_present,captured_at FROM baseline_snapshot WHERE component_id=$c ORDER BY tag,repo_type;";
+            command.Parameters.AddWithValue("$c", componentId);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                rows.Add(new BaselineSnapshotRecord(
+                    reader.GetString(0), reader.GetString(1), reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.GetInt32(5) != 0, reader.GetString(6)));
+            }
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException or InvalidOperationException)
+        {
+            HostLog.Warn($"baseline_snapshot 查询失败（{ex.GetType().Name}）");
+        }
+        return rows;
+    }
+
+    public bool UpsertComponentManagement(ComponentManagementRecord row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (!_available) return false;
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO component_management(component_id,display_name,is_managed,is_deleted,updated_at)
+                VALUES($c,$d,$m,$x,$at)
+                ON CONFLICT(component_id) DO UPDATE SET
+                  display_name=excluded.display_name, is_managed=excluded.is_managed,
+                  is_deleted=excluded.is_deleted, updated_at=excluded.updated_at;
+                """;
+            command.Parameters.AddWithValue("$c", row.ComponentId);
+            command.Parameters.AddWithValue("$d", (object?)row.DisplayName ?? DBNull.Value);
+            command.Parameters.AddWithValue("$m", row.IsManaged ? 1 : 0);
+            command.Parameters.AddWithValue("$x", row.IsDeleted ? 1 : 0);
+            command.Parameters.AddWithValue("$at", row.UpdatedAt);
+            command.ExecuteNonQuery();
+            return true;
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException or InvalidOperationException)
+        {
+            HostLog.Warn($"component_management 写入失败（{ex.GetType().Name}）");
+            return false;
+        }
+    }
+
+    public IReadOnlyList<ComponentManagementRecord> ListComponentManagement()
+    {
+        var rows = new List<ComponentManagementRecord>();
+        if (!_available) return rows;
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT component_id,display_name,is_managed,is_deleted,updated_at FROM component_management ORDER BY component_id;";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                rows.Add(new ComponentManagementRecord(
+                    reader.GetString(0),
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.GetInt32(2) != 0,
+                    reader.GetInt32(3) != 0,
+                    reader.GetString(4)));
+            }
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException or InvalidOperationException)
+        {
+            HostLog.Warn($"component_management 查询失败（{ex.GetType().Name}）");
+        }
+        return rows;
     }
 
     private static string? ReadSqliteVersion(SqliteConnection connection)

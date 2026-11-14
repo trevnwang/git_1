@@ -138,7 +138,7 @@ public sealed class HostCommandRouter : IDisposable
                 _deliveredIndex = null;
                 InvalidateCaches();
             },
-            journal: _journal);
+            journal: _journal, baseline: new BaselineSnapshotService(_snapshots.Config));
 
         // M2b-2b 启动 reconcile（FR-SAFE-04 / ADR D-026）：异步后台扫描写前 journal 中 STARTED 未收口的
         // 条目，按当前 HEAD 判定 NOT_APPLIED（可安全重试）/ UNKNOWN_APPLIED（不猜成功，提示核对），

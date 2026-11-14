@@ -1310,6 +1310,12 @@ public sealed class JobEngineTests
             Assert.Equal(tagSha, TestGit.Capture(clone, "rev-parse", "HEAD"));
             Assert.Equal("HEAD", TestGit.Capture(clone, "rev-parse", "--abbrev-ref", "HEAD"));
         }
+
+        // AC-OP-11/12/14：baseline_snapshot 由 TAG job 写 2 行（本用例选 2 仓），均为 tag_present=1。
+        var baselineRows = new BaselineSnapshotService(config).List("CF100A_Demo");
+        Assert.Equal(2, baselineRows.Count);
+        Assert.All(baselineRows, row => Assert.True(row.TagPresent));
+        Assert.All(baselineRows, row => Assert.False(string.IsNullOrWhiteSpace(row.CommitSha)));
     }
 
     [Fact]
@@ -1668,6 +1674,8 @@ public sealed class JobEngineTests
         Assert.All(job.Items, item => Assert.Equal("SKIPPED", item.State));
         Assert.All(job.Items, item => Assert.Equal(BridgeErrorCodes.RefNotFound, item.ErrorCode));
         Assert.Contains("TAG_DRIFT", job.Items[0].Message ?? string.Empty, StringComparison.Ordinal);
+        var missingBaseline = new BaselineSnapshotService(config).List("CF100A_Demo");
+        Assert.Contains(missingBaseline, row => row.Tag == "missing-v9.9.9" && !row.TagPresent && row.CommitSha is null);
         Assert.Equal(before[fixture.Clones.Values.First()], TestGit.Capture(fixture.Clones.Values.First(), "rev-parse", "HEAD"));
     }
 

@@ -58,17 +58,20 @@ public sealed partial class BatchOperationService
     private readonly RepoActionService _actions;
     private readonly GitCli _git;
     private readonly PathPolicy? _paths;
+    private readonly BaselineSnapshotService? _baseline;
 
     public BatchOperationService(
         AppConfig config,
         RepoActionService actions,
         GitCli? git = null,
-        PathPolicy? paths = null)
+        PathPolicy? paths = null,
+        BaselineSnapshotService? baseline = null)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _actions = actions ?? throw new ArgumentNullException(nameof(actions));
         _git = git ?? new GitCli();
         _paths = paths;
+        _baseline = baseline;
     }
 
     /// <summary>工作区根（<see cref="PathPolicy"/> 规范化；未配置时 null）。</summary>
@@ -1256,7 +1259,8 @@ public sealed partial class BatchOperationService
             .ConfigureAwait(false);
         if (!fetch.Success)
         {
-            // AC-OP-12：远端缺 Tag → 跳过并报告 HALF/TAG_DRIFT，不猜测成功。
+            // AC-OP-12：远端缺 Tag → 跳过并报告 TAG_DRIFT，同时写 tag_present=0 行。
+            _baseline?.Upsert(repo?.ComponentId ?? string.Empty, tag, repoType, null, null, present: false);
             return Skip(
                 BridgeErrorCodes.RefNotFound,
                 $"Tag 不存在于远程：{tag}，跳过切 Tag（TAG_DRIFT）");
@@ -1272,6 +1276,11 @@ public sealed partial class BatchOperationService
         }
 
         var tagSha = resolved.TrimmedStdout;
+        var tagObject = await _git
+            .RunAsync(local.Path!, new[] { "rev-parse", "--verify", "--quiet", "refs/tags/" + tag }, cancellationToken)
+            .ConfigureAwait(false);
+        var tagObjectSha = tagObject.Success && tagObject.TrimmedStdout.Length > 0 ? tagObject.TrimmedStdout : null;
+        _baseline?.Upsert(repo?.ComponentId ?? string.Empty, tag, repoType, tagSha, tagObjectSha, present: true);
         var moved = localBeforeSha is not null
             && !string.Equals(localBeforeSha, tagSha, StringComparison.OrdinalIgnoreCase);
 
