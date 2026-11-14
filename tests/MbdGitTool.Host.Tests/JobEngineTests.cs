@@ -1833,6 +1833,73 @@ public sealed class JobEngineTests
         }
     }
     [Fact]
+    public async Task ComponentManagement_LocalDeletePartial_ReturnsFailureAndKeepsManaged()
+    {
+        using var fixture = BatchWorkspace.Create("CF221A_Part_DESIGN", "CF221A_Part_IMPL", "CF221A_Part_MIL", "CF221A_Part_SIL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+        var dirty = fixture.Clones["CF221A_Part_SIL"];
+        File.WriteAllText(Path.Combine(dirty, "dirty.txt"), "x");
+
+        var result = await DispatchAsync(router, "unbindComponent", new
+        {
+            componentId = "CF221A_Part",
+            mode = "LOCAL_DELETE",
+            confirmText = "CF221A_Part"
+        });
+        Assert.False(result.Ok);
+        Assert.Equal(BridgeErrorCodes.DeletePartial, result.Error!.Code);
+        Assert.True(Directory.Exists(dirty), "脏仓应保留");
+        var management = await DispatchAsync(router, "getComponentManagement", null);
+        var json = System.Text.Json.JsonSerializer.Serialize(management.Data, WebJson);
+        Assert.DoesNotContain("\"isDeleted\":true", json);
+    }
+    [Fact]
+    public async Task Sync_LocalOnlyBranch_IsRejectedAndKept()
+    {
+        using var fixture = BatchWorkspace.Create("CF222A_LocalOnly_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+        var clone = fixture.Clones["CF222A_LocalOnly_IMPL"];
+        TestGit.Run(clone, "switch", "-q", "-c", "feat/local-only");
+        TestGit.Run(clone, "commit", "-q", "--allow-empty", "-m", "local only");
+
+        var batch = await DispatchAsync(router, "runBatch", new
+        {
+            kind = "SYNC",
+            componentIds = new[] { "CF222A_LocalOnly" },
+            repoTypes = new[] { "IMPL" },
+            args = new { confirm = true, confirmText = "CF222A_LocalOnly" }
+        });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+        var item = Assert.Single(job.Items);
+        Assert.NotEqual("OK", item.State);
+        Assert.Equal("feat/local-only", TestGit.Capture(clone, "rev-parse", "--abbrev-ref", "HEAD"));
+        Assert.False(string.IsNullOrWhiteSpace(TestGit.Capture(clone, "rev-parse", "refs/heads/feat/local-only")));
+        Assert.True((item.Message ?? string.Empty).Contains("本地独有", StringComparison.Ordinal), $"{item.State}:{item.ErrorCode}:{item.Message}");
+    }
+
+    [Fact]
+    public async Task Create_DryRun_ReportsRemoteStateAheadBehindAndCurrentState()
+    {
+        using var fixture = BatchWorkspace.Create("CF223A_CreatePrev_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        var clone = fixture.Clones["CF223A_CreatePrev_IMPL"];
+        var batch = new BatchOperationService(config, new RepoActionService(config: config), paths: new PathPolicy(fixture.Root));
+        var repoRef = MakeRepoRef("CF223A_CreatePrev", "IMPL", clone, "SYNCED", TestGit.Capture(clone, "rev-parse", "HEAD"));
+        var args = new StoredJobArguments("release/1.0", null, null, false, true, false, false, false, false, null, null, false, null);
+        var result = await batch.PreviewAsync("CREATE", repoRef, "CF223A_CreatePrev", "IMPL", args, CancellationToken.None);
+        Assert.Equal(JobItemStates.Preview, result.State);
+        Assert.Contains("远程存在", result.Message ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("当前仓状态", result.Message ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("超前 0/落后 0", result.Message ?? string.Empty, StringComparison.Ordinal);
+    }
+    [Fact]
     public async Task FixDetached_CreatesAndChecksOutBranchFromHead()
     {
         using var fixture = BatchWorkspace.Create("CF218A_Det_IMPL");

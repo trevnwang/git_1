@@ -16,6 +16,7 @@ const state = w.state
 const dialog = computed(() => state.overlays.batchDialog ?? null)
 const value = ref('')
 const dryRun = ref(false)
+const cleanUntracked = ref(false)
 const root = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLInputElement | null>(null)
 
@@ -32,6 +33,7 @@ watch(
     previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     value.value = next.initialValue ?? ''
     dryRun.value = false
+  cleanUntracked.value = false
     void nextTick(() => {
       if (next.kind === 'clone') root.value?.querySelector<HTMLElement>('.btn.primary')?.focus()
       else inputEl.value?.focus()
@@ -83,7 +85,7 @@ function repoLabelOf(repoType: string): string {
 function submit(): void {
   const current = dialog.value
   if (!current || !canSubmit.value) return
-  w.submitBatchDialog({ value: needsValue.value ? trimmed.value : undefined, dryRun: dryRun.value })
+  w.submitBatchDialog({ value: needsValue.value ? trimmed.value : undefined, dryRun: dryRun.value, cleanUntracked: cleanUntracked.value })
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -197,7 +199,10 @@ function trapTab(event: KeyboardEvent): void {
           <input v-model="dryRun" type="checkbox" data-testid="batch-dialog-dryrun" />
           <span>仅预览（dryRun，不执行任何写操作）</span>
         </label>
-        <p v-if="dialog.showDryRun && dialog.dryRunHint" class="dry-run-hint" data-testid="batch-dialog-dryrun-hint">
+        <label v-if="dialog.showCleanUntracked" class="dry-run" data-testid="batch-dialog-clean-untracked-label">
+  <input v-model="cleanUntracked" type="checkbox" data-testid="batch-dialog-clean-untracked" />
+  <span>同时删除未跟踪文件（不可恢复；建议先勾选 dryRun 查看清单）</span>
+</label><p v-if="dialog.showDryRun && dialog.dryRunHint" class="dry-run-hint" data-testid="batch-dialog-dryrun-hint">
           {{ dialog.dryRunHint }}
         </p>
 

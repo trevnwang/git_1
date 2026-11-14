@@ -57,6 +57,7 @@ public static class BridgeErrorCodes
     public const string DiskFull = "E_DISK_FULL";
     public const string PathTooLong = "E_PATH_TOO_LONG";
     public const string DeletePending = "E_DELETE_PENDING";
+    public const string DeletePartial = "E_DELETE_PARTIAL";
     public const string RepairFailed = "E_REPAIR_FAILED";
     public const string RecloneFailed = "E_RECLONE_FAILED";
 }

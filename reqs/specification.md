@@ -521,7 +521,7 @@ RepoType ∈ {Design, Impl, MIL, SIL}（匹配大小写不敏感）
 | FR-OP-01 | P0 | 批量 Clone：预检磁盘空间/长路径/凭据/远程存在；目录已存在则 repair 不覆盖；并发默认 2；错误分类（401/403/404 不重试，网络退避 ≤2）；逐仓 journal | 4 仓 2 成功 2 失败时组件显示 OP_PARTIAL_FAILED + 明细；重跑幂等 |
 | FR-OP-02 | P0 | 批量 Pull/Fetch：对选中组件/单仓；失败逐仓报告；禁止隐式 merge（Pull 默认 `--ff-only`，非快进转手动） | ff-only 失败提示明确；无隐式 merge commit |
 | FR-OP-03 | P0 | 批量 Checkout 分支：校验 ref 合法性；dirty 仓阻断或 stash（用户选）；部分失败报告 | 5 种前置态用例 |
-| FR-OP-04 | P0 | 切 Tag：四仓同一 Tag；Tag 不存在于远程则跳过并报告；检出为 detached；记录 `baseline_snapshot`（`^{commit}` 解引用）；Tag 被移动时 `fetch --force` 更新并告警；禁止 `--prune-tags` | 缺 Tag/移动 Tag/annotated Tag 用例 |
+| FR-OP-04 | P0 | **暂定（D-029）：不参与 M2b 验收**。切 Tag：四仓同一 Tag；Tag 不存在于远程则跳过并报告；检出为 detached；记录 `baseline_snapshot`（`^{commit}` 解引用）；Tag 被移动时 `fetch --force` 更新并告警；禁止 `--prune-tags` | 恢复时需按版本/仓集合重新定义，缺 Tag/移动 Tag/annotated Tag 用例 |
 | FR-OP-05 | P0 | 受控 SYNC（“用远程覆盖本地”）：fetch 目标 `<remote>/<同名分支>`；先备份 `refs/backup/sync/<ts>/<branch>`；dirty 存在 `stash -u`；CAS 校验后 `reset --hard <remote-ref>`（禁止 `git pull`）；untracked 默认不删、需显式勾选且执行前 dry-run；LFS 仓随后 `lfs pull`；拒绝覆盖本地独有分支 | 未推送 commit 可从备份 ref 恢复；untracked 保留；部分失败报告 |
 | FR-OP-06 | P0 | 本地删除：仅删本地；预检脏/未推送/进行中/stash → 默认阻断；软删除到 `<root>\.trash`（可恢复，**统一保留 30 天**，D-017）；realpath 校验防误删；占用文件失败保留 DELETE_PENDING | 恢复用例通过；远端零变更；`.trash` 保留期与清理策略可配置且默认 30 天 |
 | FR-OP-07 | P0 | CREATE 分支：输入分支名 → `git check-ref-format` 校验 → dry-run 表（重名/远程已删/超前落后/非法/各仓状态/基线 ref）→ 逐仓创建；部分失败可“撤销已创建分支” | 1 仓重名时预览明确；撤销成功；创建基线 ref 记录在 job_item |
@@ -1494,7 +1494,7 @@ interface ICiProvider {
   - 缺 Tag 仓：`tag_present=0`、`commit_sha=NULL`、`tag_object_sha=NULL`、`captured_at`。
 - **主键/历史**：沿用 §8.1 PK `(component_id, tag, repo_type)`；重复 TAG/移动 tag **覆盖同键行**，历史由 `operation_log` 保留（action=TAG，before/after 含旧/新 commit）。AC-OP-13④ 的“不丢历史行”按此解释，不再要求 baseline 表多版本行。
 - 四仓全部 present → 组件不漂移；任一缺 → `TAG_DRIFT`。baseline 写入仅在 TAG job 收口时按逐仓结果一次性写 4 行（失败 job 不写半套；job_item 失败但仍可写 `tag_present=0` 的完整 4 行，按 job 收口事务）。
-- **验收**：AC-OP-11/12/13/14 按本口径修订；四仓混合（3 检出+1 跳过）与 tag 移动用例必须断言 4 行/覆盖/operation_log 历史。
+- **验收（暂定，D-029）**：AC-OP-11/12/13/14 不参与 M2b 验收/实现计划；如未来恢复，按本口径修订，四仓混合与 tag 移动用例必须断言 4 行/覆盖/operation_log 历史。
 
 ## 16.5 CREATE 撤销（FR-OP-07 / AC-OP-25）
 
@@ -1546,7 +1546,7 @@ interface ICiProvider {
 1. Annex A 中 AC-OP-01…10、AC-OP-15…35、AC-REPO-01…11、AC-SAFE-01…13、AC-UI-10c、AC-UI-16 全部 `COVERED`（`PARTIAL`/`GAP` 不计；`AC-OP-11…14` 按 D-029 暂定不参与）；新增 §16 行为对应 AC（AC-OP-31/32、AC-OP-23、AC-OP-25、AC-OP-05/AC-REPO-08、AC-OP-34/35）同；
 2. 14 态×5 键矩阵在 M2b 构建复验：消费者=`RepoActionAvailabilityMatrixTests` + `ui/scripts/cdp-m2a-selfcheck.mjs`；命令=`vstest ... --Tests:RepoActionAvailabilityMatrix` + `node ui/scripts/cdp-m2a-selfcheck.mjs`；`reqs/fixtures/m2-matrix.json` 与 Host/UI 一致；
 3. `docs/m2b-fault-injection-report.md` 通过（§16.6），无 P0/P1 安全缺陷；
-4. 测试：单元/集成全绿（当前 397/397 基线）；L1 证据必跑；至少一份 L2/hermetic 真实 Gitea 证据归档；SKIP 不计 COVERED；
+4. 测试：单元/集成全绿（当前 420/420 基线；以最新台账/HEAD 为准）；L1 证据必跑；至少一份 L2/hermetic 真实 Gitea 证据归档；SKIP 不计 COVERED；
 5. 独立 Gate（需求/代码/UX）签字：报告文件 + 结论 + 日期 + commit；M2 = M2a ∧ M2b；D-025 §4 的 M2b 出口按 D-028 增补 AC-OP-34/35（ADR 记录，不降低原 AC）。
 # Annex A — 验收标准目录（AC Catalog，normative）
 
@@ -3098,7 +3098,7 @@ AC-<域>-<NN>[.<子字母>]
 | FR-OP-01 | P0 | AC-SYNC-14, AC-OP-01, AC-OP-02, AC-OP-03, AC-OP-04, AC-OP-05 | ✓ | ✓ | E2E+IT | M2 |
 | FR-OP-02 | P0 | AC-OP-06, AC-OP-07, AC-OP-08 | ✓ | ✓ | E2E+IT | M2 |
 | FR-OP-03 | P0 | AC-OP-09, AC-OP-10 | ✓ | ✓ | E2E+IT | M2 |
-| FR-OP-04 | P0 | AC-SYNC-05, AC-OP-11, AC-OP-12, AC-OP-13, AC-OP-14 | ✓ | ✓ | E2E+UT | M2 |
+| FR-OP-04 | P0 | AC-SYNC-05；AC-OP-11…14（D-029 暂定，不参与 M2b） | ✓ | ✓ | E2E+UT | M2 |
 | FR-OP-05 | P0 | AC-OP-15, AC-OP-16, AC-OP-17, AC-OP-18, AC-OP-19 | ✓ | ✓ | E2E+IT | M2 |
 | FR-OP-06 | P0 | AC-OP-20, AC-OP-21, AC-OP-22, AC-OP-23, AC-OP-30 | ✓ | ✓ | E2E+IT | M2 |
 | FR-OP-07 | P0 | AC-OP-24, AC-OP-25 | ✓ | ✓ | E2E+IT | M2 |

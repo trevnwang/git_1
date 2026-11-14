@@ -414,9 +414,12 @@ public sealed class HostCommandRouter : IDisposable
                     if (!allDeleted || job.State != "SUCCESS")
                     {
                         _audit.Record("COMPONENT_UNBIND", componentId, null, null, null, null, false,
-                            "E_DELETE_PARTIAL", 0, actor: Environment.UserName,
+                            BridgeErrorCodes.DeletePartial, 0, actor: Environment.UserName,
                             requestId: Guid.NewGuid().ToString("N"), jobId: jobId, result: "PARTIAL");
-                        return CommandResult.Success(new { componentId, mode = "LOCAL_DELETE", jobId, state = job.State, isManaged = true, isDeleted = false, items = job.Items });
+                        return CommandResult.Failure(new BridgeError(
+                            BridgeErrorCodes.DeletePartial,
+                            $"本地删除部分失败（{job.Items.Count(item => item.State is "OK" or "SKIPPED")}/{job.Items.Count} 成功）；组件保持纳管，未标记已移出",
+                            new Dictionary<string, object?> { ["jobId"] = jobId, ["state"] = job.State, ["items"] = job.Items }));
                     }
                     var (markOk, markError) = _management.MarkDeleted(componentId);
                     if (!markOk) return CommandResult.Failure(markError!);

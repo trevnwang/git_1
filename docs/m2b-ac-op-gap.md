@@ -1,7 +1,7 @@
 # M2b AC-OP 全量证据矩阵（截至 m2b-2b / 2026-11-14）
 
 > 用途：M2b final 的逐条验收台账。状态：**COVERED**=有自动化/真实证据；**PARTIAL**=有实现/部分用例但缺 AC 指定断言；**GAP**=未实现或无从验证。
-> 当前结论：**M2b 未完成**；`m2b-2b` 只是阶段 tag。测试基线 413/413；真机 reconcile NOT_APPLIED 已验证；故障注入报告见 `docs/m2b-fault-injection-report.md`（未通过）。证据来源：`tests/MbdGitTool.Host.Tests`、`ui/scripts/cdp-*.mjs`、`docs/m2b*.md`。
+> 当前结论：**M2b 未完成**；`m2b-2b` 只是阶段 tag。测试基线 420/420；真机 reconcile NOT_APPLIED 已验证；故障注入报告见 `docs/m2b-fault-injection-report.md`（未通过）。证据来源：`tests/MbdGitTool.Host.Tests`、`ui/scripts/cdp-*.mjs`、`docs/m2b*.md`。
 
 | AC | 主题 | 状态 | 现有证据 | 缺口/下一步 |
 |---|---|---|---|---|
@@ -17,7 +17,7 @@
 | AC-OP-10 | Checkout dirty 阻断/stash | COVERED | `Checkout_WithStash...`、`Checkout_Dirty...` | 批量口径 |
 | AC-OP-11 | 切 Tag 四仓成功/detached/baseline | **DEFERRED（D-029）** | 检出语义 + `RunBatch_Tag_FourRepos_MixedWritesFourBaselineRows`：3 检出/1 跳过、4 行 baseline、tag_object_sha≠commit | UI baseline 展示（可选） |
 | AC-OP-12 | 缺 Tag：3 检出+1 跳过+TAG_DRIFT | **DEFERRED（D-029）** | 四仓混合测试：3 OK/1 SKIPPED、SIL 行 `tag_present=0`、commit=NULL | 组件 TAG_DRIFT 聚合断言（可选） |
-| AC-OP-13 | Tag 被移动 fetch --force + 告警 | PARTIAL | 已实现 `fetch --force origin tag`、旧/新 SHA 比较并输出 tag_moved | 专项移动 tag 用例 |
+| AC-OP-13 | Tag 被移动 fetch --force + 告警 | **DEFERRED（D-029）** | — | — |
 | AC-OP-14 | annotated tag `^{commit}`/tag_present | **DEFERRED（D-029）** | annotated 测试 + 四仓测试断言 tag_object_sha≠commit_sha、tag_present=1 | — |
 | AC-OP-15 | SYNC BEHIND/DIRTY：备份→stash→确认→reset | COVERED | `RunBatch_Sync_Diverged...`、`DryRun_Sync...` | LFS pull 未覆盖 |
 | AC-OP-16 | SYNC DIVERGED 丢失清单/typed confirm/可恢复 | COVERED | `SyncPreview_Diverged_ShowsLossListFields`：未推送 commit 列表/untracked 列表/stash 条数/影响仓；typed confirm、备份 ref 恢复已有用例 | 四仓聚合展示（当前逐仓 message） |
@@ -43,10 +43,9 @@
 
 ## 仍需完成（M2b final 阻断）
 
-1. Clone 预检/错误分类/部分失败/目标存在（AC-OP-01…05）；Pull/Checkout 批量 E2E（06/09）。
-2. Tag 检出/TAG_DRIFT/tag_moved/annotated（11…14）。
-3. SYNC 丢失清单逐字段、untracked 显式删除、UPSTREAM_GONE（16/18/19）。
-4. DELETE_PENDING（23）；CREATE 撤销/基线（24/25）。
-5. 外部 index.lock BUSY（29）；组件纳入/移出（31/32）；AC-REPO-01…11 修复类。
-6. AC-SAFE 故障注入报告 + 真机 journal 崩溃 reconcile 演练 + 离线完整语义。
-7. 上述完成后重新跑 `m2b` Gate；通过才可打 `m2b`，M2 总出口 = M2a ∧ M2b。
+1. AC 逐条证据/台账：manifest 的 AC 映射与真实产物路径、新 UI（Repair/Reclone/撤销/pending/upstream/detached）CDP；crash drill 脱离预构建 worker。
+2. 故障注入报告转 PASS + AC-SAFE-05/06/10/11/12 逐条证据 + `docs/evidence/security` 三件套。
+3. AC-OP-26 `CRASH_AT_ITEM_2`、AC-OP-27 严格取消、AC-OP-30 冲突预览。
+4. LOCAL_DELETE partial 失败语义/UI、BINDING_ERROR 与组件绑定写入。
+5. AC-OP-18 untracked 显式清理、AC-OP-19 三子型 E2E、AC-OP-24 dryRun 字段。
+6. 全 AC 台账 → final Gate 签字 → `m2b` tag；M2 = M2a ∧ M2b。

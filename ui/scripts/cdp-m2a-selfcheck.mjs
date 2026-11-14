@@ -128,5 +128,8 @@ check('op-33.audit-actor-requestid', auditOk, auditDetail);
 
 ws.close();
 const failed = results.filter((r) => !r.ok);
+const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'artifacts', 'm2a-selfcheck');
+mkdirSync(outDir, { recursive: true });
+writeFileSync(join(outDir, 'result.json'), JSON.stringify({ total: results.length, passed: results.length - failed.length, failed: failed.map((r) => r.id), checks: results }, null, 2));
 console.log(JSON.stringify({ total: results.length, passed: results.length - failed.length, failed: failed.map((r) => r.id) }, null, 2));
 process.exit(failed.length === 0 ? 0 : 1);

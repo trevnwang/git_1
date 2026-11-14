@@ -454,9 +454,11 @@ export interface BatchDialogVm {
   /** 允许「仅预览（dryRun）」勾选（Host 不支持时忽略）。 */
   showDryRun?: boolean
   dryRunHint?: string
+  /** SYNC：显式删除 untracked 勾选（AC-OP-18；删除前必须 dry-run + 强确认）。 */
+  showCleanUntracked?: boolean
   /** CLONE 预览：缺失仓列表（componentId + repoType）。 */
   preview?: { componentId: string; repoType: string; label: string }[]
-  submit: (payload: { value?: string; dryRun?: boolean }) => void
+  submit: (payload: { value?: string; dryRun?: boolean; cleanUntracked?: boolean }) => void
 }
 
 export interface BatchTargetsVm {

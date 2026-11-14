@@ -2235,7 +2235,7 @@ function closeBatchDialog(): void {
   state.overlays.batchDialog = null
 }
 
-function submitBatchDialog(payload: { value?: string; dryRun?: boolean }): void {
+function submitBatchDialog(payload: { value?: string; dryRun?: boolean; cleanUntracked?: boolean }): void {
   const dialog = state.overlays.batchDialog
   if (!dialog) return
   state.overlays.batchDialog = null
@@ -2268,6 +2268,7 @@ function openDestructiveConfirm(kind: 'SYNC' | 'DELETE', componentIds: string[])
     initialValue: '',
     showDryRun: true,
     dryRunHint: '勾选后仅逐仓预检，不创建备份 ref、不 reset、不移动目录',
+    showCleanUntracked: isSync,
     submit: (payload) => {
       const value = (payload.value ?? '').trim()
       if (value !== componentId) {
@@ -2276,6 +2277,7 @@ function openDestructiveConfirm(kind: 'SYNC' | 'DELETE', componentIds: string[])
       }
       const args: BatchArgs = { confirmText: value }
       if (payload.dryRun === true) args.dryRun = true
+      if (payload.cleanUntracked === true) args.cleanUntracked = true
       void submitBatch(kind, { componentIds, args })
     },
   })

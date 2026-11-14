@@ -25,6 +25,18 @@ const mockScripts = [
 const realScripts = ['cdp-m2b2-realhost-check.mjs']
 
 const suites = []
+const artifactMap = {
+  'cdp-m2a-selfcheck.mjs': 'artifacts/m2a-selfcheck/result.json',
+  'cdp-m2b1-fix-selfcheck.mjs': 'artifacts/m2b1-fix-selfcheck/result.json',
+  'cdp-m2b2-selfcheck.mjs': 'artifacts/m2b2-selfcheck/result.json',
+  'cdp-m2b2-realhost-check.mjs': 'artifacts/m2b2-realhost/result.json',
+}
+const acMap = {
+  'cdp-m2a-selfcheck.mjs': ['AC-OP-06', 'AC-OP-07', 'AC-OP-08', 'AC-OP-09', 'AC-OP-10', 'AC-OP-15', 'AC-OP-16', 'AC-OP-17', 'AC-OP-20', 'AC-OP-21', 'AC-OP-22', 'AC-OP-28', 'AC-OP-29', 'AC-OP-33'],
+  'cdp-m2b1-fix-selfcheck.mjs': ['AC-OP-03', 'AC-OP-24', 'AC-OP-26', 'AC-OP-27', 'AC-OP-34', 'AC-OP-35'],
+  'cdp-m2b2-selfcheck.mjs': ['AC-OP-22', 'AC-OP-23', 'AC-OP-25', 'AC-OP-28', 'AC-OP-30', 'AC-UI-10c'],
+  'cdp-m2b2-realhost-check.mjs': ['AC-OP-01', 'AC-OP-02', 'AC-OP-04', 'AC-OP-05', 'AC-OP-31', 'AC-OP-32', 'AC-OP-34', 'AC-SAFE-13'],
+}
 const failures = []
 function run(script, required) {
   const startedAt = new Date().toISOString()
@@ -65,17 +77,12 @@ const manifest = {
   commit,
   generatedAt: new Date().toISOString(),
   suite: suites,
-  checks: suites.map((suite) => {
-    const evidence = suite.artifact ?? `artifacts/${suite.name.replace(/\.mjs$/, '')}/result.json`
-    let detail = null
-    try {
-      const absolute = join(here, '..', '..', evidence)
-      if (existsSync(absolute)) detail = JSON.parse(readFileSync(absolute, 'utf8'))
-    } catch {
-      /* ignore */
-    }
-    return { ac: suite.name, status: suite.result, evidence, detail }
-  }),  note: 'SKIP 不计入 COVERED；AC 逐条证据见 docs/m2b-ac-op-gap.md',
+  checks: suites.flatMap((suite) => (acMap[suite.name] ?? []).map((ac) => ({
+    ac,
+    status: suite.result,
+    suite: suite.name,
+    evidence: suite.artifact,
+  }))),  note: 'SKIP 不计入 COVERED；AC 逐条证据见 docs/m2b-ac-op-gap.md',
 }
 const evidenceDir = join(here, '..', '..', 'docs', 'evidence')
 mkdirSync(evidenceDir, { recursive: true })

@@ -122,9 +122,12 @@ public sealed partial class BatchOperationService
         var state = NormalizeState(repo.Repo.State);
         if (!SyncMatrixAllowed(state, out var blockedReason))
         {
+            var subtypeNote = string.Equals(state, "NO_UPSTREAM", StringComparison.OrdinalIgnoreCase)
+                ? $"（{repo.Repo.SubType ?? "NO_UPSTREAM"}：本地独有/无 upstream，拒绝覆盖）"
+                : string.Empty;
             return Skip(
                 BridgeErrorCodes.ActionNotAllowed,
-                $"当前状态 {state} 不允许 SYNC：{blockedReason}");
+                $"当前状态 {state} 不允许 SYNC：{blockedReason}{subtypeNote}");
         }
 
         var requiresTypedConfirm = state == RepoStateDiverged;
@@ -190,7 +193,7 @@ public sealed partial class BatchOperationService
         {
             return Failed(
                 BridgeErrorCodes.RefNotFound,
-                $"远端不存在分支 origin/{branch}，已拒绝 reset");
+                $"远端不存在分支 origin/{branch}（本地独有分支，拒绝覆盖），已拒绝 reset");
         }
 
         // 6) 外部改动 CAS：fetch 不应改 HEAD；若 HEAD 已变，在写备份 ref 之前拒绝（零写）。
@@ -944,7 +947,10 @@ public sealed partial class BatchOperationService
                 var remoteBranch = await _git
                     .RunAsync(localPath!, new[] { "rev-parse", "--verify", "--quiet", "refs/remotes/origin/" + branchName }, cancellationToken)
                     .ConfigureAwait(false);
-                notes.Add(remoteBranch.Success ? "远程存在：是（可能落后/领先）" : "远程存在：否");
+                notes.Add(remoteBranch.Success
+                    ? $"远程存在：是（origin/{branchName} {remoteBranch.TrimmedStdout.Substring(0, Math.Min(8, remoteBranch.TrimmedStdout.Length))}，可能落后/领先）"
+                    : $"远程存在：否（可能已删/未推送；本地跟踪分支不存在）");
+                notes.Add($"当前仓状态：{repo?.Repo.State ?? "UNKNOWN"}；超前 {repo?.Repo.Ahead ?? 0}/落后 {repo?.Repo.Behind ?? 0}");
                 var headForCreate = await ReadHeadAsync(localPath!, cancellationToken).ConfigureAwait(false);
                 notes.Add("基线 HEAD：" + (headForCreate ?? "<unborn>"));
                 notes.Add("非法分支名将由 git check-ref-format 在执行前拒绝");
