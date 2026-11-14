@@ -1,7 +1,7 @@
 # M2b-2b 阶段报告（2026-11-14）
 
 > 范围：M2b-2a 延后项 + FR-SAFE-04 + ADR D-026。状态：**候选待 Gate；tag 前不宣称 M2b/M2 完成**。
-> 证据环境：真实 RTCRepos + 本地工作区；`385/385` 测试、Debug 0 warning。
+> 证据环境：真实 RTCRepos + 本地工作区；`388/388` 测试、Debug 0 warning。
 
 ## 1. 交付
 
@@ -17,15 +17,17 @@
 | 保留清理 | `.trash` 30 天 / backup refs 30 天 / 审计 ≥90 天；命令+启动清理；不误删保留期内数据 |
 | 安全 ref 可见/可恢复 | `getBackupRefs` 同时列出 `refs/backup/restore/*`（Kind=SAFETY、branch=null）；restore 允许从安全 ref 恢复；cleanup 按时间戳清理安全 ref；UI 显示“安全备份” |
 | restore journal | `restoreBackupRef` reset 前写 STARTED，成功 DONE(postHead)，失败/安全 ref 失败 FAILED；测试覆盖 |
-| 导出过滤 | `exportOperationLog` 接受 action/componentId/result；UI 已传当前审计过滤（修复自检只发 `{format}` 的问题）；新增 Host 用例断言 result=OK 只导出 1 行且不含 PUSH |\n| Clone 预检/分类 | 长路径(>230)/磁盘<256MB/凭据/远端 `ls-remote` 预检零写；401/403→E_AUTH_FAILED、404→E_REMOTE_NOT_FOUND、网络→E_NETWORK（仅网络可重试） |
+| 导出过滤 | `exportOperationLog` 接受 action/componentId/result；UI 已传当前审计过滤（修复自检只发 `{format}` 的问题）；新增 Host 用例断言 result=OK 只导出 1 行且不含 PUSH |
+| Clone 预检/分类 | 长路径(>230)/磁盘<256MB/凭据/远端 `ls-remote` 预检零写；401/403→E_AUTH_FAILED、404→E_REMOTE_NOT_FOUND、网络→E_NETWORK（仅网络可重试） |
 
 ## 2. 验证
 
-- `vstest` **386/386**（新增安全 ref/journal/回填/导出过滤/Clone 预检用例）；构建 0 warning。
+- `vstest` **388/388**（新增安全 ref/journal/回填/导出过滤/Clone 预检用例）；构建 0 warning。
 - M2b-2 Mock/CDP 自检 **53/53**；M2a 11/11；M2b-1 68/68。
 - realhost 只读自检 **19/19**（真实审计查询/导出、备份 ref 分支/旧格式、无 console error）。
 - 真实 SYNC 新 ref：`refs/backup/sync/20261114123736/main/DESIGN` 等 4 条；旧 ref 列表为 LEGACY。
-- 真实 journal：SYNC 每仓 STARTED→DONE 成对，含 jobId/jobItemId/preHead/postHead。\n- **真机 reconcile 演练**：追加一条无 DONE 的 STARTED（RTCT_RemoteOnly/DESIGN，HEAD 不变）→ 重启 Host → 审计 `RECONCILE result=NOT_APPLIED`（id=452，actor=journal-reconciler），journal 追加 `RECONCILED`，仓库零改动。
+- 真实 journal：SYNC 每仓 STARTED→DONE 成对，含 jobId/jobItemId/preHead/postHead。
+- **真机 reconcile 演练**：追加一条无 DONE 的 STARTED（RTCT_RemoteOnly/DESIGN，HEAD 不变）→ 重启 Host → 审计 `RECONCILE result=NOT_APPLIED`（id=452，actor=journal-reconciler），journal 追加 `RECONCILED`，仓库零改动。
 - 真实修复：审计表 858→341 行（回填 JSONL 历史；其中仍含 64 行夹具/自检数据，**不作为生产数据证据**）；测试隔离后真实库不再新增。
 
 ## 3. 已知风险/未完成
