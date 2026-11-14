@@ -23,7 +23,7 @@ public sealed class M2b2AuditDatabaseTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public void Initialize_CreatesOperationLogSchemaWithWalAndUserVersion1()
+    public void Initialize_CreatesOperationLogSchemaWithWalAndUserVersion2()
     {
         var path = Path.Combine(_root, "db", "mbd.db");
         var database = new AuditDatabase(path);
@@ -36,7 +36,7 @@ public sealed class M2b2AuditDatabaseTests : IDisposable
             new SqliteConnectionStringBuilder { DataSource = path }.ToString());
         connection.Open();
 
-        Assert.Equal(1L, Scalar(connection, "PRAGMA user_version;"));
+        Assert.Equal((long)AuditDatabase.SchemaVersion, Scalar(connection, "PRAGMA user_version;"));
         Assert.Equal("wal", Scalar(connection, "PRAGMA journal_mode;")?.ToString());
 
         var columns = new List<string>();
