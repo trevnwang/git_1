@@ -57,6 +57,16 @@ public sealed class SnapshotService : IDisposable
     /// <summary>最近一次快照的只读索引（组件/仓/本地路径）；供 getRepoTree/getRepoDetail/getComponentDetail 等复用。</summary>
     public SnapshotIndex Index => Volatile.Read(ref _index);
 
+    /// <summary>
+    /// 丢弃当前快照缓存（M2 P1-2：写操作成功后调用）。下次 <see cref="GetSnapshotAsync"/> 会重新扫描，
+    /// 避免“动作后仍用旧 HEAD 快照”导致后续动作被 CAS 误拒或矩阵失真。
+    /// </summary>
+    public void Invalidate()
+    {
+        Volatile.Write(ref _current, null);
+        Volatile.Write(ref _index, SnapshotIndex.Empty);
+    }
+
     /// <summary>读取当前快照；从未刷新过则立即刷新一次（互斥等待时复用已生成的快照，避免重复扫描）。</summary>
     public async Task<SnapshotDto> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {

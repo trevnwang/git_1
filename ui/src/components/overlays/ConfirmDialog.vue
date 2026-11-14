@@ -13,7 +13,12 @@ watch(
     if (value) {
       previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
       void nextTick(() => {
-        dialogEl.value?.querySelector<HTMLElement>('.confirm-actions .btn.primary')?.focus()
+        // 确认按钮可能是 primary 或 danger（当前调用方全为 danger）：取 .confirm-actions 最后一个 .btn。
+        const root = dialogEl.value
+        if (!root) return
+        const buttons = [...root.querySelectorAll<HTMLElement>('.confirm-actions .btn')]
+        const target = buttons[buttons.length - 1] ?? root.querySelector<HTMLElement>('button')
+        target?.focus()
       })
     } else if (previousFocus) {
       previousFocus.focus?.()
@@ -70,7 +75,7 @@ function onKeydown(event: KeyboardEvent): void {
         <p v-if="state.overlays.confirm.detail" class="confirm-detail mono">{{ state.overlays.confirm.detail }}</p>
       </div>
       <footer class="confirm-actions">
-        <button type="button" class="btn" autofocus @click="cancel">取消</button>
+        <button type="button" class="btn" @click="cancel">取消</button>
         <button
           type="button"
           class="btn"

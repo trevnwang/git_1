@@ -57,3 +57,6 @@ public sealed record RunRepoActionParams(
     IReadOnlyDictionary<string, JsonElement>? Args = null);
 
 public sealed record GetCiStatusParams(string? ComponentId = null);
+
+/// <summary>getRemoteRefs 参数：按组件 + 仓类型解析本地仓（供 CHKOUT 选择器使用）。</summary>
+public sealed record GetRemoteRefsParams(string? ComponentId = null, string? RepoType = null);

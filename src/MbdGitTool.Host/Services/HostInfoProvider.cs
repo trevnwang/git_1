@@ -25,7 +25,10 @@ public sealed class HostInfoProvider
             OpenPath: true,
             RepoActions: true,  // M2：单仓操作已接入
             Ci: false,          // v1 Mock 占位
-            ComponentDetail: true),
+            ComponentDetail: true,
+            RemoteRefs: true,       // M2 P0-7：CHKOUT 选择器数据源
+            RepoActionStash: true,  // M2：CHKOUT args.stash=true
+            CommitStageAll: true),  // M2：COMMIT args.stageAll=true（需 confirm）
         Limits: new HostLimitsDto(
             MaxDirectoryEntries: FileTreeReader.DefaultLimit,
             MaxDepth: 2,

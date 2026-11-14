@@ -17,14 +17,22 @@ namespace MbdGitTool.Host.Services;
 /// <summary>
 /// 单仓操作（spec §6.2 矩阵 / code-plan §3.9 / SRS §7.6/§9.16 FR-ACT）。
 /// <para><b>M2</b>：<c>GetAvailability</c> 仍是矩阵唯一事实源（Enabled = MatrixAllowed，Stage=M2）；</para>
-/// <para><c>RunAsync</c> 校验（action → 仓 → 矩阵 → 确认 → 本地仓）后执行真实 git 单仓操作：
-/// FETCH / PULL(--ff-only) / CHKOUT / COMMIT / PUSH；同仓串行、异仓并发。</para>
-/// <para><b>安全</b>：所有 git 参数走 <c>ArgumentList</c>；PAT 仅经 <c>GIT_CONFIG_*</c> 环境注入，
-/// 不进入参数/日志/响应/错误 details（输出统一脱敏 + 截断 ≤2000 字符）。</para>
+/// <para><c>RunAsync</c> 校验（action → 仓 → 矩阵 → 确认 → 本地仓 → 凭据作用域 → CAS）后执行真实 git 单仓操作：
+/// FETCH / PULL (fetch+merge --ff-only) / CHKOUT / COMMIT / PUSH；同仓串行、异仓并发。</para>
+/// <para><b>安全（M2 P0/P1 收口）</b>：所有 git 参数走 <c>ArgumentList</c>；PAT 仅在网络动作、
+/// 且 fetch/push URL 与 <c>AppConfig.GiteaBaseUrl</c>（scheme+host+port）及 <c>/&lt;org&gt;/</c> 路径完全匹配时，
+/// 以 URL 作用域 <c>http.&lt;base&gt;.extraHeader</c> 环境注入；配置非法/作用域不匹配一律 fail-closed（不启动网络 git）；
+/// 不进入参数/日志/响应/错误 details（输出统一脱敏 + 截断）。http base 需显式 <c>allowInsecureHttp</c>。</para>
 /// </summary>
 public sealed class RepoActionService
 {
     private static readonly string[] Actions = { "PULL", "FETCH", "CHKOUT", "COMMIT", "PUSH" };
+
+    /// <summary>网络类动作（需要 PAT 注入与 URL 作用域校验）。</summary>
+    private static readonly string[] NetworkActions = { "FETCH", "PULL", "PUSH" };
+
+    /// <summary>写类动作（需要快照 HEAD CAS 校验）。</summary>
+    private static readonly string[] WriteActions = { "PULL", "CHKOUT", "COMMIT", "PUSH" };
 
     /// <summary>响应 output / 错误 stderr 摘要最大字符数（spec 风险预算）。</summary>
     private const int MaxOutputChars = 2000;
@@ -34,6 +42,12 @@ public sealed class RepoActionService
 
     /// <summary>提交信息展示摘要最大字符数。</summary>
     private const int MaxErrorSummaryChars = 500;
+
+    /// <summary>错误摘要保留的最大 stderr 行数（P1-6：看最后 20 行 + 关键行）。</summary>
+    private const int MaxSummaryLines = 20;
+
+    /// <summary>CHKOUT 自动 stash 的固定 message（便于用户按 message 找回）。</summary>
+    public const string AutoStashMessage = "MBD: auto stash before CHKOUT";
 
     private const string Stage = "M2";
 
@@ -67,13 +81,21 @@ public sealed class RepoActionService
 
     private readonly GitCli _git;
     private readonly string? _giteaToken;
+    private readonly string? _giteaBaseUrl;
+    private readonly string? _giteaOrg;
+    private readonly bool _allowInsecureHttp;
 
     /// <param name="git">git 调用封装（可空，默认 <see cref="GitCli"/>）。</param>
-    /// <param name="giteaToken">Gitea PAT（可空）。仅用于网络类动作的 http.extraHeader 注入，禁止日志/响应输出。</param>
-    public RepoActionService(GitCli? git = null, string? giteaToken = null)
+    /// <param name="giteaToken">Gitea PAT（可空；为 null 时使用 <paramref name="config"/> 中的 token）。</param>
+    /// <param name="config">应用配置（提供 Gitea baseUrl/org、token 与 allowInsecureHttp）。</param>
+    public RepoActionService(GitCli? git = null, string? giteaToken = null, AppConfig? config = null)
     {
         _git = git ?? new GitCli();
-        _giteaToken = string.IsNullOrWhiteSpace(giteaToken) ? null : giteaToken.Trim();
+        var token = giteaToken ?? config?.GiteaToken;
+        _giteaToken = string.IsNullOrWhiteSpace(token) ? null : token.Trim();
+        _giteaBaseUrl = config?.GiteaBaseUrl;
+        _giteaOrg = config?.GiteaOrg;
+        _allowInsecureHttp = config?.AllowInsecureHttp ?? false;
     }
 
     /// <summary>按仓状态给出五键可用性（固定顺序 PULL/FETCH/CHKOUT/COMMIT/PUSH；Enabled=MatrixAllowed）。</summary>
@@ -195,7 +217,21 @@ public sealed class RepoActionService
                 });
         }
 
-        // 6) 本地仓前提（快照可能过期，必须在磁盘/Git 上再收口一次）。
+        // 6) COMMIT 的 stageAll 是显式“暂存全部改动”能力，必须与 confirm=true 同时出现（默认 staged-only）。
+        if (action == "COMMIT" && arguments.StageAll && !arguments.Confirm)
+        {
+            return CommandResult.Failure(
+                BridgeErrorCodes.ConfirmRequired,
+                "COMMIT 的 stageAll=true 会暂存全部改动（含未跟踪文件），需同时传入 confirm=true",
+                new Dictionary<string, object?>
+                {
+                    ["action"] = "COMMIT",
+                    ["requiresConfirm"] = true,
+                    ["stageAll"] = true
+                });
+        }
+
+        // 7) 本地仓前提（快照可能过期，必须在磁盘/Git 上再收口一次）。
         if (!repo.Repo.IsLocal || string.IsNullOrWhiteSpace(repo.Repo.LocalPath))
         {
             return CommandResult.Failure(
@@ -221,7 +257,7 @@ public sealed class RepoActionService
                 new Dictionary<string, object?> { ["repoType"] = repo.Repo.RepoType });
         }
 
-        // 7) 同仓串行：per-repo 信号量（静态字典，跨实例共享）。
+        // 8) 同仓串行：per-repo 信号量（静态字典，跨实例共享）。
         var gate = RepoLocks.GetOrAdd(localPath, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -244,14 +280,45 @@ public sealed class RepoActionService
         var stopwatch = Stopwatch.StartNew();
         var preHead = await ReadHeadAsync(localPath, cancellationToken).ConfigureAwait(false);
 
-        (CommandResult? Failure, string Output, string Message) outcome;
+        // M2 P0-1：网络动作先做凭据作用域校验（锁内、执行 git 前）；不匹配/配置非法一律不启动网络 git。
+        IReadOnlyDictionary<string, string>? credentialEnvironment = null;
+        if (IsNetworkAction(action))
+        {
+            var (scopeFailure, environment) =
+                await PrepareCredentialEnvironmentAsync(localPath, action, cancellationToken).ConfigureAwait(false);
+            if (scopeFailure is not null)
+            {
+                HostLog.Warn(
+                    $"runRepoAction {action} {repo.ComponentId}/{repo.Repo.RepoType} ok=false "
+                    + $"code={scopeFailure.Error?.Code ?? "<none>"} ms={stopwatch.ElapsedMilliseconds} (credential scope)");
+                return scopeFailure;
+            }
+
+            credentialEnvironment = environment;
+        }
+
+        // M2 P1-2：写动作执行前做 CAS（快照 HEAD vs 当前 HEAD），外部改动一律拒绝且零改动。
+        if (IsWriteAction(action))
+        {
+            var casFailure = CheckSnapshotHead(action, repo, preHead);
+            if (casFailure is not null)
+            {
+                HostLog.Warn(
+                    $"runRepoAction {action} {repo.ComponentId}/{repo.Repo.RepoType} ok=false "
+                    + $"code={casFailure.Error?.Code ?? "<none>"} ms={stopwatch.ElapsedMilliseconds} (cas)");
+                return casFailure;
+            }
+        }
+
+        ActionOutcome outcome;
         switch (action)
         {
             case "FETCH":
-                outcome = await FetchAsync(localPath, cancellationToken).ConfigureAwait(false);
+                outcome = await FetchAsync(localPath, credentialEnvironment, cancellationToken).ConfigureAwait(false);
                 break;
             case "PULL":
-                outcome = await PullAsync(localPath, arguments, cancellationToken).ConfigureAwait(false);
+                outcome = await PullAsync(localPath, arguments, credentialEnvironment, cancellationToken)
+                    .ConfigureAwait(false);
                 break;
             case "CHKOUT":
                 outcome = await CheckoutAsync(localPath, arguments, cancellationToken).ConfigureAwait(false);
@@ -260,7 +327,8 @@ public sealed class RepoActionService
                 outcome = await CommitAsync(localPath, arguments, cancellationToken).ConfigureAwait(false);
                 break;
             case "PUSH":
-                outcome = await PushAsync(localPath, arguments, cancellationToken).ConfigureAwait(false);
+                outcome = await PushAsync(localPath, arguments, credentialEnvironment, cancellationToken)
+                    .ConfigureAwait(false);
                 break;
             default:
                 return CommandResult.Failure(
@@ -294,14 +362,16 @@ public sealed class RepoActionService
             preHead,
             postHead,
             branch,
+            stashRef = outcome.StashRef,
             output = outcome.Output,
             durationMs = (long)stopwatch.ElapsedMilliseconds,
             message = outcome.Message
         });
     }
 
-    private async Task<(CommandResult? Failure, string Output, string Message)> FetchAsync(
+    private async Task<ActionOutcome> FetchAsync(
         string localPath,
+        IReadOnlyDictionary<string, string>? credentialEnvironment,
         CancellationToken cancellationToken)
     {
         var result = await _git
@@ -310,21 +380,21 @@ public sealed class RepoActionService
                 new[] { "fetch", "--prune", "origin" },
                 cancellationToken,
                 NetworkTimeout,
-                BuildCredentialEnvironment())
+                credentialEnvironment)
             .ConfigureAwait(false);
 
         if (!result.Success)
         {
-            return (MapGitFailure("FETCH", result, cancellationToken), string.Empty, string.Empty);
+            return new ActionOutcome(MapGitFailure("FETCH", result, cancellationToken), string.Empty, string.Empty);
         }
 
-        var output = FormatOutput(result);
-        return (null, output, "FETCH 完成");
+        return new ActionOutcome(null, FormatOutput(result), "FETCH 完成");
     }
 
-    private async Task<(CommandResult? Failure, string Output, string Message)> PullAsync(
+    private async Task<ActionOutcome> PullAsync(
         string localPath,
         ActionArguments arguments,
+        IReadOnlyDictionary<string, string>? credentialEnvironment,
         CancellationToken cancellationToken)
     {
         var branch = arguments.Branch;
@@ -334,86 +404,156 @@ public sealed class RepoActionService
             branch = await ReadCurrentBranchAsync(localPath, cancellationToken).ConfigureAwait(false);
             if (branch is null)
             {
-                return (InvalidArgument(
-                    "PULL 需要 branch 参数（当前 HEAD 处于 detached 状态或无法解析当前分支）",
-                    "branch"), string.Empty, string.Empty);
+                return new ActionOutcome(
+                    InvalidArgument("PULL 需要 branch 参数（当前 HEAD 处于 detached 状态或无法解析当前分支）", "branch"),
+                    string.Empty,
+                    string.Empty);
             }
         }
 
-        var result = await _git
+        // M2 P1-1：不再用 git pull（pull 无法传 --no-overwrite-ignore），改为 fetch + merge --ff-only。
+        var fetch = await _git
             .RunAsync(
                 localPath,
-                new[] { "pull", "--ff-only", "origin", branch },
+                new[] { "fetch", "origin", branch },
                 cancellationToken,
                 NetworkTimeout,
-                BuildCredentialEnvironment())
+                credentialEnvironment)
             .ConfigureAwait(false);
-
-        if (!result.Success)
+        if (!fetch.Success)
         {
-            if (IsNonFastForward(result))
-            {
-                var summary = SummarizeGitError(result);
-                return (CommandResult.Failure(
-                    BridgeErrorCodes.GitNonFastForward,
-                    $"PULL 失败：无法快进（--ff-only），请手动 Merge/Rebase 后重试",
-                    new Dictionary<string, object?>
-                    {
-                        ["action"] = "PULL",
-                        ["branch"] = branch,
-                        ["exitCode"] = result.ExitCode,
-                        ["stderr"] = summary,
-                        ["sdkCode"] = "GIT_NON_FAST_FORWARD"
-                    }), string.Empty, string.Empty);
-            }
-
-            return (MapGitFailure("PULL", result, cancellationToken), string.Empty, string.Empty);
+            return new ActionOutcome(MapGitFailure("PULL", fetch, cancellationToken), string.Empty, string.Empty);
         }
 
-        var output = FormatOutput(result);
-        return (null, output, $"PULL 完成（{branch}）");
+        var merge = await _git
+            .RunAsync(
+                localPath,
+                new[] { "merge", "--ff-only", "--no-overwrite-ignore", "origin/" + branch },
+                cancellationToken,
+                WriteTimeout)
+            .ConfigureAwait(false);
+        if (!merge.Success)
+        {
+            if (IsNonFastForward(merge) || IsNonFastForward(fetch))
+            {
+                return new ActionOutcome(
+                    FailWithSummary(
+                        BridgeErrorCodes.GitNonFastForward,
+                        "PULL 失败：无法快进（--ff-only），请手动 Merge/Rebase 后重试",
+                        "PULL",
+                        merge,
+                        new Dictionary<string, object?>
+                        {
+                            ["branch"] = branch,
+                            ["sdkCode"] = "GIT_NON_FAST_FORWARD"
+                        }),
+                    string.Empty,
+                    string.Empty);
+            }
+
+            if (IsOverwriteRejection(merge))
+            {
+                return new ActionOutcome(OverwriteFailure("PULL", merge), string.Empty, string.Empty);
+            }
+
+            return new ActionOutcome(MapGitFailure("PULL", merge, cancellationToken), string.Empty, string.Empty);
+        }
+
+        var output = Truncate(RedactSecrets(Combine(
+            Combine(fetch.Stdout, fetch.Stderr),
+            Combine(merge.Stdout, merge.Stderr))));
+        return new ActionOutcome(null, output, $"PULL 完成（{branch}）");
     }
 
-    private async Task<(CommandResult? Failure, string Output, string Message)> CheckoutAsync(
+    private async Task<ActionOutcome> CheckoutAsync(
         string localPath,
         ActionArguments arguments,
         CancellationToken cancellationToken)
     {
         // CHKOUT 前必须工作区 clean（含 untracked）：否则拒绝，避免覆盖本地改动。
+        // 例外：显式 args.stash=true 时先把工作区改动（含未跟踪）stash -u 保存，再检出。
         var status = await _git
             .RunAsync(localPath, new[] { "status", "--porcelain" }, cancellationToken)
             .ConfigureAwait(false);
         if (!status.Success)
         {
-            return (MapGitFailure("CHKOUT", status, cancellationToken), string.Empty, string.Empty);
+            return new ActionOutcome(MapGitFailure("CHKOUT", status, cancellationToken), string.Empty, string.Empty);
         }
 
         var dirty = status.Stdout.Trim();
+        string? stashRef = null;
         if (dirty.Length > 0)
         {
-            var dirtyCount = dirty.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length;
-            return (CommandResult.Failure(
-                BridgeErrorCodes.DirtyWorktree,
-                "工作区存在未提交变更（含未跟踪文件），CHKOUT 前请先提交或 stash",
-                new Dictionary<string, object?>
-                {
-                    ["action"] = "CHKOUT",
-                    ["dirtyCount"] = dirtyCount,
-                    ["sdkCode"] = "GIT_DIRTY_WORKTREE"
-                }), string.Empty, string.Empty);
+            if (!arguments.Stash)
+            {
+                var dirtyCount = dirty.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length;
+                return new ActionOutcome(
+                    CommandResult.Failure(
+                        BridgeErrorCodes.DirtyWorktree,
+                        "工作区存在未提交变更（含未跟踪文件），CHKOUT 前请先提交或 stash（或传 args.stash=true）",
+                        new Dictionary<string, object?>
+                        {
+                            ["action"] = "CHKOUT",
+                            ["dirtyCount"] = dirtyCount,
+                            ["sdkCode"] = "GIT_DIRTY_WORKTREE"
+                        }),
+                    string.Empty,
+                    string.Empty);
+            }
+
+            var stash = await _git
+                .RunAsync(
+                    localPath,
+                    new[] { "stash", "push", "-u", "-m", AutoStashMessage },
+                    cancellationToken,
+                    WriteTimeout)
+                .ConfigureAwait(false);
+            if (!stash.Success)
+            {
+                return new ActionOutcome(MapGitFailure("CHKOUT", stash, cancellationToken), string.Empty, string.Empty);
+            }
+
+            var stashId = await _git
+                .RunAsync(localPath, new[] { "rev-parse", "--verify", "refs/stash" }, cancellationToken)
+                .ConfigureAwait(false);
+            stashRef = stashId.Success && stashId.TrimmedStdout.Length > 0 ? "stash@{0}" : null;
         }
 
+        // M2 P1-3：先校验 ref 真实存在（refs/heads|refs/tags^{commit}），避免 checkout 进入路径模式的假成功。
         string[] argumentsForGit;
         string message;
         if (arguments.Tag is not null)
         {
-            argumentsForGit = new[] { "checkout", "--detach", arguments.Tag };
+            var verify = await _git
+                .RunAsync(
+                    localPath,
+                    new[] { "rev-parse", "--verify", "--quiet", "refs/tags/" + arguments.Tag + "^{commit}" },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!verify.Success || verify.TrimmedStdout.Length == 0)
+            {
+                return new ActionOutcome(RefNotFound("tag", arguments.Tag), string.Empty, string.Empty);
+            }
+
+            argumentsForGit = new[] { "checkout", "--no-overwrite-ignore", "--detach", arguments.Tag };
             message = $"CHKOUT 完成（tag {arguments.Tag}）";
         }
         else
         {
-            argumentsForGit = new[] { "checkout", arguments.Branch! };
-            message = $"CHKOUT 完成（分支 {arguments.Branch}）";
+            var branch = arguments.Branch!;
+            var verify = await _git
+                .RunAsync(
+                    localPath,
+                    new[] { "rev-parse", "--verify", "--quiet", "refs/heads/" + branch + "^{commit}" },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!verify.Success || verify.TrimmedStdout.Length == 0)
+            {
+                return new ActionOutcome(RefNotFound("branch", branch), string.Empty, string.Empty);
+            }
+
+            argumentsForGit = new[] { "checkout", "--no-overwrite-ignore", branch };
+            message = $"CHKOUT 完成（分支 {branch}）";
         }
 
         var result = await _git
@@ -421,13 +561,19 @@ public sealed class RepoActionService
             .ConfigureAwait(false);
         if (!result.Success)
         {
-            return (MapGitFailure("CHKOUT", result, cancellationToken), string.Empty, string.Empty);
+            // M2 P1-1：ignored/untracked 文件会被覆盖时 git 拒绝；明确提示先处理，绝不静默覆盖。
+            if (IsOverwriteRejection(result))
+            {
+                return new ActionOutcome(OverwriteFailure("CHKOUT", result), string.Empty, string.Empty);
+            }
+
+            return new ActionOutcome(MapGitFailure("CHKOUT", result, cancellationToken), string.Empty, string.Empty);
         }
 
-        return (null, FormatOutput(result), message);
+        return new ActionOutcome(null, FormatOutput(result), message, stashRef);
     }
 
-    private async Task<(CommandResult? Failure, string Output, string Message)> CommitAsync(
+    private async Task<ActionOutcome> CommitAsync(
         string localPath,
         ActionArguments arguments,
         CancellationToken cancellationToken)
@@ -439,21 +585,33 @@ public sealed class RepoActionService
             .ConfigureAwait(false);
         if (!status.Success)
         {
-            return (MapGitFailure("COMMIT", status, cancellationToken), string.Empty, string.Empty);
+            return new ActionOutcome(MapGitFailure("COMMIT", status, cancellationToken), string.Empty, string.Empty);
         }
 
-        // FR-ACT-03：只提交 index 中已暂存内容，不自动 add（避免误提交未审阅/未跟踪文件）。
+        // 显式“暂存全部改动”（args.stageAll=true 且 confirm=true）：先 git add -A，再走 staged-only 提交。
+        if (arguments.StageAll)
+        {
+            var add = await _git
+                .RunAsync(localPath, new[] { "add", "-A" }, cancellationToken, WriteTimeout)
+                .ConfigureAwait(false);
+            if (!add.Success)
+            {
+                return new ActionOutcome(MapGitFailure("COMMIT", add, cancellationToken), string.Empty, string.Empty);
+            }
+        }
+
+        // FR-ACT-03：默认只提交 index 中已暂存内容，不自动 add（避免误提交未审阅/未跟踪文件）。
         var staged = await _git
             .RunAsync(localPath, new[] { "diff", "--cached", "--quiet" }, cancellationToken)
             .ConfigureAwait(false);
         if (staged.Success)
         {
-            return (NothingToCommit(), string.Empty, string.Empty);
+            return new ActionOutcome(NothingToCommit(), string.Empty, string.Empty);
         }
 
         if (staged.ExitCode != 1)
         {
-            return (MapGitFailure("COMMIT", staged, cancellationToken), string.Empty, string.Empty);
+            return new ActionOutcome(MapGitFailure("COMMIT", staged, cancellationToken), string.Empty, string.Empty);
         }
 
         var commit = await _git
@@ -461,15 +619,16 @@ public sealed class RepoActionService
             .ConfigureAwait(false);
         if (!commit.Success)
         {
-            return (MapGitFailure("COMMIT", commit, cancellationToken), string.Empty, string.Empty);
+            return new ActionOutcome(MapGitFailure("COMMIT", commit, cancellationToken), string.Empty, string.Empty);
         }
 
-        return (null, FormatOutput(commit), "COMMIT 完成");
+        return new ActionOutcome(null, FormatOutput(commit), "COMMIT 完成");
     }
 
-    private async Task<(CommandResult? Failure, string Output, string Message)> PushAsync(
+    private async Task<ActionOutcome> PushAsync(
         string localPath,
         ActionArguments arguments,
+        IReadOnlyDictionary<string, string>? credentialEnvironment,
         CancellationToken cancellationToken)
     {
         // 禁止 force：只允许 origin HEAD（setUpstream=true 时附加 -u）。
@@ -488,16 +647,263 @@ public sealed class RepoActionService
                 pushArguments,
                 cancellationToken,
                 NetworkTimeout,
-                BuildCredentialEnvironment())
+                credentialEnvironment)
             .ConfigureAwait(false);
 
         if (!result.Success)
         {
-            // 失败原样返回 stderr 摘要（脱敏 token），不额外改写 git 语义。
-            return (MapGitFailure("PUSH", result, cancellationToken), string.Empty, string.Empty);
+            if (IsPushRejected(result))
+            {
+                return new ActionOutcome(
+                    FailWithSummary(
+                        BridgeErrorCodes.PushRejected,
+                        "PUSH 被远端拒绝（非快进/受保护分支等），请 FETCH/PULL 后重试；远端未被强制覆盖",
+                        "PUSH",
+                        result,
+                        new Dictionary<string, object?>
+                        {
+                            ["sdkCode"] = "GIT_PUSH_REJECTED",
+                            ["hint"] = "先 git pull --ff-only 合并远端提交，再重新 PUSH"
+                        }),
+                    string.Empty,
+                    string.Empty);
+            }
+
+            return new ActionOutcome(MapGitFailure("PUSH", result, cancellationToken), string.Empty, string.Empty);
         }
 
-        return (null, FormatOutput(result), "PUSH 完成");
+        return new ActionOutcome(null, FormatOutput(result), "PUSH 完成");
+    }
+
+    /// <summary>M2 P0-1：凭据注入前的 fail-closed 作用域校验（锁内执行，只读、不注凭据）。</summary>
+    private async Task<(CommandResult? Failure, IReadOnlyDictionary<string, string>? Environment)>
+        PrepareCredentialEnvironmentAsync(
+            string localPath,
+            string action,
+            CancellationToken cancellationToken)
+    {
+        var token = _giteaToken;
+        if (token is null)
+        {
+            // 无 token：公开仓/系统凭据助手路径，不注入、不校验（无凭据可外发）。
+            return (null, null);
+        }
+
+        // 1) 配置完整性：token 非空但 Gitea base/org 缺失或非法 → fail closed（绝不退化为“公开仓继续注入”）。
+        var invalidFields = new List<string>();
+        if (string.IsNullOrWhiteSpace(_giteaBaseUrl))
+        {
+            invalidFields.Add("giteaBaseUrl");
+        }
+
+        if (string.IsNullOrWhiteSpace(_giteaOrg))
+        {
+            invalidFields.Add("giteaOrg");
+        }
+
+        if (invalidFields.Count > 0)
+        {
+            return (GiteaConfigInvalid(action, invalidFields, "未配置 Gitea baseUrl/org，禁止携带 PAT 执行网络 git 操作"), null);
+        }
+
+        if (!Uri.TryCreate(_giteaBaseUrl!.Trim(), UriKind.Absolute, out var baseUri)
+            || (baseUri.Scheme != Uri.UriSchemeHttp && baseUri.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrEmpty(baseUri.Host))
+        {
+            return (GiteaConfigInvalid(
+                action,
+                new[] { "giteaBaseUrl" },
+                "Gitea baseUrl 非法（需 http(s)://host[:port]），禁止携带 PAT 执行网络 git 操作"), null);
+        }
+
+        if (!string.IsNullOrEmpty(baseUri.UserInfo))
+        {
+            return (GiteaConfigInvalid(
+                action,
+                new[] { "giteaBaseUrl" },
+                "Gitea baseUrl 不允许包含 userinfo（凭据），禁止携带 PAT 执行网络 git 操作"), null);
+        }
+
+        var org = _giteaOrg!.Trim();
+        if (org.Length == 0
+            || org.Contains('/')
+            || org.Contains('\\')
+            || org.Contains("..", StringComparison.Ordinal)
+            || org.Any(char.IsWhiteSpace)
+            || org.Any(char.IsControl))
+        {
+            return (GiteaConfigInvalid(
+                action,
+                new[] { "giteaOrg" },
+                "Gitea org 非法，禁止携带 PAT 执行网络 git 操作"), null);
+        }
+
+        if (baseUri.Scheme == Uri.UriSchemeHttp && !_allowInsecureHttp)
+        {
+            return (CommandResult.Failure(
+                BridgeErrorCodes.GiteaInsecureHttp,
+                "Gitea baseUrl 为明文 http，默认禁止注入 PAT（Authorization: Basic 可被同网段读取/重放）；"
+                + "确需内网 http 请显式设置 config.json gitea.allowInsecureHttp=true 或环境变量 MBD_GITEA_ALLOW_INSECURE_HTTP=true",
+                new Dictionary<string, object?>
+                {
+                    ["action"] = action,
+                    ["scheme"] = baseUri.Scheme,
+                    ["host"] = baseUri.Host,
+                    ["port"] = baseUri.Port,
+                    ["sdkCode"] = "GITEA_INSECURE_HTTP"
+                }), null);
+        }
+
+        // 2) 读取 fetch URL 与 pushurl（只读，不注凭据）。
+        var fetchUrl = await _git
+            .RunAsync(localPath, new[] { "remote", "get-url", "origin" }, cancellationToken)
+            .ConfigureAwait(false);
+        var pushUrl = await _git
+            .RunAsync(localPath, new[] { "remote", "get-url", "--push", "origin" }, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!fetchUrl.Success || fetchUrl.TrimmedStdout.Length == 0)
+        {
+            return (CredentialScopeFailure(
+                action,
+                baseUri,
+                org,
+                fetchUrl: null,
+                pushUrl: pushUrl.Success ? pushUrl.TrimmedStdout : null,
+                failedFields: new[] { "fetchUrl" },
+                reason: "无法读取 origin fetch URL"), null);
+        }
+
+        if (!pushUrl.Success || pushUrl.TrimmedStdout.Length == 0)
+        {
+            return (CredentialScopeFailure(
+                action,
+                baseUri,
+                org,
+                fetchUrl: fetchUrl.TrimmedStdout,
+                pushUrl: null,
+                failedFields: new[] { "pushUrl" },
+                reason: "无法读取 origin push URL"), null);
+        }
+
+        var fetchCheck = CheckUrlScope(fetchUrl.TrimmedStdout, baseUri, org);
+        var pushCheck = CheckUrlScope(pushUrl.TrimmedStdout, baseUri, org);
+        if (!fetchCheck.Matches || !pushCheck.Matches)
+        {
+            var failed = new List<string>();
+            failed.AddRange(fetchCheck.FailedFields.Select(field => "fetch." + field));
+            failed.AddRange(pushCheck.FailedFields.Select(field => "push." + field));
+
+            return (CredentialScopeFailure(
+                action,
+                baseUri,
+                org,
+                fetchUrl: fetchUrl.TrimmedStdout,
+                pushUrl: pushUrl.TrimmedStdout,
+                failedFields: failed,
+                reason: "origin fetch URL / pushurl 与 Gitea baseUrl（scheme+host+port）或 /<org>/ 路径不一致"), null);
+        }
+
+        // 3) URL 作用域 header：只有发往 canonical base 的请求才携带 Authorization（即使 origin 被改也不外发）。
+        var canonicalBase = baseUri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+        var basic = Convert.ToBase64String(Encoding.UTF8.GetBytes(token + ":"));
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["GIT_CONFIG_COUNT"] = "1",
+            ["GIT_CONFIG_KEY_0"] = "http." + canonicalBase + "/.extraHeader",
+            ["GIT_CONFIG_VALUE_0"] = "Authorization: Basic " + basic
+        };
+
+        return (null, environment);
+    }
+
+    private static UrlScopeCheck CheckUrlScope(string rawUrl, Uri baseUri, string org)
+    {
+        var failed = new List<string>();
+        if (!Uri.TryCreate(rawUrl.Trim(), UriKind.Absolute, out var uri) || string.IsNullOrEmpty(uri.Host))
+        {
+            return new UrlScopeCheck(false, null, null, null, false, new[] { "url" });
+        }
+
+        if (!uri.Scheme.Equals(baseUri.Scheme, StringComparison.OrdinalIgnoreCase))
+        {
+            failed.Add("scheme");
+        }
+
+        if (!uri.Host.Equals(baseUri.Host, StringComparison.OrdinalIgnoreCase))
+        {
+            failed.Add("host");
+        }
+
+        if (uri.Port != baseUri.Port)
+        {
+            failed.Add("port");
+        }
+
+        if (!string.IsNullOrEmpty(uri.UserInfo))
+        {
+            failed.Add("userinfo");
+        }
+
+        var basePath = baseUri.AbsolutePath.TrimEnd('/');
+        var expectedPrefix = basePath + "/" + org + "/";
+        var actualPath = uri.AbsolutePath;
+        if (!actualPath.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase)
+            || actualPath.Length <= expectedPrefix.Length)
+        {
+            failed.Add("path");
+        }
+
+        return new UrlScopeCheck(
+            failed.Count == 0,
+            uri.Scheme,
+            uri.Host,
+            uri.Port,
+            string.IsNullOrEmpty(uri.UserInfo),
+            failed);
+    }
+
+    private CommandResult GiteaConfigInvalid(string action, IReadOnlyList<string> fields, string message) =>
+        CommandResult.Failure(
+            BridgeErrorCodes.GiteaConfigInvalid,
+            message,
+            new Dictionary<string, object?>
+            {
+                ["action"] = action,
+                ["fields"] = fields,
+                ["sdkCode"] = "GITEA_CONFIG_INVALID"
+            });
+
+    private CommandResult CredentialScopeFailure(
+        string action,
+        Uri baseUri,
+        string org,
+        string? fetchUrl,
+        string? pushUrl,
+        IReadOnlyList<string> failedFields,
+        string reason)
+    {
+        var basePath = baseUri.AbsolutePath.TrimEnd('/');
+
+        // 仅返回 scheme/host/port/路径前缀等非敏感匹配字段；绝不回显 URL（可能内嵌旧凭据）。
+        var details = new Dictionary<string, object?>
+        {
+            ["action"] = action,
+            ["reason"] = reason,
+            ["expectedScheme"] = baseUri.Scheme,
+            ["expectedHost"] = baseUri.Host,
+            ["expectedPort"] = baseUri.Port,
+            ["expectedPathPrefix"] = basePath + "/" + org + "/",
+            ["fetchUrlPresent"] = !string.IsNullOrEmpty(fetchUrl),
+            ["pushUrlPresent"] = !string.IsNullOrEmpty(pushUrl),
+            ["failedFields"] = failedFields,
+            ["sdkCode"] = "GIT_CREDENTIAL_SCOPE"
+        };
+
+        return CommandResult.Failure(
+            BridgeErrorCodes.CredentialScope,
+            "拒绝注入 PAT：" + reason + "（未启动网络 git）",
+            details);
     }
 
     private async Task<string?> ReadHeadAsync(string localPath, CancellationToken cancellationToken)
@@ -533,23 +939,26 @@ public sealed class RepoActionService
         return branch;
     }
 
-    /// <summary>网络类动作的凭据环境：Gitea PAT → <c>Authorization: Basic base64(token:)</c>（http.extraHeader）。</summary>
-    private IReadOnlyDictionary<string, string>? BuildCredentialEnvironment()
+    /// <summary>M2 P1-2：快照 HEAD 与当前 HEAD 的 CAS 校验（不一致 → 零改动拒绝）。</summary>
+    private static CommandResult? CheckSnapshotHead(string action, RepoRef repo, string? currentHead)
     {
-        var token = _giteaToken;
-        if (token is null)
+        var snapshotHead = string.IsNullOrWhiteSpace(repo.Repo.HeadSha) ? null : repo.Repo.HeadSha.Trim();
+        if (string.Equals(snapshotHead ?? string.Empty, currentHead ?? string.Empty, StringComparison.OrdinalIgnoreCase))
         {
-            // 无 token 仍尝试（公开仓/系统凭据助手已配置）。
             return null;
         }
 
-        var basic = Convert.ToBase64String(Encoding.UTF8.GetBytes(token + ":"));
-        return new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["GIT_CONFIG_COUNT"] = "1",
-            ["GIT_CONFIG_KEY_0"] = "http.extraHeader",
-            ["GIT_CONFIG_VALUE_0"] = "Authorization: Basic " + basic
-        };
+        return CommandResult.Failure(
+            BridgeErrorCodes.ConcurrentChange,
+            "仓库 HEAD 已变化（快照过期/外部操作），已拒绝执行且未做任何修改；请刷新后重试",
+            new Dictionary<string, object?>
+            {
+                ["action"] = action,
+                ["state"] = NormalizeState(repo.Repo.State),
+                ["snapshotHead"] = snapshotHead,
+                ["currentHead"] = currentHead,
+                ["sdkCode"] = "GIT_CONCURRENT_CHANGE"
+            });
     }
 
     private CommandResult MapGitFailure(string action, GitResult result, CancellationToken cancellationToken)
@@ -583,18 +992,50 @@ public sealed class RepoActionService
                 });
         }
 
-        var summary = SummarizeGitError(result);
-        return CommandResult.Failure(
+        return FailWithSummary(
             BridgeErrorCodes.GitFailed,
-            $"{action} 失败（exit={result.ExitCode}）：{summary}",
+            $"{action} 失败（exit={result.ExitCode}）",
+            action,
+            result,
+            new Dictionary<string, object?> { ["sdkCode"] = "GIT_FAILED" });
+    }
+
+    private CommandResult FailWithSummary(
+        string code,
+        string message,
+        string action,
+        GitResult result,
+        IReadOnlyDictionary<string, object?>? extraDetails = null)
+    {
+        var summary = SummarizeGitError(result);
+        var details = new Dictionary<string, object?>
+        {
+            ["action"] = action,
+            ["exitCode"] = result.ExitCode,
+            ["stderr"] = summary
+        };
+        if (extraDetails is not null)
+        {
+            foreach (var pair in extraDetails)
+            {
+                details[pair.Key] = pair.Value;
+            }
+        }
+
+        return CommandResult.Failure(code, $"{message}：{summary}", details);
+    }
+
+    private CommandResult OverwriteFailure(string action, GitResult result) =>
+        FailWithSummary(
+            BridgeErrorCodes.WorktreeOverwrite,
+            $"{action} 被拒绝：存在会被覆盖的本地文件（含 .gitignore 忽略文件）",
+            action,
+            result,
             new Dictionary<string, object?>
             {
-                ["action"] = action,
-                ["exitCode"] = result.ExitCode,
-                ["stderr"] = summary,
-                ["sdkCode"] = "GIT_FAILED"
+                ["sdkCode"] = "GIT_WORKTREE_OVERWRITE",
+                ["hint"] = "请先备份/移走或提交这些本地文件，再重试（Host 不会静默覆盖）"
             });
-    }
 
     private CommandResult NothingToCommit() => CommandResult.Failure(
         BridgeErrorCodes.NothingToCommit,
@@ -610,12 +1051,47 @@ public sealed class RepoActionService
         message,
         new Dictionary<string, object?> { ["field"] = field });
 
+    private static CommandResult RefNotFound(string kind, string value) => CommandResult.Failure(
+        BridgeErrorCodes.RefNotFound,
+        $"{kind} 不存在：{value}（未检出，HEAD 保持不变）",
+        new Dictionary<string, object?>
+        {
+            ["field"] = kind,
+            ["kind"] = kind,
+            ["value"] = value,
+            ["sdkCode"] = "GIT_REF_NOT_FOUND"
+        });
+
+    private static bool IsNetworkAction(string action) =>
+        NetworkActions.Contains(action, StringComparer.Ordinal);
+
+    private static bool IsWriteAction(string action) =>
+        WriteActions.Contains(action, StringComparer.Ordinal);
+
     private static bool IsNonFastForward(GitResult result)
     {
         var text = (result.Stderr + "\n" + result.Stdout).ToLowerInvariant();
         return text.Contains("not possible to fast-forward", StringComparison.Ordinal)
             || text.Contains("non-fast-forward", StringComparison.Ordinal)
             || text.Contains("not a fast forward", StringComparison.Ordinal);
+    }
+
+    /// <summary>P1-1：git 因“本地文件会被覆盖”拒绝（ignored/untracked 冲突）。</summary>
+    private static bool IsOverwriteRejection(GitResult result)
+    {
+        var text = (result.Stderr + "\n" + result.Stdout).ToLowerInvariant();
+        return text.Contains("would be overwritten", StringComparison.Ordinal)
+            || text.Contains("please move or remove them", StringComparison.Ordinal)
+            || text.Contains("overwrite ignored", StringComparison.Ordinal);
+    }
+
+    private static bool IsPushRejected(GitResult result)
+    {
+        var text = (result.Stderr + "\n" + result.Stdout).ToLowerInvariant();
+        return text.Contains("[rejected]", StringComparison.Ordinal)
+            || text.Contains("non-fast-forward", StringComparison.Ordinal)
+            || text.Contains("fetch first", StringComparison.Ordinal)
+            || text.Contains("protected branch", StringComparison.Ordinal);
     }
 
     private string FormatOutput(GitResult result) =>
@@ -629,14 +1105,49 @@ public sealed class RepoActionService
             return "（无 stderr 输出）";
         }
 
-        var firstLine = text.Split('\n')[0].Trim();
-        if (firstLine.Length == 0)
+        var lines = text
+            .Split('\n')
+            .Select(line => line.TrimEnd())
+            .Where(line => line.Trim().Length > 0)
+            .ToList();
+        if (lines.Count == 0)
         {
-            firstLine = text.Trim().Split('\n')[0].Trim();
+            return "（无 stderr 输出）";
         }
 
-        var redacted = RedactSecrets(firstLine);
-        return redacted.Length <= MaxErrorSummaryChars ? redacted : redacted[..MaxErrorSummaryChars] + "…";
+        // P1-6：优先保留关键行（fatal/error/rejected 等），再补充最后 ≤20 行；不再只看首行。
+        var selected = new List<string>();
+        foreach (var line in lines.Where(IsKeyErrorLine).TakeLast(8))
+        {
+            AddIfMissing(selected, line);
+        }
+
+        foreach (var line in lines.TakeLast(MaxSummaryLines))
+        {
+            AddIfMissing(selected, line);
+        }
+
+        var summary = RedactSecrets(string.Join("\n", selected));
+        return summary.Length <= MaxErrorSummaryChars ? summary : summary[..(MaxErrorSummaryChars - 1)] + "…";
+    }
+
+    private static bool IsKeyErrorLine(string line)
+    {
+        var trimmed = line.TrimStart();
+        return trimmed.StartsWith("fatal:", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("error:", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("! [rejected]", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("[rejected]", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("hint:", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("remote:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AddIfMissing(List<string> lines, string line)
+    {
+        if (!lines.Contains(line, StringComparer.Ordinal))
+        {
+            lines.Add(line);
+        }
     }
 
     private static string Combine(string stdout, string stderr)
@@ -693,7 +1204,7 @@ public sealed class RepoActionService
         string action,
         out ActionArguments arguments)
     {
-        arguments = new ActionArguments(null, null, null, false, false);
+        arguments = new ActionArguments(null, null, null, false, false, false, false);
         if (raw is null || raw.Count == 0)
         {
             return ValidateRequiredArguments(action, arguments);
@@ -729,6 +1240,18 @@ public sealed class RepoActionService
             return error;
         }
 
+        error = ReadBool(raw, "stash", out var stash);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        error = ReadBool(raw, "stageAll", out var stageAll);
+        if (error is not null)
+        {
+            return error;
+        }
+
         if (branch is not null)
         {
             var branchError = ValidateRefName(branch, "branch");
@@ -756,7 +1279,7 @@ public sealed class RepoActionService
             }
         }
 
-        arguments = new ActionArguments(branch, tag, message, confirm, setUpstream);
+        arguments = new ActionArguments(branch, tag, message, confirm, setUpstream, stash, stageAll);
         return ValidateRequiredArguments(action, arguments);
     }
 
@@ -867,9 +1390,9 @@ public sealed class RepoActionService
             return InvalidArgument($"参数 {field} 超长（≤255 字符）", field);
         }
 
-        if (value[0] is '-')
+        if (value[0] is '-' or '+')
         {
-            return InvalidArgument($"参数 {field} 不能以 '-' 开头", field);
+            return InvalidArgument($"参数 {field} 不能以 '-' 或 '+' 开头", field);
         }
 
         foreach (var ch in value)
@@ -924,11 +1447,29 @@ public sealed class RepoActionService
         _ => $"当前状态 {state} 不允许 {action}（spec §6.2）"
     };
 
-    /// <summary>解析后的 args（branch/tag/message/confirm/setUpstream）。</summary>
+    /// <summary>解析后的 args（branch/tag/message/confirm/setUpstream/stash/stageAll）。</summary>
     private sealed record ActionArguments(
         string? Branch,
         string? Tag,
         string? Message,
         bool Confirm,
-        bool SetUpstream);
+        bool SetUpstream,
+        bool Stash,
+        bool StageAll);
+
+    /// <summary>动作执行结果（Failure 非 null 即失败；StashRef 仅 CHKOUT 自动 stash 时非空）。</summary>
+    private sealed record ActionOutcome(
+        CommandResult? Failure,
+        string Output,
+        string Message,
+        string? StashRef = null);
+
+    /// <summary>origin URL 与 Gitea base 的作用域比对结果（用于可诊断的 E_CREDENTIAL_SCOPE details）。</summary>
+    private sealed record UrlScopeCheck(
+        bool Matches,
+        string? Scheme,
+        string? Host,
+        int? Port,
+        bool NoUserInfo,
+        IReadOnlyList<string> FailedFields);
 }

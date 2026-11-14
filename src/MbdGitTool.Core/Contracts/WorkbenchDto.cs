@@ -74,7 +74,10 @@ public sealed record HostFeaturesDto(
     bool OpenPath,
     bool RepoActions,
     bool Ci,
-    bool ComponentDetail);
+    bool ComponentDetail,
+    bool RemoteRefs = false,       // M2 P0-7：getRemoteRefs（CHKOUT 选择器数据源）
+    bool RepoActionStash = false,  // M2：CHKOUT 支持 args.stash=true（stash -u 后检出）
+    bool CommitStageAll = false);  // M2：COMMIT 支持 args.stageAll=true（仅 confirm=true）
 
 public sealed record HostLimitsDto(
     int MaxDirectoryEntries,

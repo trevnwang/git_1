@@ -75,7 +75,8 @@ internal sealed record RepoSpec(
     int Behind = 0,
     int DirtyCount = 0,
     string? RepoName = null,
-    string? Branch = "main");
+    string? Branch = "main",
+    string? HeadSha = null);
 
 internal sealed record ComponentSpec(
     string ComponentId,
@@ -105,7 +106,7 @@ internal static class TestData
         State: spec.State,
         SubType: null,
         Branch: spec.Branch,
-        HeadSha: new string('a', 40),
+        HeadSha: spec.HeadSha ?? new string('a', 40),
         Ahead: spec.Ahead,
         Behind: spec.Behind,
         DirtyCount: spec.DirtyCount,
@@ -179,6 +180,26 @@ internal static class TestGit
 
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("无法启动 git");
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"git {string.Join(' ', arguments)} 失败（exit={process.ExitCode}）：{stdout}{stderr}");
+        }
+    }
+
+    /// <summary>执行 git 并写入 stdin（如 <c>update-ref --stdin</c> 批量造 ref）。</summary>
+    public static void RunWithInput(string workingDirectory, string input, params string[] arguments)
+    {
+        var startInfo = BuildStartInfo(workingDirectory, arguments);
+        startInfo.RedirectStandardInput = true;
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("无法启动 git");
+        process.StandardInput.Write(input);
+        process.StandardInput.Close();
         var stdout = process.StandardOutput.ReadToEnd();
         var stderr = process.StandardError.ReadToEnd();
         process.WaitForExit();

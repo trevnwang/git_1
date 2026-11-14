@@ -14,6 +14,9 @@ import EmptyState from '../common/EmptyState.vue'
 const w = useWorkbench()
 const state = w.state
 const closeBtn = ref<HTMLButtonElement | null>(null)
+/** 打开前的触发控件；关闭后归还焦点（AC-UI-13）。原控件被移除时回退到触发卡片。 */
+let previousFocus: HTMLElement | null = null
+let lastOpenId = ''
 
 const open = computed(() => state.overlays.componentDrawer)
 const openId = computed(() => state.overlays.componentDrawer ?? '')
@@ -26,7 +29,26 @@ const recentCommits = computed(() => state.detail?.commits.slice(0, 5) ?? [])
 const ciState = computed(() => component.value?.ci ?? 'NONE')
 
 watch(open, (value) => {
-  if (value) void nextTick(() => closeBtn.value?.focus())
+  if (value) {
+    lastOpenId = value
+    previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    void nextTick(() => closeBtn.value?.focus())
+    return
+  }
+  // 关闭后焦点归还触发控件：优先打开前元素；丢失时回退到该组件卡片。
+  const target = previousFocus
+  previousFocus = null
+  void nextTick(() => {
+    if (target && target.isConnected && target !== document.body) {
+      target.focus()
+      return
+    }
+    if (!lastOpenId) return
+    const card = document.querySelector<HTMLElement>(
+      `[data-testid="component-card"][data-component-id="${lastOpenId}"]`,
+    )
+    card?.focus()
+  })
 })
 
 function copy(text: string | null | undefined, label: string): void {

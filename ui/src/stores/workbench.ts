@@ -36,10 +36,13 @@ import {
 import type {
   ActionAvailability,
   ActionDialogPayload,
+  ActionDialogRefsStatus,
+  ActionDialogRefVm,
   ActionDialogVm,
   CommitVm,
   ComponentDetailState,
   ComponentVm,
+  ConfirmBarVm,
   ConfirmVm,
   DrawerKind,
   FilterState,
@@ -129,6 +132,8 @@ interface WorkbenchState {
     modal: ModalKind | null
     filterOpen: boolean
     confirm: ConfirmVm | null
+    /** F 区按钮上方的内联确认条（COMMIT/PUSH 唯一写入口，FR-ACT-04）。 */
+    confirmBar: ConfirmBarVm | null
     /** M2 五键动作对话框（COMMIT 输入 / CHKOUT 选择 / 通用确认）。 */
     actionDialog: ActionDialogVm | null
     contextMenu: ContextMenuState | null
@@ -194,6 +199,8 @@ let notifySeq = 0
 let epoch = 0
 let snapshotRetryIndex = 0
 let snapshotRetryTimer: ReturnType<typeof setTimeout> | undefined
+/** CHKOUT refs 加载序号：关闭/重开对话框后丢弃过期响应（避免旧仓 refs 串台）。 */
+let checkoutRefsSeq = 0
 
 const state = reactive<WorkbenchState>({
   booted: false,
@@ -281,6 +288,7 @@ const state = reactive<WorkbenchState>({
     modal: null,
     filterOpen: false,
     confirm: null,
+    confirmBar: null,
     actionDialog: null,
     contextMenu: null,
   },
@@ -307,9 +315,13 @@ function visibleComponents(): ComponentVm[] {
   return sortComponents(filterComponents(state.components, state.search, state.filter), state.sortBy)
 }
 
-function blockedAvailability(reasonFor: (action: RepoAction) => string): Record<RepoAction, ActionAvailability> {
+function blockedAvailability(
+  reasonFor: (action: RepoAction) => string,
+  code = 'E_ACTION_NOT_ALLOWED',
+  alt = '按状态矩阵先修复仓库状态后重试',
+): Record<RepoAction, ActionAvailability> {
   const result = {} as Record<RepoAction, ActionAvailability>
-  for (const action of REPO_ACTIONS) result[action] = { enabled: false, reason: reasonFor(action), confirm: false }
+  for (const action of REPO_ACTIONS) result[action] = { enabled: false, reason: reasonFor(action), confirm: false, code, alt }
   return result
 }
 
@@ -322,12 +334,18 @@ function availability(): Record<RepoAction, ActionAvailability> {
     const infoFlag = state.hostInfo ? state.hostInfo.features?.repoActions : undefined
     const snapshotFlag = state.capabilities.repoActions
     if (infoFlag === undefined && snapshotFlag === null) {
-      return blockedAvailability((action) => `正在读取 Host 能力（getHostInfo / snapshot.capabilities）…${action} 暂不可用`)
+      return blockedAvailability(
+        (action) => `正在读取 Host 能力（getHostInfo / snapshot.capabilities）…${action} 暂不可用`,
+        'E_BUSY',
+        '等待 Host 能力读取完成后重试',
+      )
     }
     const allowed = infoFlag === true || (infoFlag === undefined && snapshotFlag === true)
     if (!allowed) {
       return blockedAvailability(
         (action) => `M1 只读：${action} 需 Host 开启 features.repoActions 或 snapshot.capabilities.repoActions（M2 接入）`,
+        'E_NOT_IMPLEMENTED',
+        '在支持写操作的 Host（M2a）中运行',
       )
     }
   }
@@ -440,6 +458,37 @@ function closeConfirm(): void {
   state.overlays.confirm = null
 }
 
+// ───────────────────────────── F 区确认条（FR-ACT-04 / AC-UI-10a/10b） ─────────────────────────────
+
+/**
+ * 打开 F 区按钮上方的 ≤48px 内联确认条。COMMIT/PUSH 的唯一写入口：
+ * 只有点「确认」（acceptConfirmBar）才会调用 runRepoAction；取消/Esc/切换选中均为 0 写。
+ */
+function openConfirmBar(bar: ConfirmBarVm): void {
+  closeContextMenu()
+  state.overlays.confirmBar = bar
+}
+
+/** 静默关闭（切换仓库/选中、刷新等上下文失效时使用，不触发 onCancel 回执）。 */
+function closeConfirmBar(): void {
+  state.overlays.confirmBar = null
+}
+
+/** 用户点「取消」/Esc：关闭并执行取消回调（0 写）。 */
+function cancelConfirmBar(): void {
+  const bar = state.overlays.confirmBar
+  state.overlays.confirmBar = null
+  bar?.onCancel?.()
+}
+
+/** 用户点「确认」：先移除确认条，再执行写操作（其余路径不得绕过本函数）。 */
+function acceptConfirmBar(): void {
+  const bar = state.overlays.confirmBar
+  if (!bar) return
+  state.overlays.confirmBar = null
+  bar.onAccept()
+}
+
 // ───────────────────────────── M2 动作对话框 / 组件详情抽屉 ─────────────────────────────
 
 function openActionDialog(dialog: ActionDialogVm): void {
@@ -449,6 +498,8 @@ function openActionDialog(dialog: ActionDialogVm): void {
 }
 
 function closeActionDialog(): void {
+  // 作废进行中的 CHKOUT refs 加载，避免关闭后旧响应回填。
+  checkoutRefsSeq += 1
   state.overlays.actionDialog = null
 }
 
@@ -710,6 +761,8 @@ async function selectComponent(id: string): Promise<void> {
     if (id) await loadActive()
     return
   }
+  // 选中变化后旧确认条的作用域已失效：静默作废（0 写）。
+  if (state.overlays.confirmBar) closeConfirmBar()
   epoch += 1
   const currentEpoch = epoch
   state.selectedComponentId = id
@@ -855,6 +908,7 @@ async function toggleTreePath(repoType: RepoType, path: string): Promise<void> {
 
 function selectTreeNode(repoType: RepoType, path: string | null): void {
   const changedRepo = repoType !== state.focusedRepoType
+  if (changedRepo && state.overlays.confirmBar) closeConfirmBar()
   state.focusedRepoType = repoType
   state.selectedPath = path
   if (changedRepo || path === null) void loadDetail()
@@ -862,6 +916,8 @@ function selectTreeNode(repoType: RepoType, path: string | null): void {
 
 function focusRepo(repoType: RepoType): void {
   if (state.focusedRepoType === repoType) return
+  // 聚焦仓变化后旧确认条作用域失效：静默作废（0 写）。
+  if (state.overlays.confirmBar) closeConfirmBar()
   state.focusedRepoType = repoType
   state.selectedPath = null
   void loadDetail()
@@ -1045,6 +1101,8 @@ async function doOpenPath(
 async function runAction(action: RepoAction): Promise<void> {
   if (state.action.pending) return
   if (state.overlays.actionDialog || state.overlays.confirm) return
+  // 已打开的确认条视为未确认：切换动作前先作废（0 写），避免旧仓/旧动作的确认被误用。
+  if (state.overlays.confirmBar) closeConfirmBar()
   const repo = focusedRepo()
   if (!repo) {
     notify('请先在文件树中选择仓库', 'warning')
@@ -1052,15 +1110,17 @@ async function runAction(action: RepoAction): Promise<void> {
   }
   const cell = availability()[action]
   if (!cell.enabled) {
-    notify(cell.reason, 'warning', 4000)
+    notify(`${cell.reason}${cell.code ? ` [${cell.code}]` : ''}${cell.alt ? ` → ${cell.alt}` : ''}`, 'warning', 4000)
     return
   }
   const target: ActionTarget = { componentId: selectedComponent().id, repoType: repo.repoType }
   switch (action) {
     case 'COMMIT':
+      // 第一步：输入提交信息 + 暂存范围；第二步（提交对话框确认后）才是 F 区确认条，确认后才写。
       openCommitDialog(target, repo)
       return
     case 'CHKOUT':
+      // spec §6.3：CHKOUT 只弹分支/Tag 选择器，不走确认条（免确认）。
       openCheckoutDialog(target, repo)
       return
     case 'PULL':
@@ -1068,8 +1128,8 @@ async function runAction(action: RepoAction): Promise<void> {
       void executeRepoAction('PULL', {}, false, target)
       return
     case 'PUSH':
-      // spec §6.4：常规 PUSH 免确认；无 upstream 发布分支才需确认（M2 后续细化）。
-      void executeRepoAction('PUSH', {}, false, target)
+      // FR-ACT-04 / D-025②：PUSH 是写远端操作，必须先经 F 区确认条，禁止零确认。
+      openPushConfirmBar(target, repo)
       return
     default:
       // FETCH 为短网络只读探测，按 spec §6.4 免确认直接执行。
@@ -1085,22 +1145,30 @@ interface ActionTarget {
 }
 
 function openCommitDialog(target: ActionTarget, repo: RepoVm): void {
+  const staged = Math.max(0, repo.stagedCount)
+  const unstaged = Math.max(0, repo.dirtyCount) + Math.max(0, repo.untrackedCount)
   openActionDialog({
     kind: 'commit',
     action: 'COMMIT',
     title: 'COMMIT · 提交已暂存改动',
-    body: `将提交 ${repo.repoName || repo.repoType}（${repo.repoType}）当前分支 ${repo.branch} 的已暂存改动；提交信息必填（1–200 字符）。`,
+    body: `将提交 ${repo.repoName || repo.repoType}（${repo.repoType}）当前分支 ${repo.branch} 的已暂存改动：已暂存 ${staged} 个文件 / 将提交 ${staged} 个文件；提交信息必填（1–200 字符）。默认只提交已暂存内容，不自动 git add -A。`,
     detail: repo.localPath ?? undefined,
-    confirmLabel: '提交',
+    confirmLabel: '下一步：确认提交',
     danger: false,
     initialMessage: '',
+    stagedCount: staged,
+    dirtyCount: Math.max(0, repo.dirtyCount),
+    untrackedCount: Math.max(0, repo.untrackedCount),
+    showStageAll: true,
     info: [
       { label: '仓库', value: repo.repoName || repo.repoType },
       { label: '分支', value: repo.branch },
+      { label: '已暂存', value: `${staged} 个文件`, tone: staged > 0 ? 'muted' : 'warning' },
+      { label: '将提交', value: `${staged} 个文件`, tone: staged > 0 ? 'muted' : 'warning' },
       {
         label: '未提交',
         value: `已跟踪 ${repo.dirtyCount} · 未跟踪 ${repo.untrackedCount}`,
-        tone: repo.dirtyCount + repo.untrackedCount > 0 ? 'warning' : 'muted',
+        tone: unstaged > 0 ? 'warning' : 'muted',
       },
     ],
     submit: (payload) => {
@@ -1110,46 +1178,205 @@ function openCommitDialog(target: ActionTarget, repo: RepoVm): void {
         openCommitDialog(target, repo)
         return
       }
-      void executeRepoAction('COMMIT', { message }, false, target)
+      // 提交对话框只负责收集参数；真正的写操作必须再经 F 区确认条（0 写直到 accept）。
+      openCommitConfirmBar(target, repo, message, payload.stageAll === true)
     },
   })
 }
 
-function openCheckoutDialog(target: ActionTarget, repo: RepoVm): void {
-  const suggestions = [...new Set([repo.branch, repo.tag ?? '', repo.compareRef?.replace(/^refs\/remotes\/origin\//, '') ?? ''])]
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0 && item !== '—')
-  const dirtyHint =
-    repo.dirtyCount + repo.untrackedCount > 0
-      ? `该仓有 ${repo.dirtyCount + repo.untrackedCount} 处未提交改动；若 Host 返回 E_DIRTY_WORKTREE，请先 COMMIT 或 stash 再检出。`
-      : undefined
-  openActionDialog({
+/** COMMIT 的 F 区确认条：文案固定「将提交 N 个已暂存文件」，accept 后才执行写操作。 */
+function openCommitConfirmBar(target: ActionTarget, repo: RepoVm, message: string, stageAll: boolean): void {
+  const staged = Math.max(0, repo.stagedCount)
+  const extra = Math.max(0, repo.dirtyCount) + Math.max(0, repo.untrackedCount)
+  const label = repo.branch && repo.branch !== '—' ? repo.branch : 'HEAD'
+  openConfirmBar({
+    action: 'COMMIT',
+    text: `将提交 ${staged} 个已暂存文件`,
+    detail: stageAll
+      ? `已勾选「暂存全部改动（git add -A）」：将在提交前暂存剩余 ${extra} 处改动，然后提交全部 ${staged + extra} 个文件（分支 ${label}）`
+      : `分支 ${label} · 仅提交已暂存内容，不自动 git add -A`,
+    confirmLabel: '确认提交',
+    danger: false,
+    onAccept: () => {
+      const args: RepoActionArgs = stageAll ? { message, stageAll: true, confirm: true } : { message }
+      void executeRepoAction('COMMIT', args, false, target)
+    },
+  })
+}
+
+/** PUSH 的 F 区确认条：文案固定「将推送 N 个提交（分支 → upstream）」；NO_UPSTREAM 走发布分支 + setUpstream。 */
+function openPushConfirmBar(target: ActionTarget, repo: RepoVm): void {
+  const stateCode = repo.state.toUpperCase()
+  const noUpstream = stateCode === 'NO_UPSTREAM'
+  const label = repo.branch && repo.branch !== '—' ? repo.branch : 'HEAD'
+  const upstreamRaw = (repo.compareRef ?? '').replace(/^refs\/remotes\//, '').trim()
+  const upstream = upstreamRaw && upstreamRaw !== label ? upstreamRaw : `origin/${label}`
+  const commits = Math.max(0, repo.ahead)
+  openConfirmBar({
+    action: 'PUSH',
+    text: `将推送 ${commits} 个提交（${label} → ${upstream}）`,
+    detail: noUpstream
+      ? `发布分支：${label} → ${upstream}；首次推送将建立 upstream（setUpstream=true）`
+      : undefined,
+    confirmLabel: '确认推送',
+    danger: true,
+    onAccept: () => {
+      const args: RepoActionArgs = noUpstream ? { setUpstream: true } : {}
+      void executeRepoAction('PUSH', args, false, target)
+    },
+  })
+}
+
+/** CHKOUT 对话框重开（校验失败）时保留已加载的 refs 与搜索词。 */
+interface CheckoutDialogSeed {
+  refs?: ActionDialogRefVm[]
+  refsStatus?: ActionDialogRefsStatus
+  refsError?: string
+  refsTruncated?: boolean
+  search?: string
+  refKind?: 'branch' | 'tag'
+  refValue?: string
+}
+
+function dedupeRefs(refs: ActionDialogRefVm[]): ActionDialogRefVm[] {
+  const seen = new Set<string>()
+  const out: ActionDialogRefVm[] = []
+  for (const ref of refs) {
+    const key = `${ref.kind}:${ref.refName}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(ref)
+  }
+  return out
+}
+
+/** 无 Host / Mock / getRemoteRefs 不可用时的回退：当前分支 + compareRef（远程）+ 当前 Tag 建议。 */
+function checkoutFallbackRefs(repo: RepoVm): ActionDialogRefVm[] {
+  const head = repo.headSha && repo.headSha !== '—' ? shortSha(repo.headSha) : ''
+  const refs: ActionDialogRefVm[] = []
+  const branch = (repo.branch ?? '').trim()
+  if (branch && branch !== '—') {
+    refs.push({ refName: `refs/heads/${branch}`, shortSha: head, kind: 'LOCAL_BRANCH' })
+  }
+  const compare = (repo.compareRef ?? '').trim()
+  if (compare.startsWith('refs/remotes/')) {
+    refs.push({ refName: compare, shortSha: head, kind: 'REMOTE_BRANCH' })
+  } else if (compare.startsWith('refs/heads/')) {
+    refs.push({ refName: compare, shortSha: head, kind: 'LOCAL_BRANCH' })
+  }
+  const tag = (repo.tag ?? '').trim()
+  if (tag && tag !== '—') {
+    refs.push({ refName: `refs/tags/${tag}`, shortSha: head, kind: 'TAG' })
+  }
+  return dedupeRefs(refs)
+}
+
+/**
+ * CHKOUT 打开时按当前组件/仓加载 Host getRemoteRefs（M2 P0-7）。
+ * loading → ready；Host 不可用/失败/Mock → 回退当前分支/Tag 建议（内联提示，不打断）。
+ */
+async function loadCheckoutRefs(target: ActionTarget, repo: RepoVm, token: number): Promise<void> {
+  const apply = (patch: Partial<ActionDialogVm>): void => {
+    if (token !== checkoutRefsSeq) return
+    const current = state.overlays.actionDialog
+    if (!current || current.kind !== 'checkout') return
+    Object.assign(current, patch)
+  }
+  const fallback = checkoutFallbackRefs(repo)
+  if (isMockMode()) {
+    apply({ refs: fallback, refsStatus: 'fallback', refsError: '', refsTruncated: false })
+    return
+  }
+  if (state.hostInfo?.features?.remoteRefs === false) {
+    apply({
+      refs: fallback,
+      refsStatus: 'fallback',
+      refsError: '当前 Host 未开启 getRemoteRefs，已回退为当前分支/Tag 建议',
+      refsTruncated: false,
+    })
+    return
+  }
+  try {
+    const dto = await api.getRemoteRefs({ componentId: target.componentId, repoType: target.repoType })
+    const refs = dedupeRefs(
+      dto.refs.map((ref) => ({ refName: ref.refName, shortSha: ref.shortSha, kind: ref.kind })),
+    )
+    if (refs.length === 0) {
+      apply({ refs: fallback, refsStatus: 'fallback', refsError: '未读取到分支/Tag，已回退为当前分支/Tag 建议', refsTruncated: false })
+      return
+    }
+    apply({ refs, refsStatus: 'ready', refsError: '', refsTruncated: dto.truncated })
+  } catch (error) {
+    // 契约未实现/超时/无 Host：回退建议，不弹错误 Toast（对话框内联说明即可）。
+    apply({
+      refs: fallback,
+      refsStatus: 'fallback',
+      refsError: `读取分支/Tag 失败（${toErrorMessage(error)}），已回退为当前分支/Tag 建议`,
+      refsTruncated: false,
+    })
+  }
+}
+
+function openCheckoutDialog(target: ActionTarget, repo: RepoVm, seed?: CheckoutDialogSeed): void {
+  const dirtyTotal = Math.max(0, repo.dirtyCount) + Math.max(0, repo.untrackedCount)
+  const dirty = dirtyTotal > 0
+  const head = repo.headSha && repo.headSha !== '—' ? shortSha(repo.headSha) : '—'
+  const refs: ActionDialogRefVm[] = seed?.refs ?? (seed ? [] : checkoutFallbackRefs(repo))
+  const dialog: ActionDialogVm = {
     kind: 'checkout',
     action: 'CHKOUT',
     title: 'CHKOUT · 检出分支 / Tag',
-    body: `将 ${repo.repoName || repo.repoType}（${repo.repoType}）从 ${repo.branch} 检出到指定分支或 Tag。`,
-    detail: dirtyHint ?? repo.localPath ?? undefined,
+    body: dirty
+      ? `将 ${repo.repoName || repo.repoType}（${repo.repoType}）从 ${repo.branch} 检出到指定分支或 Tag。工作区有 ${dirtyTotal} 处未提交改动：勾选「检出前自动 stash（-u）」后由 Host 先 stash 再检出，否则 Host 将返回 E_DIRTY_WORKTREE。`
+      : `将 ${repo.repoName || repo.repoType}（${repo.repoType}）从 ${repo.branch} 检出到指定分支或 Tag。`,
+    detail: dirty
+      ? `工作区 dirty：${dirtyTotal} 处改动（含未跟踪）将在检出前自动 git stash push -u 保存`
+      : repo.localPath ?? undefined,
     confirmLabel: '检出',
     danger: false,
-    initialRefKind: repo.tag && repo.branch === '—' ? 'tag' : 'branch',
-    initialRefValue: '',
-    suggestions,
+    initialRefKind: seed?.refKind ?? (repo.tag && repo.branch === '—' ? 'tag' : 'branch'),
+    initialRefValue: seed?.refValue ?? '',
+    initialSearch: seed?.search ?? '',
+    refs,
+    refsStatus: seed?.refsStatus ?? (seed ? 'ready' : 'loading'),
+    refsError: seed?.refsError ?? '',
+    refsTruncated: seed?.refsTruncated ?? false,
+    showStash: dirty,
+    dirtyTotal,
     info: [
       { label: '仓库', value: repo.repoName || repo.repoType },
       { label: '当前分支', value: repo.branch },
-      { label: '当前 HEAD', value: shortSha(repo.headSha) },
+      { label: '当前 HEAD', value: head },
+      ...(dirty
+        ? [{ label: '工作区', value: `${dirtyTotal} 处未提交改动`, tone: 'warning' as const }]
+        : []),
     ],
     submit: (payload) => {
-      const refValue = (payload.refValue ?? '').trim()
-      if (!refValue) {
-        notify('请填写分支或 Tag 名称', 'warning')
-        openCheckoutDialog(target, repo)
+      const value = (payload.refValue ?? '').trim()
+      if (!value) {
+        notify('请填写或选择分支 / Tag 名称', 'warning')
+        // 校验失败重开：保留已加载 refs 与搜索词，避免重新请求。
+        openCheckoutDialog(target, repo, {
+          refs: dialog.refs ?? [],
+          refsStatus: dialog.refsStatus ?? 'ready',
+          refsError: dialog.refsError,
+          refsTruncated: dialog.refsTruncated,
+          search: payload.search,
+          refKind: payload.refKind,
+          refValue: payload.refValue,
+        })
         return
       }
-      const refKind = payload.refKind === 'tag' ? 'tag' : 'branch'
-      void executeRepoAction('CHKOUT', refKind === 'tag' ? { tag: refValue, confirm: true } : { branch: refValue, confirm: true }, true, target)
+      const isTag = payload.refKind === 'tag'
+      const args: RepoActionArgs = isTag ? { tag: value, confirm: true } : { branch: value, confirm: true }
+      if (payload.stash === true) args.stash = true
+      void executeRepoAction('CHKOUT', args, true, target)
     },
-  })
+  }
+  const token = ++checkoutRefsSeq
+  openActionDialog(dialog)
+  if (seed) return
+  void loadCheckoutRefs(target, repo, token)
 }
 
 /** 动作成功后定向刷新快照（refresh 容错 + getSnapshot），不重建选中。 */
@@ -1224,7 +1451,13 @@ async function executeRepoAction(
       notify(headText ? `已提交 ${headText}` : '已提交（Host 未返回 SHA）', 'success', 2800)
     } else if (action === 'CHKOUT') {
       const ref = result.branch || args.tag || args.branch || ''
-      notify(`已检出 ${ref}${headText ? ` · HEAD ${headText}` : ''}`, 'success', 2800)
+      const stashNote =
+        args.stash === true
+          ? result.stashRef
+            ? ` · 已自动 stash：${result.stashRef}`
+            : ' · 已自动 stash 工作区改动'
+          : ''
+      notify(`已检出 ${ref}${headText ? ` · HEAD ${headText}` : ''}${stashNote}`, 'success', 3200)
     } else {
       const duration = result.durationMs ?? Date.now() - startedAt
       notify(`${action} 完成${headText ? ` · HEAD ${headText}` : ''}（${Math.round(duration)}ms）`, 'success', 2800)
@@ -1798,6 +2031,11 @@ function closeTopOverlay(): void {
     closeContextMenu()
     return
   }
+  if (state.overlays.confirmBar) {
+    // Esc/全局关闭确认条 = 取消，0 写；焦点由 RepoActionsBar 归还触发按钮。
+    cancelConfirmBar()
+    return
+  }
   if (state.overlays.actionDialog) {
     closeActionDialog()
     return
@@ -1883,6 +2121,10 @@ export interface WorkbenchStore {
   closeModal: typeof closeModal
   openConfirm: typeof openConfirm
   closeConfirm: typeof closeConfirm
+  openConfirmBar: typeof openConfirmBar
+  closeConfirmBar: typeof closeConfirmBar
+  cancelConfirmBar: typeof cancelConfirmBar
+  acceptConfirmBar: typeof acceptConfirmBar
   openContextMenu: typeof openContextMenu
   closeContextMenu: typeof closeContextMenu
   openFilter: typeof openFilter
@@ -1961,6 +2203,10 @@ export const workbench: WorkbenchStore = {
   closeModal,
   openConfirm,
   closeConfirm,
+  openConfirmBar,
+  closeConfirmBar,
+  cancelConfirmBar,
+  acceptConfirmBar,
   openContextMenu,
   closeContextMenu,
   openFilter,

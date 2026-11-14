@@ -177,6 +177,10 @@ export interface ActionAvailability {
   enabled: boolean
   reason: string
   confirm: boolean
+  /** 禁用原因对应的 Host 错误码（FR-ACT-02：禁用 tooltip 必须含错误码）。 */
+  code?: string
+  /** 替代动作（FR-ACT-02：禁用 tooltip 必须给出可执行的下一步）。 */
+  alt?: string
 }
 
 export interface OperationVm {
@@ -217,14 +221,48 @@ export interface ConfirmVm {
   onCancel?: () => void
 }
 
+/**
+ * F 区按钮上方的内联确认条（FR-ACT-04 / AC-UI-10a/10b）。
+ * COMMIT/PUSH 唯一写入口：未点「确认」不调用 runRepoAction；不遮挡/不移动 5 键。
+ */
+export interface ConfirmBarVm {
+  action: 'COMMIT' | 'PUSH'
+  /** 主文案：COMMIT「将提交 N 个已暂存文件」；PUSH「将推送 N 个提交（分支 → upstream）」。 */
+  text: string
+  /** 次要说明：NO_UPSTREAM 的发布分支、stageAll 影响等。 */
+  detail?: string
+  confirmLabel: string
+  danger: boolean
+  onAccept: () => void
+  onCancel?: () => void
+}
+
 // ───────────────────────────── M2 单仓动作对话框 ─────────────────────────────
 
 export type ActionDialogKind = 'commit' | 'checkout' | 'confirm'
+
+/** CHKOUT 选择器候选 ref（M2 P0-7：来自 Host getRemoteRefs，无 Host 时回退当前分支/Tag）。 */
+export interface ActionDialogRefVm {
+  /** 完整 ref 名（如 refs/heads/main、refs/remotes/origin/x、refs/tags/v1）。 */
+  refName: string
+  /** 短 SHA（搜索与展示）。 */
+  shortSha: string
+  kind: 'LOCAL_BRANCH' | 'REMOTE_BRANCH' | 'TAG'
+}
+
+/** CHKOUT refs 加载状态：loading / ready（Host）/ fallback（Mock 或接口不可用）/ error。 */
+export type ActionDialogRefsStatus = 'loading' | 'ready' | 'fallback' | 'error'
 
 export interface ActionDialogPayload {
   message?: string
   refKind?: 'branch' | 'tag'
   refValue?: string
+  /** COMMIT：显式勾选「暂存全部改动（git add -A）」时才为 true。 */
+  stageAll?: boolean
+  /** CHKOUT：勾选「检出前自动 stash（-u）」时为 true（Host 先 stash -u 再检出）。 */
+  stash?: boolean
+  /** CHKOUT：提交校验失败重开对话框时保留搜索词。 */
+  search?: string
 }
 
 export interface ActionDialogVm {
@@ -240,8 +278,25 @@ export interface ActionDialogVm {
   initialMessage?: string
   initialRefKind?: 'branch' | 'tag'
   initialRefValue?: string
-  /** CHKOUT 的候选 ref（来自快照分支/Tag），仅作 datalist 提示。 */
-  suggestions?: string[]
+  /** CHKOUT 的候选 ref（Host getRemoteRefs；空/不可用时为当前分支/Tag 建议）。 */
+  refs?: ActionDialogRefVm[]
+  /** CHKOUT refs 加载状态（loading 时对话框显示骨架文案）。 */
+  refsStatus?: ActionDialogRefsStatus
+  /** CHKOUT refs 加载失败/回退原因（内联展示，不打断操作）。 */
+  refsError?: string
+  /** CHKOUT refs 是否被 Host 截断（提示用搜索缩小范围）。 */
+  refsTruncated?: boolean
+  /** CHKOUT 重开时恢复的搜索词。 */
+  initialSearch?: string
+  /** CHKOUT：工作区是否有未提交改动（dirty/untracked），决定是否显示 stash 勾选。 */
+  showStash?: boolean
+  dirtyTotal?: number
+  /** COMMIT：已暂存/未提交计数（用于「已暂存 N / 将提交 N」与 stageAll 影响说明）。 */
+  stagedCount?: number
+  dirtyCount?: number
+  untrackedCount?: number
+  /** COMMIT：是否显示「暂存全部改动（git add -A）」checkbox。 */
+  showStageAll?: boolean
   submit: (payload: ActionDialogPayload) => void
 }
 

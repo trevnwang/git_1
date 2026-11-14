@@ -39,6 +39,7 @@ public sealed class HostCommandRouter : IDisposable
             ["getWorkspaceTree"] = TimeSpan.FromSeconds(10),
             ["openPath"] = TimeSpan.FromSeconds(8),
             ["runRepoAction"] = TimeSpan.FromSeconds(120),
+            ["getRemoteRefs"] = TimeSpan.FromSeconds(20),
             ["getCiStatus"] = TimeSpan.FromSeconds(2),
             ["getHostInfo"] = TimeSpan.FromSeconds(2)
         };
@@ -50,6 +51,7 @@ public sealed class HostCommandRouter : IDisposable
     private readonly GitStatusIndex _gitStatus;
     private readonly CommitsService _commits;
     private readonly RepoActionService _actions;
+    private readonly RemoteRefsService _remoteRefs;
     private readonly ComponentDetailService _componentDetail;
     private readonly RepoDetailService _repoDetail;
     private readonly CiStatusService _ci;
@@ -72,8 +74,10 @@ public sealed class HostCommandRouter : IDisposable
         _gitStatus = new GitStatusIndex();
         _commits = new CommitsService();
 
-        // 单仓操作（M2）：网络类动作凭据由 token 注入（仅环境变量，不进入参数/日志/响应）。
-        _actions = new RepoActionService(giteaToken: _snapshots.Config.GiteaToken);
+        // 单仓操作（M2）：网络类动作凭据由 token 注入（仅环境变量，不进入参数/日志/响应）；
+        // P0-1 起 RepoActionService 还会在注入前校验 origin fetch/pushurl 与 Gitea base 的作用域。
+        _actions = new RepoActionService(config: _snapshots.Config);
+        _remoteRefs = new RemoteRefsService();
 
         Func<SnapshotIndex> indexProvider = () => _snapshots.Index;
         _componentDetail = new ComponentDetailService(indexProvider, _actions);
@@ -242,7 +246,37 @@ public sealed class HostCommandRouter : IDisposable
                 await EnsureSnapshotAsync(cancellationToken).ConfigureAwait(false);
                 var parsed = ParseParams<RunRepoActionParams>(parameters);
                 // M2：真实单仓操作（异步执行，不走 _ioGate，避免长任务占满 FS/git 并发闸）。
-                return await _actions.RunAsync(parsed, _snapshots.Index, cancellationToken)
+                var result = await _actions.RunAsync(parsed, _snapshots.Index, cancellationToken)
+                    .ConfigureAwait(false);
+
+                // M2 P1-2：写操作成功后失效快照缓存/派生缓存，下一次请求按现有 refresh 机制重建（CAS 才能拿到新 HEAD）。
+                if (result.Ok)
+                {
+                    _snapshots.Invalidate();
+                    InvalidateCaches();
+                }
+
+                return result;
+            }
+
+            case "getRemoteRefs":
+            {
+                await EnsureSnapshotAsync(cancellationToken).ConfigureAwait(false);
+                var parsed = ParseParams<GetRemoteRefsParams>(parameters);
+                var resolveError = TryGetLocalRepoPath(
+                    _snapshots.Index,
+                    parsed.ComponentId,
+                    parsed.RepoType,
+                    out var localPath,
+                    out _);
+                if (resolveError is not null)
+                {
+                    return resolveError;
+                }
+
+                return await RunIoAsync(
+                        () => _remoteRefs.GetAsync(localPath, cancellationToken),
+                        cancellationToken)
                     .ConfigureAwait(false);
             }
 

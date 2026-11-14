@@ -469,6 +469,36 @@ type Cell = 'y' | 'c' | string // 'y'=可用, 'c'=可用需确认, 其它=禁用
 
 const NA = '当前仓库状态不允许该操作'
 
+/** 禁用原因 → 错误码 + 替代动作（FR-ACT-02：禁用 tooltip 固定输出「原因 [E_*] → 替代」）。 */
+const CELL_HINT: Record<string, { code: string; alt: string }> = {
+  [NA]: { code: 'E_ACTION_NOT_ALLOWED', alt: '按状态矩阵先修复仓库状态后重试' },
+  'DIRTY：需先提交或 stash': { code: 'E_DIRTY_WORKTREE', alt: '先 COMMIT 或 stash 后再 PULL' },
+  'AHEAD：本地领先，需先推送': { code: 'E_ACTION_NOT_ALLOWED', alt: '先 PUSH 本地提交' },
+  'BEHIND：先 PULL': { code: 'E_ACTION_NOT_ALLOWED', alt: '先 PULL 快进后再试' },
+  'DIVERGED：需手动 Merge/Rebase': { code: 'E_ACTION_NOT_ALLOWED', alt: '先手动 Merge/Rebase 后重扫' },
+  'DETACHED：游离 HEAD，请先创建分支': { code: 'E_ACTION_NOT_ALLOWED', alt: '基于当前 HEAD 创建分支' },
+  'NO_UPSTREAM：未配置 upstream': { code: 'E_ACTION_NOT_ALLOWED', alt: '先 PUSH 发布分支并建立 upstream' },
+  'UNMERGED：存在未解决冲突': { code: 'E_ACTION_NOT_ALLOWED', alt: '先解决冲突并 COMMIT' },
+  'IN_PROGRESS：操作未完成': { code: 'E_BUSY', alt: '等待 git 操作完成后重试' },
+  'IN_PROGRESS：合并/变基未完成': { code: 'E_BUSY', alt: '等待合并/变基完成或中止后重试' },
+  'INVALID：仓库绑定异常': { code: 'E_ACTION_NOT_ALLOWED', alt: '修复仓库绑定后重试' },
+  'MISSING：仓库未克隆': { code: 'E_REPO_NOT_LOCAL', alt: '先 Clone' },
+  '状态未知：数据过期，请先 FETCH / 重试扫描': { code: 'E_ACTION_NOT_ALLOWED', alt: '先 FETCH 或重试扫描' },
+  '无已暂存改动：请先 git add 暂存后提交': {
+    code: 'E_NOTHING_TO_COMMIT',
+    alt: '先 git add 暂存改动（已暂存后可勾选「暂存全部改动」一并提交）',
+  },
+}
+
+/** 通用 NA 的替代动作按动作细化（不改变原矩阵启用/禁用语义）。 */
+const NA_ALT_BY_ACTION: Record<RepoAction, string> = {
+  PULL: '先处理本地/远程差异后重试',
+  FETCH: '先 FETCH 刷新远程引用',
+  CHKOUT: '先解决当前状态后再 CHKOUT',
+  COMMIT: '先处理工作区状态后再 COMMIT',
+  PUSH: '先 PULL 或解决冲突后再 PUSH',
+}
+
 const MATRIX: Record<string, Record<RepoAction, Cell>> = {
   SYNCED: { PULL: 'y', FETCH: 'y', CHKOUT: 'c', COMMIT: 'y', PUSH: 'y' },
   DIRTY: {
@@ -678,6 +708,20 @@ export function actionErrorInfo(error: unknown): ActionErrorInfo {
 /** 无聚焦仓 / 仓缺失时的统一禁用原因（FR-ACT-01 / AC-UI-08）。 */
 export const NO_REPO_REASON = '请先在文件树中选择仓库'
 
+/** 把禁用原因解析成「错误码 + 替代动作」，保证每条禁用 tooltip 都是三段式可执行文案。 */
+function disabledHint(reason: string, action: RepoAction): { code: string; alt: string } {
+  const known = CELL_HINT[reason]
+  if (reason === NA) return { code: 'E_ACTION_NOT_ALLOWED', alt: NA_ALT_BY_ACTION[action] }
+  return known ?? { code: 'E_ACTION_NOT_ALLOWED', alt: '按状态矩阵先修复仓库状态后重试' }
+}
+
+/** 禁用 tooltip 统一格式：`原因 [E_CODE] → 替代动作`（FR-ACT-02 / AC-UI-08）。 */
+export function actionDisabledTitle(reason: string, code: string | undefined, alt: string | undefined): string {
+  const codeText = code ? ` [${code}]` : ''
+  const altText = alt ? ` → ${alt}` : ''
+  return `${reason}${codeText}${altText}`
+}
+
 export function actionAvailability(
   repo: RepoVm | null,
   pending: RepoAction | null,
@@ -685,7 +729,13 @@ export function actionAvailability(
   const result = {} as Record<RepoAction, ActionAvailability>
   if (!repo) {
     for (const action of REPO_ACTIONS) {
-      result[action] = { enabled: false, reason: NO_REPO_REASON, confirm: false }
+      result[action] = {
+        enabled: false,
+        reason: NO_REPO_REASON,
+        confirm: false,
+        code: 'E_ACTION_NOT_ALLOWED',
+        alt: '先在文件树/卡片中选择仓库',
+      }
     }
     return result
   }
@@ -693,7 +743,13 @@ export function actionAvailability(
   const row = MATRIX[state]
   for (const action of REPO_ACTIONS) {
     if (pending) {
-      result[action] = { enabled: false, reason: '该仓有操作进行中', confirm: false }
+      result[action] = {
+        enabled: false,
+        reason: '该仓有操作进行中',
+        confirm: false,
+        code: 'E_BUSY',
+        alt: '等待当前操作完成后重试（同仓串行）',
+      }
       continue
     }
     // FR-ACT-03：COMMIT 仅在有已暂存改动时可用（Host 不再自动 git add -A）。
@@ -702,18 +758,34 @@ export function actionAvailability(
       repo.stagedCount <= 0 &&
       (row?.[action] === 'y' || row?.[action] === 'c')
     ) {
-      result[action] = { enabled: false, reason: '无已暂存改动：请先 git add 暂存后提交', confirm: false }
+      const hint = disabledHint('无已暂存改动：请先 git add 暂存后提交', action)
+      result[action] = {
+        enabled: false,
+        reason: '无已暂存改动：请先 git add 暂存后提交',
+        confirm: false,
+        code: hint.code,
+        alt: hint.alt,
+      }
       continue
     }
     const cell = row?.[action]
     if (!row || cell === undefined) {
-      result[action] = { enabled: false, reason: `『${state}』状态未知，已禁用`, confirm: false }
+      const reason = `『${state}』状态未知，已禁用`
+      result[action] = {
+        enabled: false,
+        reason,
+        confirm: false,
+        code: 'E_ACTION_NOT_ALLOWED',
+        alt: '刷新快照后重试',
+      }
     } else if (cell === 'y') {
       result[action] = { enabled: true, reason: '', confirm: false }
     } else if (cell === 'c') {
       result[action] = { enabled: true, reason: '需二次确认（M2 接入确认对话框）', confirm: true }
     } else {
-      result[action] = { enabled: false, reason: String(cell), confirm: false }
+      const reason = String(cell)
+      const hint = disabledHint(reason, action)
+      result[action] = { enabled: false, reason, confirm: false, code: hint.code, alt: hint.alt }
     }
   }
   return result

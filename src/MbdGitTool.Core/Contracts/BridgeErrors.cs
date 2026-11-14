@@ -30,8 +30,15 @@ public static class BridgeErrorCodes
     public const string LaunchFailed = "E_LAUNCH_FAILED";
     public const string GitFailed = "E_GIT_FAILED";
     public const string GitNonFastForward = "E_GIT_NON_FF";
+    public const string PushRejected = "E_PUSH_REJECTED";
     public const string DirtyWorktree = "E_DIRTY_WORKTREE";
+    public const string WorktreeOverwrite = "E_WORKTREE_OVERWRITE";
     public const string NothingToCommit = "E_NOTHING_TO_COMMIT";
+    public const string RefNotFound = "E_REF_NOT_FOUND";
+    public const string ConcurrentChange = "E_CONCURRENT_CHANGE";
+    public const string CredentialScope = "E_CREDENTIAL_SCOPE";
+    public const string GiteaConfigInvalid = "E_GITEA_CONFIG_INVALID";
+    public const string GiteaInsecureHttp = "E_GITEA_INSECURE_HTTP";
     public const string ActionNotAllowed = "E_ACTION_NOT_ALLOWED";
     public const string NotImplemented = "E_NOT_IMPLEMENTED";
     public const string CiDisabled = "E_CI_DISABLED";

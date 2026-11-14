@@ -159,13 +159,39 @@ public sealed class RealWorkspaceSmokeTests
                 + $"launcher={Path.GetFileName(launcher.Calls[0].FileName)}");
         }
 
-        // 8) runRepoAction：M2 已启用；PULL 成功或按矩阵被拒均合法（禁止 E_NOT_IMPLEMENTED）
+        // 7) getRemoteRefs（P0-7 只读桥：本地分支/Tag 列表；对真实工作区安全）
+        var refsResult = await DispatchAsync(
+            router,
+            "getRemoteRefs",
+            new { componentId = component.ComponentId, repoType = "IMPL" });
+        Assert.True(refsResult.Ok, refsResult.Error?.Code);
+        var remoteRefs = Assert.IsType<RemoteRefsDto>(refsResult.Data);
+        Assert.Contains(remoteRefs.Refs, item => item.Kind == "LOCAL_BRANCH");
+        _output.WriteLine(
+            $"getRemoteRefs total={remoteRefs.Total} truncated={remoteRefs.Truncated} kinds="
+            + string.Join(',', remoteRefs.Refs.Select(item => item.Kind).Distinct()));
+
+        // 8) runRepoAction：P1-8 hermetic——真实工作区写操作（PULL/可能访问真实 Gitea）默认不做，
+        //    仅当显式设置 MBD_RUN_REAL_WRITE_TESTS=true 时才执行；常规 dotnet test 只读。
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("MBD_RUN_REAL_WRITE_TESTS"),
+                "true",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            _output.WriteLine("MBD_RUN_REAL_WRITE_TESTS != true：跳过真实工作区写操作（PULL）烟测");
+            return;
+        }
+
         var actionResult = await DispatchAsync(
             router,
             "runRepoAction",
             new { componentId = component.ComponentId, repoType = "IMPL", action = "PULL" });
         Assert.True(
-            actionResult.Ok || actionResult.Error?.Code == BridgeErrorCodes.ActionNotAllowed,
+            actionResult.Ok
+            || actionResult.Error?.Code == BridgeErrorCodes.ActionNotAllowed
+            || actionResult.Error?.Code == BridgeErrorCodes.GitNonFastForward
+            || actionResult.Error?.Code == BridgeErrorCodes.WorktreeOverwrite
+            || actionResult.Error?.Code == BridgeErrorCodes.ConcurrentChange,
             actionResult.Error?.Code);
         _output.WriteLine($"runRepoAction ok={actionResult.Ok} code={actionResult.Error?.Code}");
     }

@@ -65,7 +65,8 @@ public static partial class HostLog
         }
 
         var redacted = AuthorizationPattern().Replace(message, "$1***");
-        return UrlUserInfoPattern().Replace(redacted, "$1***:***@");
+        redacted = TokenPattern().Replace(redacted, "$1***");
+        return UrlUserInfoPattern().Replace(redacted, "$1***@");
     }
 
     private static void MigrateLegacyLogIfNeeded()
@@ -101,11 +102,19 @@ public static partial class HostLog
         File.Move(LogFilePath, archived, overwrite: true);
     }
 
+    /// <summary>Authorization 头（Basic/Bearer/Token 任意值）；含 <c>Authorization: Basic base64(PAT:)</c> 场景（P2-6）。</summary>
     [GeneratedRegex(
-        @"(?i)(authorization\s*[:=]\s*token\s+|authorization\s*[:=]\s*bearer\s+|(?<![a-z0-9_])(access_)?token\s*[=:]\s*)\S+",
+        @"(?i)(authorization\s*[:=]\s*)(?:(?:basic|bearer|token)\s+)?[A-Za-z0-9+/=._~\-]{4,}",
         RegexOptions.CultureInvariant)]
     private static partial Regex AuthorizationPattern();
 
-    [GeneratedRegex(@"(?i)(https?://)[^/\s:@]+:[^/\s@]+@", RegexOptions.CultureInvariant)]
+    /// <summary>URL query/参数中的 token（<c>?token=</c>/<c>access_token=</c>）。</summary>
+    [GeneratedRegex(
+        @"(?i)((?<![a-z0-9_])(?:access_)?token\s*[=:]\s*)\S+",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex TokenPattern();
+
+    /// <summary>URL userinfo（<c>scheme://user[:pass]@host</c>；token 可能作为 user）。</summary>
+    [GeneratedRegex(@"(?i)([a-z][a-z0-9+.\-]*://)[^/\s@]+@", RegexOptions.CultureInvariant)]
     private static partial Regex UrlUserInfoPattern();
 }

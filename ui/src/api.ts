@@ -214,6 +214,12 @@ export interface RepoActionArgs {
   message?: string
   /** 二次确认后重试时置 true（Host 返回 E_CONFIRM_REQUIRED 时）。 */
   confirm?: boolean
+  /** COMMIT：显式勾选「暂存全部改动（git add -A）」时为 true（Host 要求同时 confirm=true）。 */
+  stageAll?: boolean
+  /** PUSH：NO_UPSTREAM 发布分支时置 true，Host 以 `git push -u origin HEAD` 建立 upstream。 */
+  setUpstream?: boolean
+  /** CHKOUT：工作区 dirty 时置 true，Host 先 `git stash push -u` 再检出（M2 P0-7）。 */
+  stash?: boolean
 }
 
 /** runRepoAction 成功响应（M2：Host 返回执行结果；M1 仍拒绝 E_NOT_IMPLEMENTED）。 */
@@ -231,6 +237,29 @@ export interface RepoActionResultDto {
   durationMs?: number
   errorCode?: string
   message?: string
+  /** CHKOUT 自动 stash 成功时的引用（如 stash@{0}），供 Toast 提示恢复入口。 */
+  stashRef?: string
+}
+
+/** ref 种类（getRemoteRefs，M2 P0-7）。 */
+export type RemoteRefKind = 'LOCAL_BRANCH' | 'REMOTE_BRANCH' | 'TAG'
+
+export interface RemoteRefDto {
+  /** 完整 ref 名，如 refs/heads/main、refs/remotes/origin/x、refs/tags/v1。 */
+  refName: string
+  sha: string
+  /** 短 SHA（Host 未提供时由 sha 截取 7 位）。 */
+  shortSha: string
+  kind: RemoteRefKind
+  objectType?: string
+}
+
+/** getRemoteRefs 响应（M2 P0-7）：本地/远程分支 + Tag，供 CHKOUT 选择器搜索。 */
+export interface RemoteRefsDto {
+  refs: RemoteRefDto[]
+  truncated: boolean
+  total: number
+  generatedAt?: string
 }
 
 export interface CiStatusDto {
@@ -258,6 +287,7 @@ export type RequestMethod =
   | 'getWorkspaceTree'
   | 'openPath'
   | 'runRepoAction'
+  | 'getRemoteRefs'
   | 'getCiStatus'
   | 'getHostInfo'
 
@@ -271,6 +301,7 @@ export const TIMEOUTS: Record<RequestMethod, number> = {
   getWorkspaceTree: 10_000,
   openPath: 8_000,
   runRepoAction: 120_000,
+  getRemoteRefs: 20_000,
   getCiStatus: 2_000,
   getHostInfo: 2_000,
 }
@@ -912,6 +943,55 @@ export function normalizeRepoActionResult(value: unknown): RepoActionResultDto {
     // Host 错误码字段既可能是 errorCode，也可能是桥接层的 code；两者都保留以便完整映射。
     errorCode: readString(record, 'errorCode') ?? readString(record, 'code'),
     message: readString(record, 'message'),
+    stashRef: readString(record, 'stashRef'),
+  }
+}
+
+const REMOTE_REF_KINDS: readonly RemoteRefKind[] = ['LOCAL_BRANCH', 'REMOTE_BRANCH', 'TAG']
+
+/** 由 refName 前缀推断 kind（Host 字段缺失/大小写漂移时兜底）。 */
+function inferRemoteRefKind(refName: string): RemoteRefKind | null {
+  if (refName.startsWith('refs/heads/')) return 'LOCAL_BRANCH'
+  if (refName.startsWith('refs/remotes/')) return 'REMOTE_BRANCH'
+  if (refName.startsWith('refs/tags/')) return 'TAG'
+  return null
+}
+
+function shortShaOf(sha: string): string {
+  return sha.length > 7 ? sha.slice(0, 7) : sha
+}
+
+/** normalize getRemoteRefs：容忍 refs/items 字段名、PascalCase、kind 缺省（按 refName 前缀推断）。 */
+export function normalizeRemoteRefs(value: unknown): RemoteRefsDto {
+  const record = asRecord(parseMaybeJson(value))
+  if (!record) throw new HostError('E_INVALID_RESPONSE', 'getRemoteRefs 响应不是对象')
+  const rawRefs = readArray(record, 'refs') ?? readArray(record, 'items')
+  if (!rawRefs) throw new HostError('E_INVALID_RESPONSE', 'getRemoteRefs 响应缺少 refs')
+  const refs: RemoteRefDto[] = []
+  for (const item of rawRefs) {
+    const refRecord = asRecord(item)
+    if (!refRecord) continue
+    const refName = readString(refRecord, 'refName') ?? readString(refRecord, 'name')
+    const sha = readString(refRecord, 'sha') ?? readString(refRecord, 'objectSha') ?? ''
+    if (!refName || !sha) continue
+    const kindRaw = (readString(refRecord, 'kind') ?? '').toUpperCase()
+    const kind = REMOTE_REF_KINDS.includes(kindRaw as RemoteRefKind)
+      ? (kindRaw as RemoteRefKind)
+      : inferRemoteRefKind(refName)
+    if (!kind) continue
+    refs.push({
+      refName,
+      sha,
+      shortSha: readString(refRecord, 'shortSha') ?? shortShaOf(sha),
+      kind,
+      objectType: readString(refRecord, 'objectType'),
+    })
+  }
+  return {
+    refs,
+    truncated: readBoolean(record, 'truncated'),
+    total: prop(record, 'total') === undefined ? refs.length : readNumber(record, 'total', refs.length),
+    generatedAt: readString(record, 'generatedAt'),
   }
 }
 
@@ -1004,6 +1084,12 @@ export interface WorkspaceTreeParams {
   depth?: number
 }
 
+/** getRemoteRefs 参数（M2 P0-7）：按组件 + 仓类型定位本地仓。 */
+export interface RemoteRefsParams {
+  componentId: string
+  repoType: string
+}
+
 export const api = {
   async getSnapshot(): Promise<SnapshotDto> {
     return normalizeSnapshotRequired(await request<unknown>('getSnapshot'))
@@ -1051,6 +1137,15 @@ export const api = {
         repoType: params.repoType,
         action: params.action,
         args: params.args ?? {},
+      }),
+    )
+  },
+  /** M2 P0-7：CHKOUT 选择器数据源（本地/远程分支 + Tag，只读）。 */
+  async getRemoteRefs(params: RemoteRefsParams): Promise<RemoteRefsDto> {
+    return normalizeRemoteRefs(
+      await request<unknown>('getRemoteRefs', {
+        componentId: params.componentId,
+        repoType: params.repoType,
       }),
     )
   },

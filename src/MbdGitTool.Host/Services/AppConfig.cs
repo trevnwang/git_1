@@ -21,6 +21,14 @@ public sealed record AppConfig
     /// <summary>PAT；可为空（Gitea 公开组织只读接口）。禁止日志/诊断包明文输出。</summary>
     public string? GiteaToken { get; init; }
 
+    /// <summary>
+    /// 是否显式允许对 <c>http://</c> 的 Gitea 注入 PAT（P1-4 显式配置）。
+    /// <para>默认 <c>false</c>：token 非空且 base 为 http 时网络 git 动作拒绝（<c>E_GITEA_INSECURE_HTTP</c>），
+    /// 避免 <c>Authorization: Basic</c> 明文外发。</para>
+    /// <para>开启方式：config.json <c>gitea.allowInsecureHttp=true</c>，或环境变量 <c>MBD_GITEA_ALLOW_INSECURE_HTTP=true</c>。</para>
+    /// </summary>
+    public bool AllowInsecureHttp { get; init; }
+
     /// <summary>配置加载问题（文件缺失/JSON 非法等）；不影响环境变量覆盖后的可用配置。</summary>
     public string? LoadError { get; init; }
 
@@ -75,6 +83,9 @@ public sealed record AppConfig
         var baseUrl = Override("MBD_GITEA_URL", file.Gitea?.BaseUrl);
         var org = Override("MBD_GITEA_ORG", file.Gitea?.Org);
         var token = Override("MBD_GITEA_TOKEN", file.Gitea?.Token);
+        var allowInsecure = ParseBool(Environment.GetEnvironmentVariable("MBD_GITEA_ALLOW_INSECURE_HTTP"))
+            ?? file.Gitea?.AllowInsecureHttp
+            ?? false;
 
         return new AppConfig
         {
@@ -82,6 +93,7 @@ public sealed record AppConfig
             GiteaBaseUrl = Normalize(baseUrl),
             GiteaOrg = Normalize(org),
             GiteaToken = string.IsNullOrWhiteSpace(token) ? null : token.Trim(),
+            AllowInsecureHttp = allowInsecure,
             LoadError = loadError
         };
     }
@@ -92,7 +104,22 @@ public sealed record AppConfig
         var tokenState = string.IsNullOrEmpty(GiteaToken) ? "<empty>" : "<redacted>";
 
         return $"AppConfig {{ WorkspaceRoot = {WorkspaceRoot ?? "<unset>"}, GiteaBaseUrl = {GiteaBaseUrl ?? "<unset>"}, "
-            + $"GiteaOrg = {GiteaOrg ?? "<unset>"}, GiteaToken = {tokenState} }}";
+            + $"GiteaOrg = {GiteaOrg ?? "<unset>"}, GiteaToken = {tokenState}, AllowInsecureHttp = {AllowInsecureHttp} }}";
+    }
+
+    private static bool? ParseBool(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "1" or "true" or "yes" or "on" => true,
+            "0" or "false" or "no" or "off" => false,
+            _ => null
+        };
     }
 
     private static string? Override(string environmentVariable, string? currentValue)
@@ -118,5 +145,7 @@ public sealed record AppConfig
         public string? Org { get; set; }
 
         public string? Token { get; set; }
+
+        public bool? AllowInsecureHttp { get; set; }
     }
 }

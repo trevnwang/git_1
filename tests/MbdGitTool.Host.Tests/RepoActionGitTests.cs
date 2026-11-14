@@ -249,6 +249,8 @@ public sealed class RepoActionGitTests
         Assert.True(commit.Ok, Describe(commit));
         var head = GitRemoteFixture.Head(fixture.CloneB);
 
+        // P1-2 CAS：COMMIT 后快照过期，PUSH 前必须用新 HEAD 重建索引（等价 UI 动作后 refresh）。
+        index = IndexFor(fixture.CloneB);
         var result = await service.RunAsync(Params("PUSH"), index, CancellationToken.None);
 
         Assert.True(result.Ok, Describe(result));
@@ -256,36 +258,44 @@ public sealed class RepoActionGitTests
     }
 
     [Fact]
-    public async Task Push_Rejected_ReturnsGitFailedWithRedactedStderr()
+    public async Task Push_Rejected_ReturnsPushRejectedWithKeyStderrLine()
     {
         using var fixture = GitRemoteFixture.Create();
         // B 本地提交，A 再推 → B push 被非快进拒绝。
         File.WriteAllText(Path.Combine(fixture.CloneB, "local.txt"), "local only");
         TestGit.CommitAll(fixture.CloneB, "local only commit");
         fixture.CommitAndPushFromA("remote diverged");
-        var service = new RepoActionService(giteaToken: TestToken);
+        var service = new RepoActionService();
         var index = IndexFor(fixture.CloneB);
 
         var result = await service.RunAsync(Params("PUSH"), index, CancellationToken.None);
 
         Assert.False(result.Ok);
-        Assert.Equal(BridgeErrorCodes.GitFailed, result.Error!.Code);
+        Assert.Equal(BridgeErrorCodes.PushRejected, result.Error!.Code);
         Assert.Contains("exitCode", result.Error.Details!.Keys);
-        AssertNoToken(Serialize(result));
+        // P1-6：摘要不能只有首行 "To <url>"，必须包含 rejected/non-fast-forward 关键行。
+        var stderr = (string)result.Error.Details!["stderr"]!;
+        Assert.True(
+            stderr.Contains("rejected", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("fast-forward", StringComparison.OrdinalIgnoreCase),
+            stderr);
     }
 
     [Fact]
-    public async Task Token_NotPresentInSuccessOrFailureResponses()
+    public async Task Token_ConfiguredWithoutGiteaConfig_FailsClosedAndDoesNotLeak()
     {
         using var fixture = GitRemoteFixture.Create();
         var service = new RepoActionService(giteaToken: TestToken);
         var index = IndexFor(fixture.CloneB);
+        var remoteHead = GitRemoteFixture.Head(fixture.BarePath);
 
-        var ok = await service.RunAsync(Params("FETCH"), index, CancellationToken.None);
-        Assert.True(ok.Ok, Describe(ok));
-        AssertNoToken(Serialize(ok));
+        var fetch = await service.RunAsync(Params("FETCH"), index, CancellationToken.None);
+        Assert.False(fetch.Ok);
+        Assert.Equal(BridgeErrorCodes.GiteaConfigInvalid, fetch.Error!.Code);
+        AssertNoToken(Serialize(fetch));
+        Assert.Equal(remoteHead, GitRemoteFixture.Head(fixture.BarePath));
 
-        // 失败路径：origin 指向不存在的仓库 → E_GIT_FAILED；错误输出同样不得含 token。
+        // origin 指向不存在的仓库：仍应在配置 fail-closed 阶段拒绝（不启动网络 git）。
         TestGit.Run(
             fixture.CloneB,
             "remote",
@@ -294,8 +304,31 @@ public sealed class RepoActionGitTests
             Path.Combine(fixture.Root, "missing-remote.git"));
         var failed = await service.RunAsync(Params("FETCH"), index, CancellationToken.None);
         Assert.False(failed.Ok);
-        Assert.Equal(BridgeErrorCodes.GitFailed, failed.Error!.Code);
+        Assert.Equal(BridgeErrorCodes.GiteaConfigInvalid, failed.Error!.Code);
         AssertNoToken(Serialize(failed));
+    }
+
+    [Fact]
+    public async Task Token_MismatchedOriginScope_ReturnsCredentialScopeWithoutLeak()
+    {
+        using var fixture = GitRemoteFixture.Create();
+        var config = new AppConfig
+        {
+            GiteaBaseUrl = "https://gitea.example.test",
+            GiteaOrg = "RTCRepos",
+            GiteaToken = TestToken
+        };
+        var service = new RepoActionService(config: config);
+        var index = IndexFor(fixture.CloneB);
+        var remoteHead = GitRemoteFixture.Head(fixture.BarePath);
+
+        var fetch = await service.RunAsync(Params("FETCH"), index, CancellationToken.None);
+
+        Assert.False(fetch.Ok);
+        Assert.Equal(BridgeErrorCodes.CredentialScope, fetch.Error!.Code);
+        Assert.Contains("failedFields", fetch.Error.Details!.Keys);
+        AssertNoToken(Serialize(fetch));
+        Assert.Equal(remoteHead, GitRemoteFixture.Head(fixture.BarePath));
     }
 
     [Fact]
@@ -386,12 +419,17 @@ public sealed class RepoActionGitTests
         };
     }
 
-    private static SnapshotIndex IndexFor(string repoPath, string state = "SYNCED") =>
+    private static SnapshotIndex IndexFor(string repoPath, string state = "SYNCED", string? headSha = null) =>
         TestData.Index(
             Path.GetDirectoryName(repoPath) ?? repoPath,
             new ComponentSpec("CF100A_Demo", new[]
             {
-                new RepoSpec("IMPL", repoPath, State: state, Branch: "main")
+                new RepoSpec(
+                    "IMPL",
+                    repoPath,
+                    State: state,
+                    Branch: "main",
+                    HeadSha: headSha ?? GitRemoteFixture.Head(repoPath))
             }));
 
     private static string Serialize(CommandResult result) => JsonSerializer.Serialize(result, WebJson);
