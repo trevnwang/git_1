@@ -47,7 +47,8 @@ public sealed class RealWorkspaceSmokeTests
         }
 
         _output.WriteLine("workspace=" + workspace);
-        var config = new AppConfig { WorkspaceRoot = workspace };
+        // 审计-lite 落点隔离到临时目录，避免烟测（若开启写操作）写真实 %LOCALAPPDATA%。
+        var config = TestAudit.NewConfig(workspace);
         using var snapshots = new SnapshotService(config);
         var launcher = new RecordingLauncher();
         using var router = new HostCommandRouter(config, snapshots, launcher);

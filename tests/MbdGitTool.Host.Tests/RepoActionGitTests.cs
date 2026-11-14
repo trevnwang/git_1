@@ -85,12 +85,21 @@ public sealed class RepoActionGitTests
     public async Task Pull_ExplicitBranchDifferentFromCurrent_IsRejectedWithoutChanges()
     {
         using var fixture = GitRemoteFixture.Create();
+
+        // 远端 feature 领先 main（main 是其祖先）：旧实现会 fetch origin feature 后把当前 main 快进到 origin/feature。
+        TestGit.Run(fixture.CloneA, "checkout", "-q", "-b", "feature");
+        File.WriteAllText(Path.Combine(fixture.CloneA, "feature-ahead.txt"), "feature ahead");
+        TestGit.CommitAll(fixture.CloneA, "feature ahead of main");
+        TestGit.Run(fixture.CloneA, "push", "-q", "origin", "feature");
+        TestGit.Run(fixture.CloneA, "checkout", "-q", "main");
+        var featureHead = TestGit.Capture(fixture.BarePath, "rev-parse", "refs/heads/feature");
+
         var service = new RepoActionService();
         var index = IndexFor(fixture.CloneB);
         var headBefore = GitRemoteFixture.Head(fixture.CloneB);
         var branchBefore = GitRemoteFixture.Branch(fixture.CloneB);
 
-        // AC-SAFE-17：PULL 只允许当前分支，显式 branch 不同必须拒绝且零改动。
+        // AC-SAFE-17：PULL 只允许当前分支，显式 branch 不同必须拒绝且零改动（不得 FF 到其它远端分支）。
         var result = await service.RunAsync(
             Params("PULL", new { branch = "feature" }),
             index,
@@ -98,8 +107,33 @@ public sealed class RepoActionGitTests
 
         Assert.False(result.Ok);
         Assert.Equal(BridgeErrorCodes.InvalidArgument, result.Error!.Code);
+        Assert.Equal("branch", result.Error.Details!["field"]);
         Assert.Equal(headBefore, GitRemoteFixture.Head(fixture.CloneB));
         Assert.Equal(branchBefore, GitRemoteFixture.Branch(fixture.CloneB));
+        Assert.NotEqual(featureHead, GitRemoteFixture.Head(fixture.CloneB));
+    }
+
+    [Fact]
+    public async Task CommitAndPush_WithoutConfirm_AreRejectedByFrozenConfirmFlag()
+    {
+        using var fixture = GitRemoteFixture.Create();
+        File.WriteAllText(Path.Combine(fixture.CloneB, "needs-confirm.txt"), "x");
+        TestGit.Run(fixture.CloneB, "add", "needs-confirm.txt");
+        var service = new RepoActionService();
+        var index = IndexFor(fixture.CloneB);
+        var headBefore = GitRemoteFixture.Head(fixture.CloneB);
+
+        // ADR AC-UI-08 / SRS §7.6 冻结：COMMIT/PUSH 恒 RequiresConfirm（即使矩阵 cell=Y）。
+        var commit = await service.RunAsync(
+            Params("COMMIT", new { message = "no confirm" }), index, CancellationToken.None);
+        Assert.False(commit.Ok);
+        Assert.Equal(BridgeErrorCodes.ConfirmRequired, commit.Error!.Code);
+        Assert.Equal(headBefore, GitRemoteFixture.Head(fixture.CloneB));
+
+        var push = await service.RunAsync(Params("PUSH"), index, CancellationToken.None);
+        Assert.False(push.Ok);
+        Assert.Equal(BridgeErrorCodes.ConfirmRequired, push.Error!.Code);
+        Assert.Equal(headBefore, GitRemoteFixture.Head(fixture.CloneB));
     }
 
     [Fact]

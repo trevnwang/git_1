@@ -226,7 +226,7 @@ public sealed class RepoActionService
     }
 
     private async Task<CommandResult> RunCoreAsync(
-        RunRepoActionParams parameters,
+        RunRepoActionParams? parameters,
         SnapshotIndex index,
         CancellationToken cancellationToken,
         RepoActionExecution execution)
@@ -1614,4 +1614,10 @@ public sealed class RepoActionExecution
     public string? ErrorCode { get; set; }
 
     public long DurationMs { get; set; }
+
+    /// <summary>操作者（审计 operation_log.actor）。</summary>
+    public string? Actor { get; set; }
+
+    /// <summary>请求关联 ID（审计 operation_log.request_id）。</summary>
+    public string? RequestId { get; set; }
 }

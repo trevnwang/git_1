@@ -139,7 +139,7 @@ public sealed class HostCommandRouterTests
     {
         var token = "ghp_router_fake_token_9876543210";
         using var fixture = GitRemoteFixture.Create();
-        var config = new AppConfig { WorkspaceRoot = fixture.Root, GiteaToken = token };
+        var config = TestAudit.NewConfig(fixture.Root, token);
         using var router = new HostCommandRouter(
             config,
             new SnapshotService(config),
@@ -309,12 +309,16 @@ public sealed class HostCommandRouterTests
         Assert.Equal(BridgeErrorCodes.InvalidArgument, badParams.Error!.Code);
     }
 
-    private static HostCommandRouter CreateMockRouter() =>
-        new(new AppConfig(), new SnapshotService(new AppConfig()));
+    private static HostCommandRouter CreateMockRouter()
+    {
+        // 审计-lite 落点隔离到临时目录，避免单测写真实 %LOCALAPPDATA%。
+        var config = TestAudit.NewConfig();
+        return new HostCommandRouter(config, new SnapshotService(config));
+    }
 
     private static HostCommandRouter CreateWorkspaceRouter(string workspaceRoot, RecordingLauncher launcher)
     {
-        var config = new AppConfig { WorkspaceRoot = workspaceRoot };
+        var config = TestAudit.NewConfig(workspaceRoot);
         return new HostCommandRouter(config, new SnapshotService(config), launcher);
     }
 

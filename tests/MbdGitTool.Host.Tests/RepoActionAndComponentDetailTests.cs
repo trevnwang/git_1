@@ -68,6 +68,23 @@ public sealed class RepoActionServiceTests
         States.Select(state => new object[] { state, ExpectedMatrix[state] });
 
     [Fact]
+    public void GetAvailability_Synced_CommitAndPushRequireConfirm_OthersFollowMatrix()
+    {
+        var availability = new RepoActionService().GetAvailability(Repo("SYNCED"));
+
+        // SYNCED 矩阵为 YYYYY（全部允许），但 COMMIT/PUSH 的确认标志冻结为 C。
+        Assert.All(availability, item => Assert.True(item.MatrixAllowed));
+        Assert.True(availability.Single(item => item.Action == "COMMIT").RequiresConfirm);
+        Assert.True(availability.Single(item => item.Action == "PUSH").RequiresConfirm);
+        Assert.All(
+            availability.Where(item => item.Action is "PULL" or "FETCH" or "CHKOUT"),
+            item => Assert.False(item.RequiresConfirm));
+        Assert.Equal(
+            "CONFIRM_REQUIRED",
+            availability.Single(item => item.Action == "COMMIT").ReasonCode);
+    }
+
+    [Fact]
     public void Run_UnknownAction_ReturnsInvalidArgument()
     {
         var service = new RepoActionService();

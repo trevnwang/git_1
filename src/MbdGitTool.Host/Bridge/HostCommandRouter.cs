@@ -247,8 +247,11 @@ public sealed class HostCommandRouter : IDisposable
 
             case "runRepoAction":
             {
-                await EnsureSnapshotAsync(cancellationToken).ConfigureAwait(false);
+                // AC-SAFE-15：写前 read-through 重扫（拒绝复用旧快照），CAS 以刷新后的 HEAD 为基准。
+                await _snapshots.RefreshAsync(cancellationToken).ConfigureAwait(false);
                 var parsed = ParseParams<RunRepoActionParams>(parameters);
+                var requestId = Guid.NewGuid().ToString("N");
+                var actor = Environment.UserName;
 
                 // M2：真实单仓操作（异步执行，不走 _ioGate，避免长任务占满 FS/git 并发闸）。
                 // G-P0-2 / AC-OP-33：动作返回前写审计-lite（成功/失败/异常都写 1 行，不含 token/output）。
@@ -257,7 +260,12 @@ public sealed class HostCommandRouter : IDisposable
                         parsed,
                         _snapshots.Index,
                         cancellationToken,
-                        execution => _audit.Record(execution))
+                        execution =>
+                        {
+                            execution.Actor = actor;
+                            execution.RequestId = requestId;
+                            _audit.Record(execution);
+                        })
                     .ConfigureAwait(false);
 
                 // M2 P1-2：写操作成功后失效快照缓存/派生缓存，下一次请求按现有 refresh 机制重建（CAS 才能拿到新 HEAD）。

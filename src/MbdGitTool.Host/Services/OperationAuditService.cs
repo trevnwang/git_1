@@ -72,7 +72,9 @@ public sealed class OperationAuditService
             execution.PostHead,
             execution.Ok,
             execution.ErrorCode,
-            execution.DurationMs);
+            execution.DurationMs,
+            actor: execution.Actor,
+            requestId: execution.RequestId);
     }
 
     /// <summary>追加一条执行审计（字段级重载，便于独立测试/诊断）。</summary>
@@ -85,7 +87,9 @@ public sealed class OperationAuditService
         string? postHead,
         bool ok,
         string? errorCode,
-        long durationMs)
+        long durationMs,
+        string? actor = null,
+        string? requestId = null)
     {
         try
         {
@@ -101,7 +105,9 @@ public sealed class OperationAuditService
                     postHead = Sanitize(postHead),
                     ok,
                     errorCode = Sanitize(errorCode),
-                    durationMs = Math.Max(0, durationMs)
+                    durationMs = Math.Max(0, durationMs),
+                    actor = Sanitize(actor),
+                    requestId = Sanitize(requestId)
                 },
                 JsonOptions);
 

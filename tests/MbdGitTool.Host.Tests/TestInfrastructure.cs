@@ -314,3 +314,21 @@ internal sealed class RecordingLauncher : IProcessLauncher
         return Succeed;
     }
 }
+
+/// <summary>
+/// 隔离的审计-lite 目录（<c>%TEMP%\MbdGitToolTests\audit\&lt;guid&gt;</c>）：
+/// 避免 Host 单测把 JSONL 写进真实 <c>%LOCALAPPDATA%\MbdGitTool\audit</c>。
+/// </summary>
+internal static class TestAudit
+{
+    public static string NewRoot() =>
+        Path.Combine(Path.GetTempPath(), "MbdGitToolTests", "audit", Guid.NewGuid().ToString("N"));
+
+    /// <summary>带临时 <see cref="AppConfig.AuditRoot"/> 的配置（供 HostCommandRouter/SnapshotService 共用）。</summary>
+    public static AppConfig NewConfig(string? workspaceRoot = null, string? giteaToken = null) => new()
+    {
+        WorkspaceRoot = workspaceRoot,
+        GiteaToken = giteaToken,
+        AuditRoot = NewRoot()
+    };
+}

@@ -392,7 +392,7 @@ public sealed class RepoActionSecurityTests
     public async Task Router_AfterSuccessfulWrite_RefreshesSnapshotSoNextActionPassesCas()
     {
         using var fixture = GitRemoteFixture.Create();
-        var config = new AppConfig { WorkspaceRoot = fixture.Root };
+        var config = TestAudit.NewConfig(fixture.Root);
         using var snapshots = new SnapshotService(config);
         using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
         var snapshot = await DispatchAsync(router, "getSnapshot", null);
@@ -535,7 +535,7 @@ public sealed class RepoActionSecurityTests
     public async Task RemoteRefs_Router_ReturnsReadOnlyRefList()
     {
         using var fixture = GitRemoteFixture.Create();
-        var config = new AppConfig { WorkspaceRoot = fixture.Root };
+        var config = TestAudit.NewConfig(fixture.Root);
         using var snapshots = new SnapshotService(config);
         using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
         Assert.True((await DispatchAsync(router, "getSnapshot", null)).Ok);

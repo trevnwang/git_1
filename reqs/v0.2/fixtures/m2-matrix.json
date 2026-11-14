@@ -13,7 +13,7 @@
     "Host 单测：tests/MbdGitTool.Host.Tests（RepoActionAvailabilityMatrixTests 等）",
     "CDP：ui/scripts/cdp-m2a-selfcheck.mjs"
   ],
-  "status": "SINGLE_SOURCE_PENDING_CODE_ALIGNMENT",
+  "status": "aligned",
   "freezeNotes": [
     "本夹具是 AC-UI-08 的唯一期望源：Host GetAvailability 输出与 UI 逐格状态都必须与本文件一致；禁止第三份手写矩阵。",
     "enabled：取自 SRS §7.6 映射（PULL= Pull(ff) 列、FETCH= Fetch 列、CHKOUT= Checkout 分支列、COMMIT= Commit 列、PUSH= Push 列）；矩阵中 — 按禁用编码（D-025 冻结）。",
