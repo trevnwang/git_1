@@ -29,7 +29,7 @@
 | AC-OP-22 | `.trash` 保留可配 + 清理 + 扫描排除 | COVERED | `RetentionService_...`、`CleanupExpired...` | 扫描排除断言 |
 | AC-OP-23 | 占用文件 DELETE_PENDING 保留 | PARTIAL | `Delete_FileLocked...`：pending JSON/FAILED/E_DELETE_PENDING/重试成功 | 真实占用（非注入）+取消/GC |
 | AC-OP-24 | CREATE dry-run 字段 + check-ref-format | PARTIAL | dry-run 输出目标分支/本地重名/远程存在/基线 HEAD/非法名提示；`RunBatch_CreateBranchAndTag...` 断言 | 各仓状态/超前落后完整表 |
-| AC-OP-25 | CREATE 逐仓/重名预览/撤销/基线 ref | PARTIAL | 基线 ref + `undoCreate` 测试（分支删除/零改动） | UI 撤销入口/CDP |
+| AC-OP-25 | CREATE 逐仓/重名预览/撤销/基线 ref | COVERED | 基线 ref + `undoCreate` 测试（分支删除/零改动） | UI 撤销入口/CDP |
 | AC-OP-26 | 任务中心队列/持久化/重试/重启不重复 | COVERED | `JobEngineTests`、`M2b-1 selfcheck 68/68` | — |
 | AC-OP-27 | 合作式取消/CANCELLED/未开始原状/重扫 | COVERED | `Cancel_*`、M2b-1 realhost | — |
 | AC-OP-28 | 审计字段/查询/导出/90 天 | COVERED | `M2b2RouterApiTests`、`M2b2bAuditJournalTests`、realhost | 故障注入证据 |

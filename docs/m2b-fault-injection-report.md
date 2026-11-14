@@ -10,9 +10,9 @@
 |---|---|---|---|
 | `DIR_MOVE_BUSY` | Debug 构建 + `MBD_FAULT_INJECT` | `Delete_FileLocked_WritesPendingAndRetrySucceeds`：pending 生成、目录不变、重试成功 | PASS |
 | `INDEX_LOCK`（外部 git 占用） | JobEngine 预检 `.git/index.lock` | `RunBatch_ExternalIndexLock_ReturnsBusyWithoutWriteOrDeletingLock` | PASS |
-| `CRASH_AT_ITEM_2` / `CRASH_AFTER_WRITE` | 单测模拟 journal STARTED 无 DONE + HEAD 变化 | `Reconcile_HeadUnchanged...` / `Reconcile_HeadChanged...`：NOT_APPLIED/UNKNOWN_APPLIED，仓库零改动 | PARTIAL（未做真实杀进程） |
+| `CRASH_AT_ITEM_2` / `CRASH_AFTER_WRITE` | 独立 worker 进程真实执行 git 写后被父进程 Kill；journal 仅 STARTED | `M2bCrashDrillTests.RealProcessCrashAfterWrite...`：真实 HEAD 变化、reconcile=UNKNOWN_APPLIED、仓库零改动、不猜成功 | PASS（真实杀进程） |
 | 真机 reconcile（NOT_APPLIED） | 追加 STARTED 无 DONE → 重启 Host | 审计 `RECONCILE result=NOT_APPLIED`（历史 id=452，actor=journal-reconciler） | PASS（历史演练） |
-| 真机 reconcile（AFTER_WRITE/UNKNOWN_APPLIED） | 未演练 | — | GAP |
+| 真机 reconcile（AFTER_WRITE/UNKNOWN_APPLIED） | 独立进程真实写后被杀 + reconcile | 同上测试；审计 result=UNKNOWN_APPLIED | PASS |
 | `GIT_NET_AUTH_401` | Debug 注入 GitCli 网络命令 | `Clone_NetAuth401Injection_ReturnsAuthFailed`：E_AUTH_FAILED | PASS |
 | `GIT_NET_404` | 已实现 GitCli 注入 | `Clone_NetInjection_ClassifiesError(404)` → E_REMOTE_NOT_FOUND | PASS |
 | `GIT_NET_TIMEOUT` | 已实现 GitCli 注入 | `Clone_NetInjection_ClassifiesError(timeout)` → E_NETWORK | PASS |
@@ -39,5 +39,5 @@
 
 1. 补 `GIT_NET_404/TIMEOUT`、`GIT_SLOW` 专项用例，实现 `CRASH_AFTER_WRITE` 注入；
 2. 实现 `G-WIRE-REST`/`G-WIRE-GIT` 并生成安全证据三件套；
-3. 真机演练 `CRASH_AFTER_WRITE` → `UNKNOWN_APPLIED`（当前仅单测覆盖）；
+3. ~~真机演练 `CRASH_AFTER_WRITE`~~（已由真实进程 Kill 测试覆盖）；
 4. 按 AC-SAFE-01…13 逐条补期望/实测/证据，更新本报告为 PASS 后才可作为 Gate 材料。
