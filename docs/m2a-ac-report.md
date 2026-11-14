@@ -3,7 +3,7 @@
 > 日期：2026-11-14 15:10（本地）　候选代码：工作区最新（待提交）
 > 权威定义：SRS v0.3.1-r2 §13.1.1 + §13.1.2；ADR `reqs/adr/D-025-m2a-m2b.md`。
 > 证据层：A=Host 单测/黑盒，B=真实 Gitea E2E，C=WebView2 CDP 真实鼠标键盘，D=静态/截图。
-> **本文件是 Gate 复评输入，不代表最终签收；签收以独立 Gate 报告为准。**
+> **签收：独立复评通过（`docs/review-m2a-signoff-ux.md`、`docs/review-m2a-signoff-cas.md`）；tag = `m2a`（目标提交 `458e39d`）。**
 
 ## 1. 总表
 
