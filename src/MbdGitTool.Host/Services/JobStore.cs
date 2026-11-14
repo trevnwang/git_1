@@ -171,6 +171,7 @@ public sealed class JobStore
 /// <summary>
 /// 持久化的 job 行（jobs.json）：JobDto 全字段 + 重试所需的 kind/args 元数据。
 /// 可空时间/错误码/HEAD 字段保持可空，JSON 中允许 null。
+/// <para><c>DryRun/CancelRequested</c> 为可选参数（旧 jobs.json 反序列化兼容；缺省 false）。</para>
 /// </summary>
 public sealed record StoredJob(
     string Id,
@@ -182,9 +183,11 @@ public sealed record StoredJob(
     IReadOnlyList<StoredJobItem> Items,
     StoredJobArguments? Arguments,
     string? Actor,
-    string? RequestId);
+    string? RequestId,
+    bool DryRun = false,
+    bool CancelRequested = false);
 
-/// <summary>持久化的 job_item 行（逐仓结果）。</summary>
+/// <summary>持久化的 job_item 行（逐仓结果）；<c>Preview</c> 仅 dryRun 作业为 true。</summary>
 public sealed record StoredJobItem(
     string ComponentId,
     string RepoType,
@@ -196,7 +199,8 @@ public sealed record StoredJobItem(
     string? Message,
     string? PreHead,
     string? PostHead,
-    string? BackupRef);
+    string? BackupRef,
+    bool Preview = false);
 
 /// <summary>批量作业参数（runBatch.args 的解析结果；持久化以便重启后“仅重试失败项”仍可执行）。</summary>
 public sealed record StoredJobArguments(
@@ -209,4 +213,5 @@ public sealed record StoredJobArguments(
     bool SetUpstream,
     bool Stash,
     bool StageAll,
-    string? TrashStamp);
+    string? TrashStamp,
+    string? ConfirmText = null);

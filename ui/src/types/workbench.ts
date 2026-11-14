@@ -230,6 +230,8 @@ export interface MenuItemVm {
   danger?: boolean
   separator?: boolean
   stage?: string
+  /** 悬停说明（禁用原因等）。 */
+  title?: string
 }
 
 export interface ConfirmVm {
@@ -340,7 +342,18 @@ export interface FilterState {
 
 // ───────────────────────────── M2b 任务中心 / 批量入口 ─────────────────────────────
 
-export type JobKind = 'SYNC' | 'CREATE' | 'CLONE' | 'DELETE' | 'RESTORE' | 'TAG' | 'PULL' | 'FETCH'
+export type JobKind =
+  | 'SYNC'
+  | 'CREATE'
+  | 'CLONE'
+  | 'DELETE'
+  | 'RESTORE'
+  | 'TAG'
+  | 'PULL'
+  | 'FETCH'
+  | 'CHKOUT'
+  | 'COMMIT'
+  | 'PUSH'
 
 export type JobState =
   | 'PENDING'
@@ -350,6 +363,7 @@ export type JobState =
   | 'FAILED'
   | 'CANCELED'
   | 'INTERRUPTED'
+  | 'PREVIEW'
 
 export type JobItemState =
   | 'PENDING'
@@ -361,6 +375,8 @@ export type JobItemState =
   | 'SKIPPED'
   | 'CANCELED'
   | 'INTERRUPTED'
+  /** dryRun 预览项：只做只读预检、仓库零写。 */
+  | 'PREVIEW'
 
 export interface JobItemVm {
   componentId: string
@@ -374,6 +390,8 @@ export interface JobItemVm {
   preHead: string | null
   postHead: string | null
   backupRef: string | null
+  /** dryRun 预览项（只读预检、零写）。 */
+  preview?: boolean
 }
 
 export interface JobVm {
@@ -391,17 +409,35 @@ export interface JobVm {
   items: JobItemVm[]
   /** 进行中（PENDING/RUNNING）：任务中心按此分段，数量同步到状态栏队列。 */
   active: boolean
+  /**
+   * dryRun 预览作业（未执行任何写操作）：来自提交时 args.dryRun=true 的本地记录，
+   * 或由「全部 SKIPPED + DRY_RUN 消息」识别（历史/重启后仍可识别）。
+   */
+  dryRun?: boolean
+  /** 事件信封合成的部分快照（无完整 items/kind）：合并时保留上一份明细。 */
+  partial?: boolean
 }
 
 /** 任务中心分段：进行中 / 历史。 */
 export type TasksSegment = 'active' | 'history'
 
-/** 批量入口动作（runBatch.kind 的 UI 子集）。 */
-export type BatchKind = 'SYNC' | 'CREATE' | 'CLONE' | 'DELETE' | 'TAG' | 'RESTORE'
+/** 批量入口动作（runBatch.kind 的 UI 子集；完整清单见 viewmodel.BATCH_ACTIONS）。 */
+export type BatchKind =
+  | 'SYNC'
+  | 'CREATE'
+  | 'CLONE'
+  | 'DELETE'
+  | 'TAG'
+  | 'RESTORE'
+  | 'PULL'
+  | 'FETCH'
+  | 'CHKOUT'
+  | 'COMMIT'
+  | 'PUSH'
 
-/** 批量参数对话框（CREATE/TAG 输入 branch/tag；CLONE 预览缺失仓；可选 dryRun）。 */
+/** 批量参数对话框（CREATE/TAG/CHKOUT 输入 branch/tag；CLONE 预览缺失仓；可选 dryRun）。 */
 export interface BatchDialogVm {
-  kind: 'branch' | 'tag' | 'clone'
+  kind: 'branch' | 'tag' | 'clone' | 'chkout'
   action: BatchKind
   title: string
   body: string

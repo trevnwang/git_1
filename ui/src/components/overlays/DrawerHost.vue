@@ -5,14 +5,18 @@
  * （状态/错误码/backupRef/preHead→postHead）、“仅重试失败项”、从备份 ref 恢复。
  * 数据来自 store：JOB_UPDATED 事件驱动 + getJobs 轮询兜底（Mock 模式为内置演示作业）。
  */
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useWorkbench } from '../../stores/workbench'
 import {
   REPO_LABEL,
   formatAgo,
   formatClock,
   formatDurationMs,
+  jobCanceledCount,
+  jobIsDryRun,
+  jobItemCancelNote,
   jobItemStateMeta,
+  jobItemVisibleErrorCode,
   jobKindLabel,
   jobProgressPercent,
   jobRetryableCount,
@@ -27,6 +31,59 @@ const state = w.state
 
 const kind = computed(() => state.overlays.drawer)
 const title = computed(() => (kind.value === 'tasks' ? '任务中心' : '通知中心'))
+const root = ref<HTMLElement | null>(null)
+const closeBtn = ref<HTMLButtonElement | null>(null)
+/** 打开抽屉前的触发控件：关闭（✕ / 遮罩 / Esc）后归还焦点（AC-UI-13 / §11.0.4-5）。 */
+let previousFocus: HTMLElement | null = null
+
+watch(kind, (value) => {
+  if (value) {
+    previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    void nextTick(() => closeBtn.value?.focus())
+    return
+  }
+  const target = previousFocus
+  previousFocus = null
+  void nextTick(() => {
+    if (target && target.isConnected && target !== document.body) target.focus()
+  })
+})
+
+/** 抽屉内焦点陷阱：Tab/Shift+Tab 只在抽屉内循环，不逃逸到主界面。 */
+function trapTab(event: KeyboardEvent): void {
+  const rootEl = root.value
+  if (!rootEl) return
+  const focusables = [...rootEl.querySelectorAll<HTMLElement>('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter(
+    (node) => !node.hasAttribute('disabled') && node.offsetParent !== null,
+  )
+  if (focusables.length === 0) {
+    event.preventDefault()
+    return
+  }
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  const active = document.activeElement as HTMLElement | null
+  if (event.shiftKey) {
+    if (active === first || !active || !rootEl.contains(active)) {
+      event.preventDefault()
+      last.focus()
+    }
+  } else if (active === last || !active || !rootEl.contains(active)) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+/** Esc 关闭抽屉并归还焦点；stopPropagation 防止宿主全局 Esc 继续关闭下层浮层/清空选择模式。 */
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    w.closeDrawer()
+    return
+  }
+  if (event.key === 'Tab') trapTab(event)
+}
 
 const ciNotifications = [
   { type: 'CI 失败', detail: '构建失败 / 失败阶段 / 构建号 / 链接（v1 空分组）' },
@@ -71,6 +128,34 @@ function retryableCount(job: JobVm): number {
   return jobRetryableCount(job)
 }
 
+/** P1-1：dryRun 预览作业识别（提交记录 / 全 SKIPPED+DRY_RUN 消息）。 */
+function isDryRun(job: JobVm): boolean {
+  return jobIsDryRun(job)
+}
+
+function canceledCount(job: JobVm): number {
+  return jobCanceledCount(job)
+}
+
+/** 预览作业不显示「✓ 成功」：成功态改「预览完成」，避免把预检读成已写入。 */
+function jobStateLabel(job: JobVm): string {
+  if (isDryRun(job) && (job.state === 'SUCCESS' || job.state === 'PARTIAL')) return '预览完成'
+  return jobStateMeta(job.state).label
+}
+
+function jobProgressText(job: JobVm): string {
+  return isDryRun(job) ? '未执行写操作' : `${job.ok}/${job.total}`
+}
+
+/** P0-1 前端侧：取消项不展示错误码（旧数据 E_TIMEOUT 会误导为“超时失败”）。 */
+function itemErrorCode(item: JobVm['items'][number]): string | null {
+  return jobItemVisibleErrorCode(item)
+}
+
+function itemCancelNote(item: JobVm['items'][number]): string {
+  return jobItemCancelNote(item)
+}
+
 function onCancel(job: JobVm): void {
   void w.cancelJob(job.id)
 }
@@ -83,17 +168,27 @@ function onRetry(job: JobVm): void {
 <template>
   <div v-if="kind" class="overlay" @click.self="w.closeDrawer()">
     <aside
+      ref="root"
       class="drawer"
       :class="{ 'drawer-wide': kind === 'tasks' }"
       data-testid="drawer"
       role="dialog"
       aria-modal="true"
       :aria-label="title"
+      tabindex="-1"
+      @keydown="onKeydown"
     >
       <header class="drawer-head">
         <span class="title">{{ title }}</span>
         <span v-if="kind === 'tasks'" class="source-pill" data-testid="task-source">{{ jobsSourceLabel }}</span>
-        <button type="button" class="icon-btn" autofocus title="关闭（Esc）" aria-label="关闭" @click="w.closeDrawer()">✕</button>
+        <button
+          ref="closeBtn"
+          type="button"
+          class="icon-btn"
+          title="关闭（Esc）"
+          aria-label="关闭"
+          @click="w.closeDrawer()"
+        >✕</button>
       </header>
 
       <!-- 任务中心（M2b） -->
@@ -124,7 +219,14 @@ function onRetry(job: JobVm): void {
             :aria-selected="state.tasksSegment === 'active'"
             data-testid="task-segment-active"
             @click="w.setTasksSegment('active')"
-          >进行中 <span class="tab-count">{{ activeJobs.length }}</span></button>
+          >进行中 <span class="tab-count">{{ activeJobs.length }}</span>
+            <span
+              v-if="state.tasksUnreadActive > 0"
+              class="tab-new"
+              data-testid="task-new-active"
+              :title="`${state.tasksUnreadActive} 个新进行中作业（当前显示历史分段）`"
+            >● {{ state.tasksUnreadActive }} 新</span>
+          </button>
           <button
             type="button"
             role="tab"
@@ -149,8 +251,8 @@ function onRetry(job: JobVm): void {
           icon="◷"
           :title="state.tasksSegment === 'active' ? '暂无进行中的任务' : '暂无历史任务'"
           :desc="state.tasksSegment === 'active'
-            ? '批量 SYNC / CREATE / Clone / Delete 提交后会在此显示逐仓进度、取消与失败重试。'
-            : '已完成的批量作业会保留在此，可展开逐仓结果或仅重试失败项。'"
+            ? '批量 SYNC / CREATE / Clone / PULL / FETCH / CHKOUT / Tag / Restore / Delete 提交后会在此显示逐仓进度、取消与失败重试。'
+            : '已完成的批量作业会保留在此，可展开逐仓结果或仅重试失败项；dryRun 预览作业标注「未执行写操作」。'"
           data-testid="task-empty"
         />
 
@@ -159,21 +261,28 @@ function onRetry(job: JobVm): void {
             v-for="job in shownJobs"
             :key="job.id"
             class="job-card"
-            :class="{ current: isCurrent(job.id), active: job.active }"
+            :class="{ current: isCurrent(job.id), active: job.active, 'dry-run': isDryRun(job) }"
             data-testid="task-job"
             :data-job-id="job.id"
             :data-job-kind="job.kind"
             :data-state="job.state"
             :data-active="job.active ? '1' : '0'"
+            :data-dryrun="isDryRun(job) ? '1' : '0'"
             @click="w.selectJob(job.id)"
           >
             <div class="job-head">
               <span class="job-kind" data-testid="task-kind">{{ jobKindLabel(job.kind) }}</span>
               <span
+                v-if="isDryRun(job)"
+                class="dryrun-badge"
+                data-testid="task-dryrun-badge"
+                title="dryRun 预览：仅预检，未执行任何写操作"
+              >预览（dryRun）</span>
+              <span
                 class="job-state"
-                :class="`tone-${jobStateMeta(job.state).tone}`"
+                :class="`tone-${isDryRun(job) ? 'info' : jobStateMeta(job.state).tone}`"
                 data-testid="task-state"
-              >{{ jobStateMeta(job.state).icon }} {{ jobStateMeta(job.state).label }}</span>
+              >{{ isDryRun(job) ? '◷' : jobStateMeta(job.state).icon }} {{ jobStateLabel(job) }}</span>
               <span class="spacer" />
               <span class="job-id mono" :title="job.id">{{ job.id }}</span>
               <button
@@ -186,13 +295,27 @@ function onRetry(job: JobVm): void {
               >取消</button>
             </div>
 
-            <div class="job-progress" :title="`成功 ${job.ok} · 失败 ${job.failed} · 跳过 ${job.skipped} / 共 ${job.total}`">
+            <div
+              class="job-progress"
+              :title="isDryRun(job)
+                ? `dryRun 预览：仅预检（共 ${job.total} 仓），未执行任何写操作`
+                : `成功 ${job.ok} · 失败 ${job.failed} · 跳过 ${job.skipped} · 已取消 ${canceledCount(job)} / 共 ${job.total}`"
+            >
               <div class="progress-track">
-                <span class="progress-ok" :style="{ width: `${jobProgressPercent(job)}%` }" />
+                <span
+                  class="progress-ok"
+                  :class="{ 'progress-preflight': isDryRun(job) }"
+                  :style="{ width: `${jobProgressPercent(job)}%` }"
+                />
               </div>
-              <span class="progress-text" data-testid="task-progress">{{ job.ok }}/{{ job.total }}</span>
+              <span class="progress-text" data-testid="task-progress">{{ jobProgressText(job) }}</span>
               <span v-if="job.failed > 0" class="failed-count" data-testid="task-failed-count">失败 {{ job.failed }}</span>
+              <span v-if="canceledCount(job) > 0" class="canceled-count" data-testid="task-canceled-count">已取消 {{ canceledCount(job) }}</span>
               <span v-if="job.skipped > 0" class="skipped-count">跳过 {{ job.skipped }}</span>
+            </div>
+
+            <div v-if="isDryRun(job)" class="job-dryrun-note" data-testid="task-dryrun-note">
+              预览（dryRun）：已预检 {{ job.total }} 仓，<b>未执行任何写操作</b>（不建分支/Tag、不写远端）。
             </div>
 
             <div class="job-time" data-testid="task-time">{{ jobTimeText(job) }}</div>
@@ -234,10 +357,20 @@ function onRetry(job: JobVm): void {
                   :class="`tone-${jobItemStateMeta(item.state).tone}`"
                   data-testid="task-item-state"
                 >{{ jobItemStateMeta(item.state).icon }} {{ jobItemStateMeta(item.state).label }}</span>
-                <span v-if="item.errorCode" class="item-error" :data-error-code="item.errorCode" data-testid="task-item-error">
-                  <b class="mono">{{ item.errorCode }}</b>
+                <span
+                  v-if="itemErrorCode(item)"
+                  class="item-error"
+                  :data-error-code="itemErrorCode(item)"
+                  data-testid="task-item-error"
+                >
+                  <b class="mono">{{ itemErrorCode(item) }}</b>
                   <span v-if="item.message"> · {{ item.message }}</span>
                 </span>
+                <span
+                  v-else-if="item.state === 'CANCELED'"
+                  class="item-canceled"
+                  data-testid="task-item-canceled"
+                >{{ itemCancelNote(item) }}</span>
                 <span v-else-if="item.message" class="item-message">{{ item.message }}</span>
                 <span v-if="item.preHead || item.postHead" class="item-heads mono" data-testid="task-item-heads">
                   {{ shortSha(item.preHead) }} → {{ shortSha(item.postHead) }}
@@ -255,6 +388,7 @@ function onRetry(job: JobVm): void {
 
         <p class="task-footnote">
           M2b：批量写操作经 Host 作业运行；取消为合作式（不整体回滚），终态以实际扫描为准；失败项可“仅重试失败项”。
+          dryRun 预览作业只做逐仓预检，<b>未执行任何写操作</b>。
         </p>
       </div>
 
@@ -367,6 +501,16 @@ function onRetry(job: JobVm): void {
   cursor: pointer;
 }
 .task-tab.active { color: var(--text); border-bottom-color: var(--focus); font-weight: 650; }
+.tab-new {
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--st-info-bg);
+  border: 1px solid var(--st-info-bd);
+  color: var(--st-info-fg);
+  font-size: 9px;
+  font-weight: 600;
+}
 .tab-count {
   margin-left: 4px;
   padding: 0 5px;
@@ -402,8 +546,28 @@ function onRetry(job: JobVm): void {
 }
 .job-card.active { border-left: 3px solid var(--st-info-fg); }
 .job-card.current { border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus); }
+.job-card.dry-run { border-left: 3px solid var(--st-warning-fg); }
 .job-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .job-kind { font-size: 12px; font-weight: 650; white-space: nowrap; }
+.dryrun-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--st-warning-bd);
+  background: var(--st-warning-bg);
+  color: var(--st-warning-fg);
+  white-space: nowrap;
+}
+.job-dryrun-note {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--st-warning-fg);
+  background: color-mix(in srgb, var(--st-warning-bg) 40%, var(--surface));
+  border: 1px dashed var(--st-warning-bd);
+  border-radius: 4px;
+  padding: 3px 6px;
+}
 .job-state { font-size: 10px; font-weight: 600; padding: 0 6px; border-radius: 999px; white-space: nowrap; }
 .job-id { font-size: 9px; color: var(--text-2); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-progress { display: flex; align-items: center; gap: 6px; }
@@ -411,7 +575,15 @@ function onRetry(job: JobVm): void {
 .progress-ok { display: block; height: 100%; background: var(--st-info-fg); transition: width 240ms var(--ease); }
 .progress-text { font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .failed-count { font-size: 10px; color: var(--st-danger-fg); white-space: nowrap; }
+.canceled-count { font-size: 10px; color: var(--st-neutral-fg); white-space: nowrap; }
 .skipped-count { font-size: 10px; color: var(--st-warning-fg); white-space: nowrap; }
+.progress-ok.progress-preflight {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--st-warning-fg) 0 4px,
+    color-mix(in srgb, var(--st-warning-bg) 80%, var(--st-warning-fg)) 4px 8px
+  );
+}
 .job-time { font-size: 10px; color: var(--text-2); }
 .job-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .task-link {
@@ -432,6 +604,7 @@ function onRetry(job: JobVm): void {
 .item-repo { font-weight: 600; }
 .item-state { padding: 0 5px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
 .item-error { color: var(--st-danger-fg); flex: 1 1 100%; padding-left: 12px; overflow-wrap: anywhere; }
+.item-canceled { color: var(--text-2); flex: 1 1 100%; padding-left: 12px; overflow-wrap: anywhere; }
 .item-message { color: var(--text-2); flex: 1 1 100%; padding-left: 12px; overflow-wrap: anywhere; }
 .item-heads { color: var(--text-2); }
 .item-backup { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 100%; padding-left: 12px; color: var(--st-warning-fg); overflow-wrap: anywhere; }

@@ -62,6 +62,7 @@ onBeforeUnmount(() => {
         role="menuitem"
         :class="{ danger: item.danger }"
         :disabled="item.disabled"
+        :title="item.title"
         @click="run(item.key)"
       >{{ item.label }}</button>
     </template>

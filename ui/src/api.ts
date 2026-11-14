@@ -264,9 +264,20 @@ export interface RepoActionResultDto {
 // ───────────────────────────── M2b 作业（Job）DTO ─────────────────────────────
 
 /** 批量作业类型（runBatch.kind；Host 以自身能力为准，未知 kind 由 Host 返回错误码）。 */
-export type JobKind = 'SYNC' | 'CREATE' | 'CLONE' | 'DELETE' | 'RESTORE' | 'TAG' | 'PULL' | 'FETCH'
+export type JobKind =
+  | 'SYNC'
+  | 'CREATE'
+  | 'CLONE'
+  | 'DELETE'
+  | 'RESTORE'
+  | 'TAG'
+  | 'PULL'
+  | 'FETCH'
+  | 'CHKOUT'
+  | 'COMMIT'
+  | 'PUSH'
 
-/** job.state 合法值（契约 7 态，SRS §8.1）。 */
+/** job.state 合法值（契约 8 态；PREVIEW 仅用于 dryRun 预览作业“只预检、零写”）。 */
 export type JobState =
   | 'PENDING'
   | 'RUNNING'
@@ -275,8 +286,9 @@ export type JobState =
   | 'FAILED'
   | 'CANCELED'
   | 'INTERRUPTED'
+  | 'PREVIEW'
 
-/** job_item.state（Host 契约：PENDING/RUNNING/OK/FAILED/SKIPPED/CANCELED/INTERRUPTED；兼容 SUCCESS）。 */
+/** job_item.state（Host 契约：PENDING/RUNNING/OK/FAILED/SKIPPED/CANCELED/INTERRUPTED/PREVIEW；兼容 SUCCESS）。 */
 export type JobItemState =
   | 'PENDING'
   | 'RUNNING'
@@ -286,6 +298,7 @@ export type JobItemState =
   | 'SKIPPED'
   | 'CANCELED'
   | 'INTERRUPTED'
+  | 'PREVIEW'
 
 export interface JobItemDto {
   componentId: string
@@ -300,6 +313,8 @@ export interface JobItemDto {
   postHead?: string | null
   /** SYNC 等备份类作业的恢复引用（refs/backup/sync/...）。 */
   backupRef?: string | null
+  /** dryRun 预览项：只做只读预检、仓库零写（Host M2b-1 修复后新增）。 */
+  preview?: boolean
 }
 
 export interface JobDto {
@@ -315,6 +330,17 @@ export interface JobDto {
   finishedAt?: string | null
   cancellable: boolean
   items: JobItemDto[]
+  /** dryRun 预览作业（只预检、零写；Host M2b-1 修复后新增字段）。 */
+  dryRun?: boolean
+  /** 已请求取消（合作式取消中）。 */
+  cancelRequested?: boolean
+  /** job 级说明（取消/内部原因等，可空）。 */
+  message?: string | null
+  /**
+   * 部分快照（事件信封只带 jobId/state/total/cancellable，无完整 items）：
+   * store 合并时保留已有 kind/items，避免明细被冲掉。正常 getJobs/getJob 响应不带该字段。
+   */
+  partial?: boolean
 }
 
 /** runBatch 参数（契约：{kind,componentIds?,repoTypes?,args?}）。 */
@@ -554,11 +580,11 @@ function onBridgeMessage(event: MessageEvent<unknown>) {
   const reply = asRecord(parseMaybeJson(event.data))
   if (!reply) return
 
-  // Host 推送：{ event: 'JOB_UPDATED', data: Job }（无 id，不是请求响应）。
+  // Host 推送：新信封 `{event:"JOB_UPDATED", jobId, current, data, state,total,cancellable}`，
+  // 兼容旧信封 `{event:"JOB_UPDATED", data:JobDto}`（无 id，不是请求响应）。
   const eventName = (readString(reply, 'event') ?? readString(reply, 'type') ?? '').toUpperCase()
   if (eventName === 'JOB_UPDATED' || eventName === 'JOB.UPDATED') {
-    const payload = asRecord(parseMaybeJson(reply['data'] ?? reply['job'] ?? reply['payload']))
-    const job = payload ? normalizeJob(payload) : null
+    const job = normalizeJobUpdatedEvent(reply)
     if (job) dispatchJobUpdate(job)
     return
   }
@@ -590,6 +616,49 @@ function dispatchJobUpdate(job: JobDto): void {
       // 订阅者异常不得影响桥接消息通道（其他请求/订阅仍需要继续工作）。
     }
   }
+}
+
+/**
+ * 解析 `JOB_UPDATED` 事件（M2b-1 修：新信封 + 旧 data 形状兼容）。
+ *
+ * - 新信封（后端 M2b-1 修复后）：`{ event:"JOB_UPDATED", jobId, current:JobDto, data:JobDto,
+ *   state, total, cancellable }`：`current` 与 `data` 均为当前 job 快照，优先 `current`。
+ * - 旧信封：`{ event:"JOB_UPDATED", data:JobDto }`。
+ * - 兜底：只有信封级字段（jobId + state/total/cancellable + items）时合成**部分快照**
+ *   （`partial=true`），由 store 合并保留旧 items/kind，避免把已知明细冲掉。
+ */
+export function normalizeJobUpdatedEvent(reply: Record<string, unknown>): JobDto | null {
+  for (const candidate of [reply['current'], reply['data'], reply['job'], reply['payload']]) {
+    const record = asRecord(parseMaybeJson(candidate))
+    if (!record) continue
+    const payloadId = readString(record, 'id') ?? readString(record, 'jobId')
+    const envelopeId = readString(reply, 'jobId') ?? readString(reply, 'id')
+    const job = normalizeJob(payloadId || !envelopeId ? record : { ...record, id: envelopeId })
+    if (job) return job
+  }
+
+  const jobId = readString(reply, 'jobId') ?? readString(reply, 'id')
+  if (!jobId) return null
+  // 只有确实带快照语义（state/items）时才合成，避免把进度数字误当状态。
+  const hasState = prop(reply, 'state') !== undefined
+  const hasItems = Array.isArray(prop(reply, 'items'))
+  if (!hasState && !hasItems) return null
+  const job = normalizeJob({
+    id: jobId,
+    kind: prop(reply, 'kind'),
+    state: prop(reply, 'state'),
+    total: prop(reply, 'total'),
+    ok: prop(reply, 'ok'),
+    failed: prop(reply, 'failed'),
+    skipped: prop(reply, 'skipped'),
+    createdAt: prop(reply, 'createdAt'),
+    startedAt: prop(reply, 'startedAt'),
+    finishedAt: prop(reply, 'finishedAt'),
+    cancellable: prop(reply, 'cancellable'),
+    items: prop(reply, 'items'),
+    partial: true,
+  })
+  return job
 }
 
 /**
@@ -1155,6 +1224,7 @@ const JOB_STATES: readonly JobState[] = [
   'FAILED',
   'CANCELED',
   'INTERRUPTED',
+  'PREVIEW',
 ]
 const JOB_ITEM_STATES: readonly JobItemState[] = [
   'PENDING',
@@ -1165,15 +1235,19 @@ const JOB_ITEM_STATES: readonly JobItemState[] = [
   'SKIPPED',
   'CANCELED',
   'INTERRUPTED',
+  'PREVIEW',
 ]
 
 function normalizeJobState(value: unknown): JobState {
   const upper = typeof value === 'string' ? value.toUpperCase() : ''
+  // 兼容旧拼写 CANCELLED（SRS/AC 字面）：UI 内部状态只用 CANCELED。
+  if (upper === 'CANCELLED') return 'CANCELED'
   return (JOB_STATES as readonly string[]).includes(upper) ? (upper as JobState) : 'PENDING'
 }
 
 function normalizeJobItemState(value: unknown): JobItemState {
   const upper = typeof value === 'string' ? value.toUpperCase() : ''
+  if (upper === 'CANCELLED') return 'CANCELED'
   return (JOB_ITEM_STATES as readonly string[]).includes(upper) ? (upper as JobItemState) : 'PENDING'
 }
 
@@ -1195,6 +1269,7 @@ function normalizeJobItem(value: unknown): JobItemDto | null {
     preHead: readNullableString(record, 'preHead'),
     postHead: readNullableString(record, 'postHead'),
     backupRef: readNullableString(record, 'backupRef'),
+    preview: readBoolean(record, 'preview') || normalizeJobItemState(prop(record, 'state')) === 'PREVIEW',
   }
 }
 
@@ -1233,6 +1308,10 @@ export function normalizeJob(value: unknown): JobDto | null {
     finishedAt: readNullableString(record, 'finishedAt'),
     cancellable,
     items,
+    dryRun: readBoolean(record, 'dryRun') || state === 'PREVIEW' || undefined,
+    cancelRequested: readBoolean(record, 'cancelRequested') || undefined,
+    message: readNullableString(record, 'message'),
+    partial: record['partial'] === true ? true : undefined,
   }
 }
 

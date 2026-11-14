@@ -16,9 +16,12 @@ import type { BatchArgs, CommitDto, HostInfoDto, JobDto, RepoActionArgs, RepoTre
 import * as mock from '../mocks/workbenchMock'
 import { REPO_ACTIONS } from '../types/workbench'
 import {
+  BATCH_ACTIONS,
   HOST_ACTIONS_UNREADY_REASON,
   NO_REPO_REASON,
   actionErrorInfo,
+  batchActionDef,
+  batchActionLabel,
   emptyComponentVm,
   filterComponents,
   formatAgo,
@@ -26,6 +29,7 @@ import {
   hostAvailability,
   isDangerousFile,
   isSafeFile,
+  jobIsDryRun,
   jobKindLabel,
   jobStateMeta,
   mapComponent,
@@ -91,7 +95,7 @@ interface NotificationVm {
 interface ContextMenuState {
   x: number
   y: number
-  items: { key: string; label: string; danger?: boolean; disabled?: boolean; separator?: boolean }[]
+  items: { key: string; label: string; title?: string; danger?: boolean; disabled?: boolean; separator?: boolean }[]
 }
 
 interface WorkbenchState {
@@ -159,6 +163,8 @@ interface WorkbenchState {
   /** 任务中心当前高亮作业（提交后自动定位）。 */
   currentJobId: string
   tasksSegment: TasksSegment
+  /** 未查看的新进行中作业数（不在「进行中」分段时出现；切到进行中/关闭抽屉清零）。 */
+  tasksUnreadActive: number
   expandedJobIds: string[]
   /** 批量提交进行中（防重复提交；不锁定单仓五键）。 */
   batchPending: boolean
@@ -252,6 +258,11 @@ let jobsClockTimer: ReturnType<typeof setInterval> | undefined
 let jobsUnsubscribe: (() => void) | undefined
 /** 作业终态后的快照回写（≤2s，合并多次终态事件）。 */
 let jobSnapshotTimer: ReturnType<typeof setTimeout> | undefined
+/**
+ * dryRun 预览作业 id（P1-1）：提交时 args.dryRun=true 的作业在当前会话内直接标记；
+ * 历史/重启后由 viewmodel.jobIsDryRun 的「全 SKIPPED + DRY_RUN 消息」识别兜底。
+ */
+const dryRunJobIds = new Set<string>()
 
 const state = reactive<WorkbenchState>({
   booted: false,
@@ -349,6 +360,7 @@ const state = reactive<WorkbenchState>({
   jobsAt: 0,
   currentJobId: '',
   tasksSegment: 'active',
+  tasksUnreadActive: 0,
   expandedJobIds: [],
   batchPending: false,
   online: true,
@@ -1752,27 +1764,44 @@ function sortJobs(jobs: JobVm[]): JobVm[] {
 /** 合并同一 job 的增量更新：进度计数单调不减，终止态不被迟到的进行中事件覆盖。 */
 function mergeJob(prev: JobVm, next: JobVm): JobVm {
   if (prev.finishedAt && !next.finishedAt) return prev
-  return {
+  const merged: JobVm = {
     ...next,
     ok: Math.max(prev.ok, next.ok),
     failed: Math.max(prev.failed, next.failed),
     skipped: Math.max(prev.skipped, next.skipped),
     total: Math.max(prev.total, next.total),
   }
+  // 事件信封可能只带状态/计数（partial）：保留上一份明细与不可变字段，避免把 items 冲成空。
+  if (next.partial) {
+    if (merged.items.length === 0) merged.items = prev.items
+    merged.kind = next.kind || prev.kind
+    merged.createdAt = next.createdAt || prev.createdAt
+  }
+  if (dryRunJobIds.has(merged.id)) merged.dryRun = true
+  // dryRun 是 job 不可变属性：后续快照缺字段/旧 Host 不带 dryRun 时不得丢标记。
+  if (prev.dryRun) merged.dryRun = true
+  return merged
 }
 
 /** 作业终态：通知中心 +1、可感知 Toast、并触发快照回写（卡片/状态栏 ≤2s）。 */
 function notifyJobTerminal(job: JobVm): void {
   const meta = jobStateMeta(job.state)
-  const detail = `成功 ${job.ok} · 失败 ${job.failed} · 跳过 ${job.skipped}`
-  const title = `${jobKindLabel(job.kind)} · ${meta.label}`
-  const level = job.state === 'SUCCESS' ? 'info' : job.state === 'PARTIAL' ? 'warn' : 'err'
+  const dryRun = jobIsDryRun(job)
+  const detail = dryRun
+    ? `dryRun 预览：未执行任何写操作（预检 ${job.total} 仓，跳过 ${job.skipped}）`
+    : `成功 ${job.ok} · 失败 ${job.failed} · 跳过 ${job.skipped} · 已取消 ${jobCanceledCountOf(job)}`
+  const title = dryRun ? `${jobKindLabel(job.kind)} · 预览完成（dryRun）` : `${jobKindLabel(job.kind)} · ${meta.label}`
+  const level = dryRun || job.state === 'SUCCESS' ? 'info' : job.state === 'PARTIAL' ? 'warn' : 'err'
   pushNotification(title, detail, level)
   if (state.overlays.drawer !== 'tasks') {
-    const tone = job.state === 'SUCCESS' ? 'success' : job.state === 'PARTIAL' ? 'warning' : 'error'
+    const tone = dryRun || job.state === 'SUCCESS' ? 'success' : job.state === 'PARTIAL' ? 'warning' : 'error'
     notify(`${title}（${detail}）`, tone, 4_200)
   }
   scheduleJobSnapshotRefresh()
+}
+
+function jobCanceledCountOf(job: JobVm): number {
+  return job.items.filter((item) => item.state === 'CANCELED').length
 }
 
 /** 作业终态后合并刷新快照（避免 PARTIAL 多项连续完成时重复全量刷新）。 */
@@ -1787,16 +1816,22 @@ function scheduleJobSnapshotRefresh(): void {
 /** 应用整份作业列表（Mock 轮询 / Host 列表刷新），并检测 active → 终态迁移。 */
 function applyJobs(nextJobs: JobVm[]): void {
   const previous = new Map(state.jobs.map((job) => [job.id, job]))
+  const added: JobVm[] = []
   const merged = nextJobs.map((next) => {
     const prev = previous.get(next.id)
     const job = prev ? mergeJob(prev, next) : next
+    if (!prev) {
+      if (dryRunJobIds.has(job.id)) job.dryRun = true
+      added.push(job)
+    }
     if (prev && prev.active && !job.active) notifyJobTerminal(job)
     return job
   })
   state.jobs = sortJobs(merged)
   state.jobsAt = Date.now()
   updateTaskCount()
-  syncCurrentJobSegment()
+  // P0-2 修复：列表合并只更新计数/行状态，**不**按旧 currentJobId 强制切换分段。
+  noteNewActiveJobs(added)
 }
 
 /** 单个 JOB_UPDATED 事件：按 id 合并（事件可能乱序/重复）。 */
@@ -1808,24 +1843,37 @@ function applyJobUpdate(dto: JobDto): void {
     state.jobs = sortJobs(state.jobs.map((job) => (job.id === next.id ? merged : job)))
     if (prev.active && !merged.active) notifyJobTerminal(merged)
   } else {
+    if (dryRunJobIds.has(next.id)) next.dryRun = true
     state.jobs = sortJobs([...state.jobs, next])
     if (!next.active) notifyJobTerminal(next)
+    else noteNewActiveJobs([next])
   }
   state.jobsSource = isMockMode() ? 'mock' : 'host'
   state.jobsStatus = 'ready'
   state.jobsError = ''
   state.jobsAt = Date.now()
   updateTaskCount()
-  syncCurrentJobSegment()
 }
 
-function syncCurrentJobSegment(): void {
-  if (!state.currentJobId) return
-  const job = state.jobs.find((item) => item.id === state.currentJobId)
-  if (job) {
-    state.tasksSegment = job.active ? 'active' : 'history'
-    if (!state.expandedJobIds.includes(job.id)) state.expandedJobIds.push(job.id)
-  }
+/**
+ * 新出现的进行中作业：若用户当前不在「进行中」分段，只累计未读提示（tab 角标），
+ * 不静默抢走当前分段（P0-2 的根因修复）。
+ */
+function noteNewActiveJobs(added: JobVm[]): void {
+  const active = added.filter((job) => job.active)
+  if (active.length === 0) return
+  if (state.tasksSegment === 'active' && state.overlays.drawer === 'tasks') return
+  state.tasksUnreadActive += active.length
+}
+
+/** 显式定位某个 job（提交/取消/重试/点选）：同步高亮、分段与展开。 */
+function focusJob(jobId: string): void {
+  if (!jobId) return
+  state.currentJobId = jobId
+  const job = state.jobs.find((item) => item.id === jobId)
+  if (job) state.tasksSegment = job.active ? 'active' : 'history'
+  if (!state.expandedJobIds.includes(jobId)) state.expandedJobIds.push(jobId)
+  if (state.tasksSegment === 'active') state.tasksUnreadActive = 0
 }
 
 function activeJobs(): JobVm[] {
@@ -1842,11 +1890,11 @@ function currentJob(): JobVm | null {
 
 function setTasksSegment(segment: TasksSegment): void {
   state.tasksSegment = segment
+  if (segment === 'active') state.tasksUnreadActive = 0
 }
 
 function selectJob(jobId: string): void {
-  state.currentJobId = jobId
-  syncCurrentJobSegment()
+  focusJob(jobId)
 }
 
 function toggleJobExpanded(jobId: string): void {
@@ -1930,22 +1978,52 @@ async function initJobs(): Promise<void> {
 }
 
 function openTaskCenter(jobId?: string): void {
-  if (jobId) {
-    state.currentJobId = jobId
-    state.tasksSegment = 'active'
-    if (!state.expandedJobIds.includes(jobId)) state.expandedJobIds.push(jobId)
-  }
+  if (jobId) focusJob(jobId)
+  else if (state.tasksSegment === 'active') state.tasksUnreadActive = 0
   openDrawer('tasks')
   void ensureJobsLoaded(true)
 }
 
 // ───────────────────────────── M2b 批量入口 ─────────────────────────────
 
-/** 批量目标：批量选择模式取勾选集合，否则取当前选中组件（与 FR-BOARD-04 一致）。 */
+/** 有效的已勾选组件（过滤掉已不在快照里的 id）。 */
+function checkedComponentIds(): string[] {
+  return state.checkedIds.filter((id) => state.components.some((component) => component.id === id))
+}
+
+/**
+ * 批量目标（P1-3 修复）：
+ * - 批量选择模式：**只**取勾选集合；0 勾选 = 空集合（不再隐式回退到当前选中组件）。
+ * - 非选择模式（菜单/右键/卡片快捷入口）：显式作用于当前选中组件，确认对话框逐条列出目标。
+ */
 function batchTargetComponentIds(): string[] {
-  const checked = state.checkedIds.filter((id) => state.components.some((component) => component.id === id))
-  if (state.selectMode && checked.length > 0) return checked
+  if (state.selectMode) return checkedComponentIds()
   return state.selectedComponentId ? [state.selectedComponentId] : []
+}
+
+/** 选择模式下 0 勾选：三处批量入口统一禁用并提示「先勾选组件」。 */
+function batchCommandsBlocked(): boolean {
+  return state.selectMode && checkedComponentIds().length === 0
+}
+
+function batchSelectionCount(): number {
+  return checkedComponentIds().length
+}
+
+function batchCommandsHint(): string {
+  return state.selectMode ? '先勾选组件（批量命令只对已勾选组件生效）' : '请先选择组件'
+}
+
+/** 三处入口统一的批量动作可用性（P1-2：未实现项显式禁用 + 原因）。 */
+function batchActionState(kind: BatchKind): { enabled: boolean; title: string; blocked: boolean } {
+  const def = batchActionDef(kind)
+  if (def && !def.implemented) {
+    return { enabled: false, blocked: false, title: def.title }
+  }
+  if (batchCommandsBlocked()) {
+    return { enabled: false, blocked: true, title: `${batchCommandsHint()} [${batchActionLabel(kind)} 未提交]` }
+  }
+  return { enabled: true, blocked: false, title: def?.title ?? batchActionLabel(kind) }
 }
 
 function componentIdsText(componentIds: string[]): string {
@@ -1988,17 +2066,81 @@ function submitBatchDialog(payload: { value?: string; dryRun?: boolean }): void 
   dialog.submit(payload)
 }
 
-function openBatchConfirm(kind: BatchKind, componentIds: string[]): void {
-  const sync = kind === 'SYNC'
-  const repoCount = componentIds.length * 4
-  openConfirm({
-    title: sync ? `批量 SYNC ${componentIds.length} 个组件？` : `批量 Delete ${componentIds.length} 个组件？`,
-    body: sync
-      ? `将对 ${componentIds.length} 个组件的 ${repoCount} 个仓执行受控 SYNC（远程覆盖本地）。Host 会先预检并创建备份 ref；脏仓/未推送仓将失败或跳过，不整体回滚。逐仓结果提交后可在任务中心查看。`
-      : `将把 ${componentIds.length} 个组件的本地仓软删除到工作区 .trash（保留 30 天，可恢复），不写远端；失败项可在任务中心“仅重试失败项”。`,
-    detail: `组件：${componentIdsText(componentIds)}`,
-    confirmLabel: sync ? '确认 SYNC' : '确认软删除',
+/** 需要二次确认的批量动作（不含需要参数输入/预览的 CREATE/TAG/CHKOUT/CLONE）。 */
+type BatchConfirmKind = 'SYNC' | 'DELETE' | 'PULL' | 'FETCH'
+
+/** SYNC/DELETE 强写：仅允许单个组件，要求输入组件 ID 二次确认（Host 校验 confirmText）。 */
+function openDestructiveConfirm(kind: 'SYNC' | 'DELETE', componentIds: string[]): void {
+  if (componentIds.length !== 1) {
+    notify(`${kind} 仅支持单个组件：请只勾选 1 个组件后再执行（强覆盖/软删需输入组件 ID 确认）`, 'warning', 5_000)
+    return
+  }
+  const componentId = componentIds[0]
+  const isSync = kind === 'SYNC'
+  openBatchDialog({
+    kind: 'branch',
+    action: kind,
+    title: isSync ? `SYNC 受控覆盖 · ${componentId}` : `Delete 软删除 · ${componentId}`,
+    body: isSync
+      ? '将对该组件四仓执行：预检 → 创建 refs/backup/sync 备份 → reset --hard origin/<branch>。脏仓/未推送/分叉仓将拒绝或跳过；不会整体回滚。请输入组件 ID 确认。'
+      : '将把该组件四仓本地目录移到工作区 .trash（保留 30 天，可 RESTORE），不写远端。脏/有未推送/有 stash 的仓将被拒绝；请输入组件 ID 确认。',
+    detail: `组件：${componentId} · 四仓（Design/Impl/MIL/SIL）`,
+    confirmLabel: isSync ? '确认 SYNC' : '确认软删除',
     danger: true,
+    inputLabel: '输入组件 ID 确认',
+    inputPlaceholder: componentId,
+    initialValue: '',
+    showDryRun: true,
+    dryRunHint: '勾选后仅逐仓预检，不创建备份 ref、不 reset、不移动目录',
+    submit: (payload) => {
+      const value = (payload.value ?? '').trim()
+      if (value !== componentId) {
+        notify(`确认失败：请输入完整组件 ID「${componentId}」`, 'warning', 4_000)
+        return
+      }
+      const args: BatchArgs = { confirmText: value }
+      if (payload.dryRun === true) args.dryRun = true
+      void submitBatch(kind, { componentIds, args })
+    },
+  })
+}
+
+function openBatchConfirm(kind: BatchConfirmKind, componentIds: string[]): void {
+  const count = componentIds.length
+  const repoCount = count * 4
+  const copy: Record<BatchConfirmKind, { title: string; body: string; confirmLabel: string; danger: boolean }> = {
+    SYNC: {
+      title: `批量 SYNC ${count} 个组件？`,
+      body: `将对 ${count} 个组件的 ${repoCount} 个仓执行受控 SYNC（远程覆盖本地）。Host 会先预检并创建备份 ref；脏仓/未推送仓将失败或跳过，不整体回滚。逐仓结果提交后可在任务中心查看。`,
+      confirmLabel: '确认 SYNC',
+      danger: true,
+    },
+    DELETE: {
+      title: `批量 Delete ${count} 个组件？`,
+      body: `将把 ${count} 个组件的本地仓软删除到工作区 .trash（保留 30 天，可恢复），不写远端；失败项可在任务中心“仅重试失败项”。`,
+      confirmLabel: '确认软删除',
+      danger: true,
+    },
+    PULL: {
+      title: `批量 PULL ${count} 个组件？`,
+      body: `将对 ${count} 个组件的 ${repoCount} 个仓执行 PULL（拉取 origin 并快进合并）。本地有未提交改动或已分叉的仓将失败/跳过，不整体回滚；不自动 stash。逐仓结果提交后可在任务中心查看。`,
+      confirmLabel: '确认 PULL',
+      danger: true,
+    },
+    FETCH: {
+      title: `批量 FETCH ${count} 个组件？`,
+      body: `将对 ${count} 个组件的 ${repoCount} 个仓执行 FETCH（只读：仅更新 origin/* 远程引用，不修改工作区与本地分支）。逐仓结果提交后可在任务中心查看。`,
+      confirmLabel: '确认 FETCH',
+      danger: false,
+    },
+  }
+  const entry = copy[kind]
+  openConfirm({
+    title: entry.title,
+    body: entry.body,
+    detail: `组件：${componentIdsText(componentIds)}`,
+    confirmLabel: entry.confirmLabel,
+    danger: entry.danger,
     onConfirm: () => {
       closeConfirm()
       void submitBatch(kind, { componentIds })
@@ -2043,30 +2185,42 @@ function openClonePreview(componentIds: string[]): void {
   })
 }
 
-function openBatchInput(kind: 'CREATE' | 'TAG', componentIds: string[]): void {
+function openBatchInput(kind: 'CREATE' | 'TAG' | 'CHKOUT', componentIds: string[]): void {
   const isTag = kind === 'TAG'
+  const isChkout = kind === 'CHKOUT'
   openBatchDialog({
-    kind: isTag ? 'tag' : 'branch',
+    kind: isTag ? 'tag' : isChkout ? 'chkout' : 'branch',
     action: kind,
-    title: isTag ? `批量打 Tag（${componentIds.length} 个组件）` : `批量 CREATE 分支（${componentIds.length} 个组件）`,
+    title: isTag
+      ? `批量打 Tag（${componentIds.length} 个组件）`
+      : isChkout
+        ? `批量 CHKOUT（${componentIds.length} 个组件）`
+        : `批量 CREATE 分支（${componentIds.length} 个组件）`,
     body: isTag
       ? `将在所选组件的各仓创建/切换到同名 Tag。名称由 Host 校验；同名 Tag 已存在或工作区脏的仓将失败。`
-      : `将在所选组件的各仓创建同名分支（已存在则切换）。名称由 Host 校验；工作区脏或游离 HEAD 的仓将失败。`,
+      : isChkout
+        ? `将在所选组件的各仓检出指定分支/Tag（refs/tags/ 前缀按 Tag 处理）。工作区脏或 ref 不存在的仓将失败/跳过，不整体回滚。`
+        : `将在所选组件的各仓创建同名分支（已存在则切换）。名称由 Host 校验；工作区脏或游离 HEAD 的仓将失败。`,
     detail: `组件：${componentIdsText(componentIds)}`,
-    confirmLabel: isTag ? '确认打 Tag' : '确认 CREATE',
+    confirmLabel: isTag ? '确认打 Tag' : isChkout ? '确认 CHKOUT' : '确认 CREATE',
     danger: false,
-    inputLabel: isTag ? 'Tag 名称' : '分支名',
-    inputPlaceholder: isTag ? '例如 v1.2.0' : '例如 release/1.2',
-    initialValue: isTag ? commonTagOf(componentIds) : commonBranchOf(componentIds),
+    inputLabel: isTag ? 'Tag 名称' : isChkout ? '目标分支/Tag' : '分支名',
+    inputPlaceholder: isTag ? '例如 v1.2.0' : isChkout ? '例如 main 或 refs/tags/v1.2.0' : '例如 release/1.2',
+    initialValue: isTag ? commonTagOf(componentIds) : isChkout ? commonBranchOf(componentIds) : commonBranchOf(componentIds),
     showDryRun: true,
-    dryRunHint: '勾选后仅校验名称并预览，不写本地',
+    dryRunHint: isTag || !isChkout ? '勾选后仅校验名称并预览，不写本地' : '勾选后仅预检 ref 与仓库状态，不检出',
     submit: (payload) => {
       const value = (payload.value ?? '').trim()
       if (!value) {
-        notify(isTag ? '请填写 Tag 名称' : '请填写分支名', 'warning')
+        notify(isTag ? '请填写 Tag 名称' : isChkout ? '请填写目标分支/Tag' : '请填写分支名', 'warning')
         return
       }
-      const args: BatchArgs = isTag ? { tag: value } : { branch: value }
+      let args: BatchArgs
+      if (isTag) args = { tag: value }
+      else if (isChkout) {
+        const tagRef = /^refs\/tags\/(.+)$/.exec(value)
+        args = tagRef ? { tag: tagRef[1] } : { branch: value }
+      } else args = { branch: value }
       if (payload.dryRun === true) args.dryRun = true
       void submitBatch(kind, { componentIds, args })
     },
@@ -2084,6 +2238,12 @@ function jobsApiUnavailable(): boolean {
  * 用户确认后才调用 runBatch（未确认 = 0 写）。
  */
 function requestBatch(kind: BatchKind): void {
+  // 未实现项（批量 COMMIT/PUSH）在三处入口显式禁用；万一路径触达也明确提示，不静默失败。
+  const def = batchActionDef(kind)
+  if (def && !def.implemented) {
+    notify(`${def.label}：${def.title}`, 'warning', 5_000)
+    return
+  }
   if (state.batchPending) {
     notify('已有批量提交进行中，请稍候', 'warning')
     return
@@ -2094,12 +2254,22 @@ function requestBatch(kind: BatchKind): void {
   }
   const componentIds = batchTargetComponentIds()
   if (componentIds.length === 0) {
-    notify(state.selectMode ? '请先勾选要批量操作的组件' : '请先选择组件', 'warning')
+    // P1-3：选择模式 0 勾选时禁用并提示，不隐式回退到当前组件。
+    notify(
+      state.selectMode
+        ? `先勾选组件：${batchActionLabel(kind)}未提交（批量选择模式下只对已勾选组件生效）`
+        : '请先选择组件',
+      'warning',
+    )
     return
   }
   switch (kind) {
     case 'SYNC':
     case 'DELETE':
+      openDestructiveConfirm(kind, componentIds)
+      return
+    case 'PULL':
+    case 'FETCH':
       openBatchConfirm(kind, componentIds)
       return
     case 'CLONE':
@@ -2107,13 +2277,14 @@ function requestBatch(kind: BatchKind): void {
       return
     case 'CREATE':
     case 'TAG':
+    case 'CHKOUT':
       openBatchInput(kind, componentIds)
       return
     case 'RESTORE':
       openRestoreConfirm(componentIds)
       return
     default:
-      notify(`批量 ${kind}：Host 未声明支持该作业类型`, 'warning', 4_200)
+      notify(`${batchActionLabel(kind)}：Host 未声明支持该作业类型`, 'warning', 4_200)
   }
 }
 
@@ -2125,18 +2296,31 @@ async function submitBatch(
   if (state.batchPending) return
   state.batchPending = true
   const args: BatchArgs = { ...(options.args ?? {}) }
-  // 契约：SYNC/DELETE/RESTORE/CREATE/TAG 属强写 kind，Host 要求 args.confirm=true；
+  const dryRun = args.dryRun === true
+  // 契约：COMMIT/PUSH/SYNC/DELETE/RESTORE/CREATE/TAG 属强写 kind，Host 要求 args.confirm=true；
   // 到达 submitBatch 说明用户已通过确认/参数对话框确认，故统一携带 confirm。
-  if (['SYNC', 'DELETE', 'RESTORE', 'CREATE', 'TAG'].includes(kind)) args.confirm = true
+  if (['COMMIT', 'PUSH', 'SYNC', 'DELETE', 'RESTORE', 'CREATE', 'TAG'].includes(kind)) args.confirm = true
+  const submitToast = (jobId: string, total: number, skipped = 0): void => {
+    const skippedText = skipped > 0 ? ` · 跳过 ${skipped}` : ''
+    if (dryRun) {
+      notify(
+        `已提交${jobKindLabel(kind)}（dryRun 预览，未执行任何写操作） · job ${shortJobId(jobId)}（${total} 仓预检${skippedText}）`,
+        'info',
+        5_000,
+      )
+    } else {
+      notify(`已提交${jobKindLabel(kind)} · job ${shortJobId(jobId)}（${total} 仓${skippedText}）`, 'success', 4_200)
+    }
+  }
   try {
     if (isMockMode()) {
       const result = mock.mockRunBatch(kind, options.componentIds, options.repoTypes, args)
+      if (dryRun && result.jobId) dryRunJobIds.add(result.jobId)
       applyJobs(mock.mockJobs().map(mapJob))
       state.jobsSource = 'mock'
       state.jobsStatus = 'ready'
       state.jobsError = ''
-      const skipped = result.skipped > 0 ? ` · 跳过 ${result.skipped}` : ''
-      notify(`已提交${jobKindLabel(kind)} · job ${shortJobId(result.jobId)}（${result.total} 仓${skipped}）`, 'success', 4_200)
+      submitToast(result.jobId, result.total, result.skipped)
       openTaskCenter(result.jobId)
       return
     }
@@ -2146,26 +2330,27 @@ async function submitBatch(
       repoTypes: options.repoTypes,
       args,
     })
+    if (dryRun && result.jobId) dryRunJobIds.add(result.jobId)
     await refreshJobs(true)
     if (!result.accepted) {
       notify(
-        `批量 ${kind} 未被接受（accepted=false）${result.skipped > 0 ? ` · 跳过 ${result.skipped}` : ''}`,
+        `${batchActionLabel(kind)}未被接受（accepted=false）${result.skipped > 0 ? ` · 跳过 ${result.skipped}` : ''}`,
         'warning',
         5_000,
       )
       return
     }
     if (result.jobId) {
-      notify(`已提交${jobKindLabel(kind)} · job ${shortJobId(result.jobId)}（${result.total} 仓）`, 'success', 4_200)
+      submitToast(result.jobId, result.total)
       openTaskCenter(result.jobId)
     } else {
-      notify(`批量 ${kind} 已提交（Host 未返回 jobId）`, 'info', 4_200)
+      notify(`${batchActionLabel(kind)}已提交（Host 未返回 jobId）`, 'info', 4_200)
       openDrawer('tasks')
     }
   } catch (error) {
     if (error instanceof HostError && error.code === 'E_CONFIRM_REQUIRED' && args.confirm !== true) {
       openConfirm({
-        title: `批量 ${kind} 需要二次确认`,
+        title: `${batchActionLabel(kind)}需要二次确认`,
         body: toErrorMessage(error),
         confirmLabel: '确认并提交',
         danger: true,
@@ -2180,9 +2365,9 @@ async function submitBatch(
     if (isMethodUnavailable(error)) {
       notify(`Host 未实现 runBatch（M2b 后端未就绪）：${info.message}`, 'warning', 6_000)
     } else {
-      notify(`批量 ${kind} 提交失败 · ${info.code}：${info.message}`, 'error', 6_500)
+      notify(`${batchActionLabel(kind)}提交失败 · ${info.code}：${info.message}`, 'error', 6_500)
     }
-    pushNotification(`批量 ${kind} 提交失败`, `${info.code}：${info.message}`, 'err')
+    pushNotification(`${batchActionLabel(kind)}提交失败`, `${info.code}：${info.message}`, 'err')
   } finally {
     state.batchPending = false
   }
@@ -2195,9 +2380,8 @@ async function cancelJob(jobId: string): Promise<void> {
     if (isMockMode()) {
       const job = mock.mockCancelJob(jobId)
       if (job) applyJobUpdate(job)
-      state.currentJobId = jobId
-      state.tasksSegment = 'history'
-      notify(`已请求取消 ${shortJobId(jobId)}：已开始仓标记取消，未开始仓保持原状（以实际扫描为准）`, 'warning', 4_200)
+      focusJob(jobId)
+      notify(`已请求取消 ${shortJobId(jobId)}：已开始仓取消、未开始仓保持原状（合作式，不整体回滚；以实际扫描为准）`, 'warning', 4_200)
       return
     }
     // Host 契约：cancelJob 回 { jobId, state }（仅状态，不是完整 job 快照）。
@@ -2220,13 +2404,14 @@ async function cancelJob(jobId: string): Promise<void> {
       updateTaskCount()
     }
     await refreshJobs(true)
-    state.currentJobId = jobId
-    syncCurrentJobSegment()
-    notify(`已请求取消 ${shortJobId(jobId)}（合作式；终态以实际扫描为准）`, 'info', 3_600)
+    focusJob(jobId)
+    notify(`已请求取消 ${shortJobId(jobId)}：已开始仓取消、未开始仓保持原状（合作式，不整体回滚；终态以实际扫描为准）`, 'info', 3_800)
   } catch (error) {
     if (isMethodUnavailable(error)) notify('Host 未实现 cancelJob（M2b 后端未就绪）', 'warning', 5_000)
     else if (error instanceof HostError && error.code === 'E_JOB_NOT_FOUND')
       notify(`取消失败：任务不存在或已被淘汰（${shortJobId(jobId)}）`, 'warning', 4_000)
+    else if (error instanceof HostError && error.code === 'E_ACTION_NOT_ALLOWED')
+      notify(`取消失败：作业已结束，只有排队/进行中的作业可取消（${shortJobId(jobId)}）`, 'warning', 4_500)
     else notify(`取消失败：${toErrorMessage(error)}`, 'error', 5_000)
   }
 }
@@ -2242,18 +2427,14 @@ async function retryFailed(jobId: string): Promise<void> {
         return
       }
       applyJobs(mock.mockJobs().map(mapJob))
-      state.currentJobId = result.jobId
-      if (!state.expandedJobIds.includes(result.jobId)) state.expandedJobIds.push(result.jobId)
-      state.tasksSegment = 'active'
+      focusJob(result.jobId)
       notify(`已提交重试作业 · job ${shortJobId(result.jobId)}（仅 ${result.total} 个失败/取消项）`, 'success', 4_200)
       return
     }
     const result = await api.retryFailed(jobId)
     await refreshJobs(true)
     if (result.accepted && result.jobId) {
-      state.currentJobId = result.jobId
-      if (!state.expandedJobIds.includes(result.jobId)) state.expandedJobIds.push(result.jobId)
-      state.tasksSegment = 'active'
+      focusJob(result.jobId)
       notify(`已提交重试作业 · job ${shortJobId(result.jobId)}（仅 ${result.total || '—'} 项）`, 'success', 4_200)
     } else {
       // 契约：无可重试项时 { jobId:null, accepted:false, retried:0 }，不创建空作业。
@@ -2290,19 +2471,23 @@ function openRestoreConfirm(componentIds: string[]): void {
 
 function cardContextMenu(event: MouseEvent, componentId: string): void {
   if (state.selectedComponentId !== componentId) void selectComponent(componentId)
-  const component = selectedComponent()
-  const hasMissing = component.repos.some((repo) => repo.state === 'MISSING')
+  // P1-2/P1-3：批量项与 BatchBar/菜单栏同一清单；选择模式 0 勾选时统一禁用并给出原因。
+  const batchItems = BATCH_ACTIONS.map((action) => {
+    const availability = batchActionState(action.kind)
+    return {
+      key: `component.${action.kind}`,
+      label: `${action.label}…`,
+      title: availability.title,
+      disabled: !availability.enabled,
+      danger: action.danger,
+    }
+  })
   openContextMenu(event.clientX, event.clientY, [
     { key: 'card.openWorkbench', label: '在工作台打开' },
     { key: 'card.detail', label: '查看组件详情（抽屉）' },
     { key: 'card.locateFolder', label: '在文件夹视图定位' },
     { key: '-', label: '', separator: true },
-    { key: 'component.SYNC', label: 'SYNC…（四仓，远程覆盖本地，需确认）', danger: true },
-    { key: 'component.CREATE', label: 'CREATE…（四仓建同名分支）' },
-    { key: 'component.CLONE', label: 'Clone 缺失仓…', disabled: !hasMissing },
-    { key: 'component.TAG', label: '批量打 Tag…' },
-    { key: 'component.RESTORE', label: 'Restore…（从 .trash 恢复缺失仓，需确认）' },
-    { key: 'component.DELETE', label: 'Delete…（仅本地，软删到 .trash，需确认）', danger: true },
+    ...batchItems,
     { key: '-', label: '', separator: true },
     { key: 'copy.componentId', label: '复制组件 ID' },
     { key: 'copy.componentPath', label: '复制组件路径' },
@@ -2678,6 +2863,15 @@ function command(key: string): void {
     case 'component.CLONE':
       requestBatch('CLONE')
       break
+    case 'component.PULL':
+      requestBatch('PULL')
+      break
+    case 'component.FETCH':
+      requestBatch('FETCH')
+      break
+    case 'component.CHKOUT':
+      requestBatch('CHKOUT')
+      break
     case 'component.TAG':
       requestBatch('TAG')
       break
@@ -2686,6 +2880,12 @@ function command(key: string): void {
       break
     case 'component.DELETE':
       requestBatch('DELETE')
+      break
+    case 'component.COMMIT':
+      requestBatch('COMMIT')
+      break
+    case 'component.PUSH':
+      requestBatch('PUSH')
       break
     case 'tools.ci':
       openModal('ci')
@@ -2910,6 +3110,10 @@ export interface WorkbenchStore {
   retryFailed: typeof retryFailed
   requestBatch: typeof requestBatch
   submitBatch: typeof submitBatch
+  batchActionState: typeof batchActionState
+  batchCommandsBlocked: typeof batchCommandsBlocked
+  batchSelectionCount: typeof batchSelectionCount
+  batchCommandsHint: typeof batchCommandsHint
   openBatchDialog: typeof openBatchDialog
   closeBatchDialog: typeof closeBatchDialog
   submitBatchDialog: typeof submitBatchDialog
@@ -3009,6 +3213,10 @@ export const workbench: WorkbenchStore = {
   retryFailed,
   requestBatch,
   submitBatch,
+  batchActionState,
+  batchCommandsBlocked,
+  batchSelectionCount,
+  batchCommandsHint,
   openBatchDialog,
   closeBatchDialog,
   submitBatchDialog,

@@ -5,7 +5,6 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -17,13 +16,21 @@ namespace MbdGitTool.Host.Services;
 
 /// <summary>
 /// M2b 作业内核（SRS §9.7 FR-OP-08、§9.16 FR-ACT-05/06、§13.1.2 AC-UI-10c）：
-/// <para>后台队列（单 worker 串行执行 job；job 内 item 串行，避免同仓并发），<see cref="Task.Run"/> 常驻；
-/// 每个 job 独立 <see cref="CancellationTokenSource"/>，<c>cancelJob</c> 合作式取消当前 git 进程；</para>
+/// <para>后台队列（单 worker 串行执行 job；job 内 item 串行）。<b>互斥</b>：单 worker 保证 job 之间串行，
+/// 但批量自定义 kind（SYNC/DELETE/CLONE/RESTORE/CREATE/TAG）逐仓执行前仍复用
+/// <see cref="RepoActionService.AcquireRepoLockAsync"/> 的 per-repo 锁，与单仓 M2a 写操作互斥（同仓串行、异仓可并发）；</para>
+/// <para>每个 job 独立 <see cref="CancellationTokenSource"/>，<c>cancelJob</c> 合作式取消当前 git 进程：
+/// 只有 PENDING/RUNNING 可取消；未开始 item 记 <c>CANCELED</c> 且 <c>errorCode=null</c>（取消≠超时），
+/// RUNNING item 随 CancellationToken 合作取消；</para>
 /// <para><c>retryFailed</c> 用原 job 的 FAILED/INTERRUPTED/CANCELED items 创建新 job（不重跑成功仓）；</para>
-/// <para>每 item 结束写 1 行审计（复用 <see cref="OperationAuditService"/>，追加 jobId/jobItemId/result/backupRef）；</para>
-/// <para>持久化 <c>%LOCALAPPDATA%\MbdGitTool\jobs\jobs.json</c>（<see cref="AppConfig.JobsRoot"/> 可注入），
-/// 启动加载时把 PENDING/RUNNING 标 <c>INTERRUPTED</c>（不重复执行），最多保留最近 200 个 job；</para>
-/// <para>每次状态/逐仓进度变化通过 <see cref="EventSink"/> 推送 <c>{event:"JOB_UPDATED", data:JobDto}</c>。</para>
+/// <para>审计：每个 item 的每个终态（OK/FAILED/SKIPPED/CANCELED/INTERRUPTED/PREVIEW）<b>恰写 1 行</b>
+/// （含预跳过、取消未开始、job 级内部异常、重启改写等路径），追加 jobId/jobItemId/result/backupRef；</para>
+/// <para>持久化 <c>%LOCALAPPDATA%\MbdGitTool\jobs\jobs.json</c>（<see cref="AppConfig.JobsRoot"/> 可注入）；
+/// 重启加载时 RUNNING item → <c>INTERRUPTED</c>、未开始 PENDING item → <c>CANCELED</c>（进程重启未执行），
+/// 绝不重复执行；最多保留最近 200 个 job；</para>
+/// <para>每次状态/逐仓进度变化通过 <see cref="EventSink"/> 推送
+/// <c>{ event:"JOB_UPDATED", jobId, current:JobDto, data:JobDto, state, total, cancellable }</c>；
+/// <c>args.dryRun=true</c> 的作业只输出预检（item/job state = <c>PREVIEW</c>），零仓库写。</para>
 /// </summary>
 public sealed class JobEngine : IDisposable
 {
@@ -123,7 +130,9 @@ public sealed class JobEngine : IDisposable
 
     /// <summary>
     /// 作业事件推送出口（由 <c>HostCommandRouter.EventSink</c> 转发给 WebViewBridge）。
-    /// 回调参数固定为 <c>{event:"JOB_UPDATED", data:JobDto}</c> 形状；回调异常不影响作业。
+    /// 回调参数固定为 <see cref="JobUpdatedEventDto"/> 形状：
+    /// <c>{ event:"JOB_UPDATED", jobId, current:JobDto, data:JobDto, state, total, cancellable }</c>；
+    /// <c>current</c> 与 <c>data</c> 为同一份 job 快照；回调异常不影响作业。
     /// </summary>
     public Action<object>? EventSink { get; set; }
 
@@ -225,9 +234,11 @@ public sealed class JobEngine : IDisposable
     }
 
     /// <summary>
-    /// <c>cancelJob</c>：取消 PENDING/RUNNING 作业（合作式；当前 git 进程随 CancellationToken 终止）。
-    /// <para>PENDING 立即标 CANCELED；RUNNING 置 cancelRequested 并取消 token，worker 将当前 item 记 CANCELED、
-    /// 未开始 item 保持原状并全部记 CANCELED（不整体回滚），终态以实际扫描为准。</para>
+    /// <c>cancelJob</c>：只允许取消 PENDING/RUNNING 作业；已完成作业返回 <c>E_ACTION_NOT_ALLOWED</c>。
+    /// <para>PENDING 立即标 <c>CANCELED</c>：全部未开始 item 记 <c>CANCELED</c> 且 <c>errorCode=null</c>
+    /// （取消不等于超时，不写 <c>E_TIMEOUT</c>），逐 item 补写审计行；</para>
+    /// <para>RUNNING：置 <c>cancelRequested</c> 并取消 token（GitCli 收到后杀进程树），worker 把当前 item 记
+    /// <c>CANCELED</c>、未开始 item 记 <c>CANCELED</c>（errorCode=null），终态 job=CANCELED。</para>
     /// </summary>
     public CommandResult CancelJob(CancelJobParams parameters)
     {
@@ -243,6 +254,7 @@ public sealed class JobEngine : IDisposable
 
         JobRecord? job;
         CancelJobResultDto result;
+        var jobFinalizedByCancel = false;
         lock (_sync)
         {
             job = FindJobUnsafe(jobId);
@@ -251,36 +263,49 @@ public sealed class JobEngine : IDisposable
                 return JobNotFound(jobId);
             }
 
-            if (job.State is JobStates.Pending or JobStates.Running)
+            if (job.State is not (JobStates.Pending or JobStates.Running))
             {
-                job.CancelRequested = true;
-                if (job.State == JobStates.Pending)
-                {
-                    job.State = JobStates.Canceled;
-                    job.FinishedAt = Now();
-                    MarkPendingItemsCanceledUnsafe(job);
-                }
-                else
-                {
-                    // 合作式取消：GitCli 收到取消后杀进程树；OCE 由 worker 记 CANCELED。
-                    try
+                return CommandResult.Failure(
+                    BridgeErrorCodes.ActionNotAllowed,
+                    $"作业已结束（state={job.State}），只有 PENDING/RUNNING 可取消",
+                    new Dictionary<string, object?>
                     {
-                        job.Cts?.Cancel();
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // 作业刚结束：忽略。
-                    }
-                }
+                        ["jobId"] = job.Id,
+                        ["state"] = job.State,
+                        ["cancellable"] = false
+                    });
+            }
 
+            job.CancelRequested = true;
+            if (job.State == JobStates.Pending)
+            {
+                job.State = JobStates.Canceled;
+                job.FinishedAt = Now();
+                CancelPendingItemsUnsafe(job, "作业取消：未开始执行");
                 PersistUnsafe();
+
+                // 每 item 终态恰 1 行审计（PENDING 取消路径原先漏写）。
+                WriteMissingItemAuditsUnsafe(job);
+                jobFinalizedByCancel = true;
+            }
+            else
+            {
+                // 合作式取消：GitCli 收到取消后杀进程树；OCE 由 worker 记 CANCELED。
+                try
+                {
+                    job.Cts?.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // 作业刚结束：忽略。
+                }
             }
 
             result = new CancelJobResultDto(job.Id, job.State);
         }
 
         Publish(job);
-        if (result.State == JobStates.Canceled)
+        if (jobFinalizedByCancel)
         {
             _ = Task.Run(() => InvokeJobFinished(), CancellationToken.None);
         }
@@ -365,7 +390,7 @@ public sealed class JobEngine : IDisposable
                 {
                     if (_lifetime.IsCancellationRequested)
                     {
-                        MarkInterrupted(job);
+                        MarkInterruptedOnShutdown(job);
                         continue;
                     }
 
@@ -392,11 +417,12 @@ public sealed class JobEngine : IDisposable
             {
                 if (job.State is not JobStates.Pending || _disposed)
                 {
-                    // 已被 cancelJob 标 CANCELED / 宿主关闭：不执行。
+                    // 已被 cancelJob 标 CANCELED / 宿主关闭：不执行（绝不重复执行）。
                     if (job.State is JobStates.Pending)
                     {
-                        MarkInterruptedUnsafe(job);
+                        MarkInterruptedUnsafe(job, "宿主关闭：未开始执行", "宿主关闭：执行中断");
                         PersistUnsafe();
+                        WriteMissingItemAuditsUnsafe(job);
                     }
 
                     return;
@@ -436,7 +462,7 @@ public sealed class JobEngine : IDisposable
         {
             lock (_sync)
             {
-                CancelRemainingItemsUnsafe(job);
+                CancelRemainingItemsUnsafe(job, "作业取消：未开始执行");
                 FinalizeJobUnsafe(job);
                 PersistUnsafe();
             }
@@ -517,8 +543,8 @@ public sealed class JobEngine : IDisposable
             item.State = JobItemStates.Running;
             item.StartedAt = Now();
 
-            // 不在此处落盘：即使进程崩溃，下次加载会把 PENDING/RUNNING 统一标 INTERRUPTED（不重复执行），
-            // 状态语义不变；避免大批量作业每个 item 都重写整份 jobs.json。
+            // 不在此处落盘：即使进程崩溃，下次加载会把 RUNNING item 标 INTERRUPTED（未开始 PENDING 标 CANCELED，
+            // 不重复执行），状态语义不变；避免大批量作业每个 item 都重写整份 jobs.json。
         }
 
         Publish(job);
@@ -528,13 +554,31 @@ public sealed class JobEngine : IDisposable
         try
         {
             RepoActionExecution? execution = null;
-            (result, execution, repoState) = await ExecuteByKindAsync(
-                    job,
-                    item,
-                    repo,
-                    index,
-                    cancellationToken)
-                .ConfigureAwait(false);
+            var lockPath = ResolveRepoLockPath(job, item, repo);
+            if (lockPath is null || job.Arguments.DryRun)
+            {
+                (result, execution, repoState) = await ExecuteByKindAsync(
+                        job,
+                        item,
+                        repo,
+                        index,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                // P1-3：批量自定义 kind 与单仓 M2a 写操作复用同一把 per-repo 锁（同仓串行、异仓并发）。
+                using var lease = await RepoActionService
+                    .AcquireRepoLockAsync(lockPath, cancellationToken)
+                    .ConfigureAwait(false);
+                (result, execution, repoState) = await ExecuteByKindAsync(
+                        job,
+                        item,
+                        repo,
+                        index,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             if (execution is not null)
             {
@@ -548,9 +592,10 @@ public sealed class JobEngine : IDisposable
         }
         catch (OperationCanceledException)
         {
+            // 取消 ≠ 失败/超时：item 记 CANCELED 且 errorCode=null（不写 E_TIMEOUT）。
             result = new BatchItemResult(
                 JobItemStates.Canceled,
-                BridgeErrorCodes.Timeout,
+                null,
                 "已取消（当前 git 进程已终止）");
         }
         catch (Exception ex)
@@ -573,15 +618,19 @@ public sealed class JobEngine : IDisposable
             item.PreHead = result.PreHead;
             item.PostHead = result.PostHead;
             item.BackupRef = Truncate(result.BackupRef, 256);
+            item.Preview = result.State == JobItemStates.Preview;
+            item.RepoState = repoState;
             if (result.State == JobItemStates.Canceled)
             {
                 job.CancelRequested = true;
             }
 
             PersistUnsafe();
+
+            // 已执行 item 的终态审计只在这里写 1 行（AuditWritten 保证不重复）。
+            WriteItemAuditUnsafe(job, item, repoState, result, stopwatch.ElapsedMilliseconds);
         }
 
-        WriteItemAudit(job, item, repoState, result, stopwatch.ElapsedMilliseconds);
         Publish(job);
 
         if (result.State == JobItemStates.Canceled)
@@ -593,6 +642,31 @@ public sealed class JobEngine : IDisposable
         HostLog.Info(
             $"job item：job={job.Id} {item.ComponentId}/{item.RepoType} kind={job.Kind} "
             + $"state={result.State} code={result.ErrorCode ?? "<none>"} ms={stopwatch.ElapsedMilliseconds}");
+    }
+
+    /// <summary>
+    /// item 执行时使用的 per-repo 锁路径：单仓五键由 <see cref="RepoActionService.RunAsync"/> 内部加同一把锁，
+    /// 这里不重复获取（避免自锁）；其余批量 kind 返回 canonical localPath / 目标路径。
+    /// </summary>
+    private string? ResolveRepoLockPath(JobRecord job, JobItemRecord item, RepoRef? repo)
+    {
+        if (RepoActionKinds.Contains(job.Kind, StringComparer.Ordinal))
+        {
+            return null;
+        }
+
+        if (repo is not null && repo.Repo.IsLocal && !string.IsNullOrWhiteSpace(repo.Repo.LocalPath))
+        {
+            return PathPolicy.TryCanonicalize(repo.Repo.LocalPath);
+        }
+
+        if (job.Kind is "CLONE" or "RESTORE" && _paths is not null)
+        {
+            var name = BatchOperationService.RepoNameFor(repo, item.ComponentId, item.RepoType);
+            return _paths.TryResolveWorkspacePath(name, out var full, out _) ? full : null;
+        }
+
+        return null;
     }
 
     private async Task<(BatchItemResult Result, RepoActionExecution? Execution, string RepoState)> ExecuteByKindAsync(
@@ -617,14 +691,12 @@ public sealed class JobEngine : IDisposable
 
         if (arguments.DryRun)
         {
-            var skipReason = PreviewDryRun(job.Kind, repo, item.RepoType);
-            return (
-                new BatchItemResult(
-                    JobItemStates.Skipped,
-                    null,
-                    skipReason ?? $"DRY_RUN：已预检通过，将执行 {job.Kind}（未执行）"),
-                null,
-                repoState);
+            // dryRun：只做逐仓只读预检（状态矩阵/本地/分支/upstream/dirty/untracked/unpushed/stash），
+            // 不 fetch / 不建 ref / 不 stash / 不 reset / 不移动目录；item 记 PREVIEW。
+            var preview = await _batch
+                .PreviewAsync(job.Kind, repo, item.ComponentId, item.RepoType, arguments, cancellationToken)
+                .ConfigureAwait(false);
+            return (preview, null, repoState);
         }
 
         if (RepoActionKinds.Contains(job.Kind, StringComparer.Ordinal))
@@ -635,10 +707,12 @@ public sealed class JobEngine : IDisposable
 
         var result = job.Kind switch
         {
-            "SYNC" => await _batch.SyncAsync(repo, item.RepoType, cancellationToken).ConfigureAwait(false),
+            "SYNC" => await _batch.SyncAsync(repo, item.ComponentId, item.RepoType, arguments, cancellationToken)
+                .ConfigureAwait(false),
             "CLONE" => await _batch.CloneAsync(repo, item.ComponentId, item.RepoType, cancellationToken)
                 .ConfigureAwait(false),
-            "DELETE" => await _batch.DeleteAsync(repo, item.RepoType, cancellationToken).ConfigureAwait(false),
+            "DELETE" => await _batch.DeleteAsync(repo, item.ComponentId, item.RepoType, arguments, cancellationToken)
+                .ConfigureAwait(false),
             "RESTORE" => await _batch.RestoreAsync(repo, item.ComponentId, item.RepoType, arguments, cancellationToken)
                 .ConfigureAwait(false),
             "CREATE" => await _batch.CreateBranchAsync(repo, item.RepoType, arguments, cancellationToken)
@@ -778,29 +852,23 @@ public sealed class JobEngine : IDisposable
     {
         lock (_sync)
         {
-            CancelRemainingItemsUnsafe(job);
+            CancelRemainingItemsUnsafe(job, "作业取消：未开始执行");
             PersistUnsafe();
         }
     }
 
-    private static void CancelRemainingItemsUnsafe(JobRecord job)
+    /// <summary>取消未开始（PENDING）item：记 CANCELED 且 errorCode=null（不写 E_TIMEOUT，取消≠超时）。</summary>
+    private static void CancelRemainingItemsUnsafe(JobRecord job, string message) =>
+        CancelPendingItemsUnsafe(job, message);
+
+    private static void CancelPendingItemsUnsafe(JobRecord job, string message)
     {
         foreach (var item in job.Items.Where(entry => entry.State == JobItemStates.Pending))
         {
             item.State = JobItemStates.Canceled;
-            item.ErrorCode = BridgeErrorCodes.Timeout;
-            item.Message = "作业取消：未开始执行";
+            item.ErrorCode = null;
+            item.Message = message;
             item.FinishedAt = Now();
-        }
-    }
-
-    private static void MarkPendingItemsCanceledUnsafe(JobRecord job)
-    {
-        foreach (var item in job.Items.Where(entry =>
-                     entry.State is JobItemStates.Pending or JobItemStates.Running))
-        {
-            item.State = JobItemStates.Canceled;
-            item.FinishedAt ??= Now();
         }
     }
 
@@ -815,66 +883,99 @@ public sealed class JobEngine : IDisposable
         Publish(job);
     }
 
-    private static void FinalizeJobUnsafe(JobRecord job)
+    /// <summary>
+    /// 终态归并（幂等）：dryRun → PREVIEW；有 INTERRUPTED item → INTERRUPTED；有 CANCELED item → CANCELED；
+    /// 否则按 ok/failed 计 SUCCESS/PARTIAL/FAILED。无论走哪条路径，都为尚未写审计的终态 item 补写恰好 1 行。
+    /// </summary>
+    private void FinalizeJobUnsafe(JobRecord job)
     {
-        if (IsTerminal(job.State))
+        if (!IsTerminal(job.State))
         {
-            return;
+            job.FinishedAt = Now();
+            if (job.Arguments.DryRun)
+            {
+                job.State = JobStates.Preview;
+            }
+            else if (job.Items.Any(item => item.State == JobItemStates.Interrupted))
+            {
+                job.State = JobStates.Interrupted;
+            }
+            else if (job.Items.Any(item => item.State == JobItemStates.Canceled))
+            {
+                job.State = JobStates.Canceled;
+                job.CancelRequested = true;
+            }
+            else
+            {
+                var ok = job.Items.Count(item => item.State == JobItemStates.Ok);
+                var failed = job.Items.Count(item => item.State == JobItemStates.Failed);
+                job.State = failed == 0
+                    ? JobStates.Success
+                    : ok > 0
+                        ? JobStates.Partial
+                        : JobStates.Failed;
+            }
         }
 
-        job.FinishedAt = Now();
-        if (job.Items.Any(item => item.State == JobItemStates.Interrupted))
-        {
-            job.State = JobStates.Interrupted;
-            return;
-        }
-
-        if (job.CancelRequested || job.Items.Any(item => item.State == JobItemStates.Canceled))
-        {
-            job.State = JobStates.Canceled;
-            job.CancelRequested = true;
-            return;
-        }
-
-        var ok = job.Items.Count(item => item.State == JobItemStates.Ok);
-        var failed = job.Items.Count(item => item.State == JobItemStates.Failed);
-        job.State = failed == 0
-            ? JobStates.Success
-            : ok > 0
-                ? JobStates.Partial
-                : JobStates.Failed;
+        WriteMissingItemAuditsUnsafe(job);
     }
 
-    private void MarkInterrupted(JobRecord job)
+    private void MarkInterruptedOnShutdown(JobRecord job)
     {
         lock (_sync)
         {
-            MarkInterruptedUnsafe(job);
+            MarkInterruptedUnsafe(job, "宿主关闭：未开始执行", "宿主关闭：执行中断");
             PersistUnsafe();
+            WriteMissingItemAuditsUnsafe(job);
         }
 
         Publish(job);
     }
 
-    private static void MarkInterruptedUnsafe(JobRecord job)
+    /// <summary>
+    /// 重启/关闭语义（AC-OP-26① 修正）：只有真正执行中的 RUNNING item 标 INTERRUPTED；
+    /// 未开始的 PENDING item 记 CANCELED（reason=进程重启/关闭未执行），绝不误标 INTERRUPTED 或重复执行；
+    /// job：曾 RUNNING（或有 RUNNING item）→ INTERRUPTED，纯排队未开始 → CANCELED。
+    /// </summary>
+    private static void MarkInterruptedUnsafe(JobRecord job, string pendingMessage, string runningMessage)
     {
-        if (IsTerminal(job.State))
+        if (!IsTerminal(job.State))
         {
-            return;
+            var wasRunning = job.State == JobStates.Running
+                || job.Items.Any(item => item.State == JobItemStates.Running);
+            job.State = wasRunning ? JobStates.Interrupted : JobStates.Canceled;
+            job.FinishedAt ??= Now();
+            if (job.State == JobStates.Canceled)
+            {
+                job.CancelRequested = true;
+            }
         }
 
-        job.State = JobStates.Interrupted;
-        job.FinishedAt ??= Now();
-        foreach (var item in job.Items.Where(entry =>
-                     entry.State is JobItemStates.Pending or JobItemStates.Running))
+        foreach (var item in job.Items)
         {
-            item.State = JobItemStates.Interrupted;
-            item.FinishedAt ??= Now();
+            if (item.State == JobItemStates.Running)
+            {
+                item.State = JobItemStates.Interrupted;
+                item.Message = runningMessage;
+                item.FinishedAt ??= Now();
+            }
+            else if (item.State == JobItemStates.Pending)
+            {
+                item.State = JobItemStates.Canceled;
+                item.ErrorCode = null;
+                item.Message = pendingMessage;
+                item.FinishedAt ??= Now();
+            }
         }
     }
 
     private static bool IsTerminal(string state) => state is
-        JobStates.Partial or JobStates.Success or JobStates.Failed or JobStates.Canceled or JobStates.Interrupted;
+        JobStates.Partial or JobStates.Success or JobStates.Failed or JobStates.Canceled
+        or JobStates.Interrupted or JobStates.Preview;
+
+    private static bool IsItemTerminal(string state) => state is
+        JobItemStates.Ok or JobItemStates.Failed or JobItemStates.Skipped
+        or JobItemStates.Canceled or JobItemStates.Interrupted or JobItemStates.Preview;
 
     // ------------------------------------------------------------------ 失效处理 / 快照
 
@@ -909,13 +1010,49 @@ public sealed class JobEngine : IDisposable
 
     // ------------------------------------------------------------------ 审计
 
-    private void WriteItemAudit(
+    /// <summary>
+    /// 为尚未写审计的终态 item 补写恰好 1 行（覆盖：受理阶段预跳过、取消未开始、job 级内部异常、
+    /// 重启改写等“未进入 ExecuteItemAsync”的路径）。<c>AuditWritten</c> 标记保证每 item 恰 1 行。
+    /// </summary>
+    private void WriteMissingItemAuditsUnsafe(JobRecord job)
+    {
+        foreach (var item in job.Items)
+        {
+            if (item.AuditWritten || !IsItemTerminal(item.State))
+            {
+                continue;
+            }
+
+            var result = new BatchItemResult(
+                item.State,
+                item.ErrorCode,
+                item.Message,
+                item.PreHead,
+                item.PostHead,
+                item.BackupRef);
+            WriteItemAuditUnsafe(
+                job,
+                item,
+                string.IsNullOrWhiteSpace(item.RepoState) ? "UNKNOWN" : item.RepoState!,
+                result,
+                durationMs: 0);
+        }
+    }
+
+    private void WriteItemAuditUnsafe(
         JobRecord job,
         JobItemRecord item,
         string repoState,
         BatchItemResult result,
         long durationMs)
     {
+        if (item.AuditWritten)
+        {
+            return;
+        }
+
+        // 先置位再写：即使审计 IO 失败也不重复写（“恰 1 行”由 Result/JobItemId 唯一性保证）。
+        item.AuditWritten = true;
         try
         {
             _audit.Record(
@@ -992,6 +1129,22 @@ public sealed class JobEngine : IDisposable
                 });
         }
 
+        // DELETE 的第二重确认独立于 confirm：必须携带 args.confirmText（UI 输入组件 ID）。
+        if (!arguments.DryRun
+            && kindText == "DELETE"
+            && string.IsNullOrWhiteSpace(arguments.ConfirmText))
+        {
+            return CommandResult.Failure(
+                BridgeErrorCodes.ConfirmRequired,
+                "DELETE 需强确认：args.confirmText 必须等于要删除的组件 ID（UI 输入组件 ID；精确匹配、区分大小写）",
+                new Dictionary<string, object?>
+                {
+                    ["kind"] = kindText,
+                    ["requiresConfirm"] = true,
+                    ["requiresTypedConfirm"] = true
+                });
+        }
+
         if (parameters.ComponentIds is null || parameters.ComponentIds.Count == 0)
         {
             return CommandResult.Failure(
@@ -1049,9 +1202,14 @@ public sealed class JobEngine : IDisposable
                 };
                 item.Id = "pending:" + sequence.ToString(CultureInfo.InvariantCulture);
 
-                if (preSkipItems && hasSnapshot)
+                if (preSkipItems && !arguments.DryRun && hasSnapshot)
                 {
                     var found = index.TryGetRepo(componentId, repoType, out var repo);
+                    if (found)
+                    {
+                        item.RepoState = repo.Repo.State;
+                    }
+
                     if (found && TryPreviewSkip(kindText, repo, componentId, repoType, out var skipCode, out var skipMessage))
                     {
                         item.State = JobItemStates.Skipped;
@@ -1234,6 +1392,11 @@ public sealed class JobEngine : IDisposable
             return InvalidArgument("参数 message 超长（≤2000 字符）", "message");
         }
 
+        if (arguments.ConfirmText is not null && arguments.ConfirmText.Length > 256)
+        {
+            return InvalidArgument("参数 confirmText 超长（≤256 字符）", "confirmText");
+        }
+
         return null;
     }
 
@@ -1244,7 +1407,7 @@ public sealed class JobEngine : IDisposable
         value.Length == 14 && value.All(character => character is >= '0' and <= '9');
 
     private static StoredJobArguments DefaultArguments() =>
-        new(null, null, null, false, false, false, false, false, false, null);
+        new(null, null, null, false, false, false, false, false, false, null, null);
 
     private static BridgeError? TryParseArguments(
         IReadOnlyDictionary<string, JsonElement>? raw,
@@ -1275,6 +1438,12 @@ public sealed class JobEngine : IDisposable
         }
 
         error = ReadString(raw, "trashStamp", out var trashStamp);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        error = ReadString(raw, "confirmText", out var confirmText);
         if (error is not null)
         {
             return error;
@@ -1326,7 +1495,8 @@ public sealed class JobEngine : IDisposable
             setUpstream,
             stash,
             stageAll,
-            trashStamp);
+            trashStamp,
+            confirmText);
         return null;
     }
 
@@ -1551,13 +1721,14 @@ public sealed class JobEngine : IDisposable
         {
             var job = FromStored(entry);
 
-            // “重启不重复执行”：上次进程遗留的 PENDING/RUNNING 一律标 INTERRUPTED，绝不重新入队。
+            // “重启不重复执行”（AC-OP-26/P1-5）：RUNNING item → INTERRUPTED；未开始 PENDING item → CANCELED
+            // （reason=进程重启未执行），绝不重新入队、也不把未开始项误标 INTERRUPTED。
             if (job.State is JobStates.Pending or JobStates.Running || job.Items.Any(item =>
                     item.State is JobItemStates.Pending or JobItemStates.Running))
             {
-                MarkInterruptedUnsafe(job);
-                job.CancelRequested = true;
+                MarkInterruptedUnsafe(job, "进程重启：未开始执行（不重复执行）", "进程重启：执行中断（不重复执行）");
                 interrupted++;
+                WriteMissingItemAuditsUnsafe(job);
             }
 
             _jobs.Add(job);
@@ -1566,7 +1737,7 @@ public sealed class JobEngine : IDisposable
         PruneJobsUnsafe();
         if (interrupted > 0)
         {
-            HostLog.Warn($"作业历史加载：{interrupted} 个未完成作业标 INTERRUPTED（重启不重复执行）");
+            HostLog.Warn($"作业历史加载：{interrupted} 个未完成作业已收敛（RUNNING→INTERRUPTED、PENDING→CANCELED，重启不重复执行）");
         }
 
         if (_jobs.Count > 0)
@@ -1614,10 +1785,13 @@ public sealed class JobEngine : IDisposable
             item.Message,
             item.PreHead,
             item.PostHead,
-            item.BackupRef)).ToList(),
+            item.BackupRef,
+            item.Preview)).ToList(),
         job.Arguments,
         job.Actor,
-        job.RequestId);
+        job.RequestId,
+        job.Arguments.DryRun,
+        job.CancelRequested);
 
     private static JobRecord FromStored(StoredJob stored)
     {
@@ -1631,7 +1805,8 @@ public sealed class JobEngine : IDisposable
             FinishedAt = stored.FinishedAt,
             Arguments = stored.Arguments ?? DefaultArguments(),
             Actor = stored.Actor,
-            RequestId = stored.RequestId
+            RequestId = stored.RequestId,
+            CancelRequested = stored.CancelRequested
         };
 
         var index = 0;
@@ -1651,7 +1826,8 @@ public sealed class JobEngine : IDisposable
                 Message = item.Message,
                 PreHead = item.PreHead,
                 PostHead = item.PostHead,
-                BackupRef = item.BackupRef
+                BackupRef = item.BackupRef,
+                Preview = item.Preview || string.Equals(item.State, JobItemStates.Preview, StringComparison.Ordinal)
             });
         }
 
@@ -1672,7 +1848,8 @@ public sealed class JobEngine : IDisposable
                 item.Message,
                 item.PreHead,
                 item.PostHead,
-                item.BackupRef))
+                item.BackupRef,
+                item.Preview || string.Equals(item.State, JobItemStates.Preview, StringComparison.Ordinal)))
             .ToList();
 
         return new JobDto(
@@ -1687,7 +1864,31 @@ public sealed class JobEngine : IDisposable
             job.StartedAt,
             job.FinishedAt,
             job.State is JobStates.Pending or JobStates.Running && !job.CancelRequested,
+            job.Arguments.DryRun,
+            job.CancelRequested,
+            JobMessage(job),
             items);
+    }
+
+    /// <summary>作业级文案（dryRun=预览、取消/中断说明；正常作业为 null 由 UI 自行组合逐仓文案）。</summary>
+    private static string? JobMessage(JobRecord job)
+    {
+        if (job.Arguments.DryRun)
+        {
+            return $"预览（DRY_RUN）：仅输出逐仓预检结果，未执行、未写入任何仓库/ref（{job.Items.Count} 项）";
+        }
+
+        if (job.State == JobStates.Canceled)
+        {
+            return "作业已取消：未开始项已取消（errorCode=null）；已开始项按合作式取消终止";
+        }
+
+        if (job.State == JobStates.Interrupted)
+        {
+            return "作业已中断：进程重启/宿主关闭导致执行中断，重启后不重复执行";
+        }
+
+        return null;
     }
 
     // ------------------------------------------------------------------ 事件推送
@@ -1708,8 +1909,16 @@ public sealed class JobEngine : IDisposable
 
         try
         {
-            // 固定形状：{ event:"JOB_UPDATED", data:JobDto }（WebViewBridge 原样 PostWebMessageAsJson）。
-            sink(new JobUpdatedEvent("JOB_UPDATED", dto));
+            // 固定形状（AC-UI-10c②）：{ event, jobId, current, data, state, total, cancellable }；
+            // current 与 data 同为 job 快照（data 为 M2b 首版兼容键）。
+            sink(new JobUpdatedEventDto(
+                Event: "JOB_UPDATED",
+                JobId: dto.Id,
+                Current: dto,
+                Data: dto,
+                State: dto.State,
+                Total: dto.Total,
+                Cancellable: dto.Cancellable));
         }
         catch (Exception ex)
         {
@@ -1758,10 +1967,12 @@ public sealed class JobEngine : IDisposable
                 // 已取消/销毁。
             }
 
-            // 进程退出兜底：内存中的未完成作业标 INTERRUPTED 并落盘（下次启动不会再执行）。
+            // 进程退出兜底：内存中的未完成作业收敛（RUNNING→INTERRUPTED、未开始→CANCELED）并落盘，
+            // 下次启动不会再执行；逐 item 补写审计行。
             foreach (var job in _jobs.Where(entry => !IsTerminal(entry.State)))
             {
-                MarkInterruptedUnsafe(job);
+                MarkInterruptedUnsafe(job, "宿主关闭：未开始执行", "宿主关闭：执行中断");
+                WriteMissingItemAuditsUnsafe(job);
             }
 
             try
@@ -1855,10 +2066,14 @@ public sealed class JobEngine : IDisposable
         public string? PostHead { get; set; }
 
         public string? BackupRef { get; set; }
-    }
 
-    /// <summary>JOB_UPDATED 事件信封（固定形状：<c>{event:"JOB_UPDATED", data:JobDto}</c>）。</summary>
-    private sealed record JobUpdatedEvent(
-        [property: JsonPropertyName("event")] string Event,
-        [property: JsonPropertyName("data")] JobDto Data);
+        /// <summary>dryRun 预检 item 标记（state=PREVIEW 时为 true）。</summary>
+        public bool Preview { get; set; }
+
+        /// <summary>动作前仓库状态快照（审计 <c>state</c> 列；未执行路径可能为 UNKNOWN）。</summary>
+        public string? RepoState { get; set; }
+
+        /// <summary>审计行已写标记（每 item 每个终态恰 1 行）。</summary>
+        public bool AuditWritten { get; set; }
+    }
 }

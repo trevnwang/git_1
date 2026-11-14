@@ -1036,7 +1036,7 @@ export function mockRunBatch(
   return { jobId: id, accepted: true, total: items.length, skipped: job.skipped }
 }
 
-/** cancelJob 的 Mock 实现：合作式取消（已开始项 CANCELED，未开始项保持 PENDING）。 */
+/** cancelJob 的 Mock 实现：合作式取消（已开始项 CANCELED；未开始项 CANCELED + 无错误码，语义为“未开始/已取消”）。 */
 export function mockCancelJob(jobId: string): JobDto | null {
   const job = findMockJob(jobId)
   if (!job) return null
@@ -1051,7 +1051,14 @@ export function mockCancelJob(jobId: string): JobDto | null {
     if (item.state === 'RUNNING') {
       item.state = 'CANCELED'
       item.finishedAt = new Date().toISOString()
+      item.errorCode = null
       item.message = '已取消（合作式取消，未整体回滚；Mock）'
+    } else if (item.state === 'PENDING') {
+      // 与 Host M2b-1 修复后的语义一致：未开始项不再写 E_TIMEOUT，前端显示“已取消（未开始）”。
+      item.state = 'CANCELED'
+      item.finishedAt = new Date().toISOString()
+      item.errorCode = null
+      item.message = '作业取消：未开始执行'
     }
   }
   return JSON.parse(JSON.stringify(job)) as JobDto

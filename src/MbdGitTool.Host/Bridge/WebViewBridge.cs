@@ -67,7 +67,9 @@ public sealed class WebViewBridge : IDisposable
     }
 
     /// <summary>
-    /// M2b：把作业事件（固定形状 <c>{event:"JOB_UPDATED", data:JobDto}</c>）推给 UI。
+    /// M2b：把作业事件推给 UI。固定形状（AC-UI-10c②）：
+    /// <c>{ event:"JOB_UPDATED", jobId, current:JobDto, data:JobDto, state, total, cancellable }</c>
+    /// （<c>current</c>/<c>data</c> 为同一份 job 快照，<c>data</c> 保留旧版兼容）。
     /// <para>必须在 UI 线程调用（WebView2 <c>PostWebMessageAsJson</c> 要求）；由
     /// <c>MainWindow</c> 在 <see cref="HostCommandRouter.EventSink"/> 中用 Dispatcher 调度。</para>
     /// <para>序列化失败/超长/桥已销毁均只告警丢弃，不影响后台作业。</para>

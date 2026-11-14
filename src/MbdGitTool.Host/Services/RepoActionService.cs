@@ -99,6 +99,35 @@ public sealed class RepoActionService
     }
 
     /// <summary>
+    /// 批量作业与单仓动作共享的 per-repo 互斥锁（P1-3 收口）：键 = canonical localPath，与
+    /// <see cref="RunAsync"/> 使用同一静态 <see cref="RepoLocks"/> 字典；同仓串行、异仓可并发。
+    /// 批量 SYNC/DELETE/CLONE/RESTORE/CREATE/TAG 在 <c>JobEngine</c> 逐仓执行前调用本方法，
+    /// 避免与单仓 M2a 写操作并发写同一仓。
+    /// </summary>
+    public static async Task<IDisposable> AcquireRepoLockAsync(string? localPath, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localPath);
+        var key = PathPolicy.TryCanonicalize(localPath) ?? localPath.Trim();
+        var gate = RepoLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        return new RepoLockLease(gate);
+    }
+
+    private sealed class RepoLockLease : IDisposable
+    {
+        private SemaphoreSlim? _gate;
+
+        public RepoLockLease(SemaphoreSlim gate) => _gate = gate;
+
+        public void Dispose()
+        {
+            var gate = Interlocked.Exchange(ref _gate, null);
+            gate?.Release();
+        }
+    }
+
+
+    /// <summary>
     /// 按仓状态给出五键可用性（固定顺序 PULL/FETCH/CHKOUT/COMMIT/PUSH；Enabled=MatrixAllowed）。
     /// <para><b>RequiresConfirm</b>（ADR AC-UI-08 / SRS §7.6 冻结）：COMMIT/PUSH 恒为 <c>true</c>（与矩阵 cell 无关），
     /// 其余动作取矩阵 <c>C</c>。<c>RunAsync</c> 据此强制 <c>args.confirm=true</c>（FR-ACT-04），
@@ -339,18 +368,10 @@ public sealed class RepoActionService
                 new Dictionary<string, object?> { ["repoType"] = repo.Repo.RepoType });
         }
 
-        // 8) 同仓串行：per-repo 信号量（静态字典，跨实例共享）。
-        var gate = RepoLocks.GetOrAdd(localPath, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            return await ExecuteAsync(action, repo, localPath, arguments, execution, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        finally
-        {
-            gate.Release();
-        }
+        // 8) 同仓串行：per-repo 信号量（静态字典，跨实例共享；批量作业复用同一把锁）。
+        using var lease = await AcquireRepoLockAsync(localPath, cancellationToken).ConfigureAwait(false);
+        return await ExecuteAsync(action, repo, localPath, arguments, execution, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private async Task<CommandResult> ExecuteAsync(

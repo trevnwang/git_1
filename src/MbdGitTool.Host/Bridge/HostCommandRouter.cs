@@ -142,7 +142,8 @@ public sealed class HostCommandRouter : IDisposable
 
     /// <summary>
     /// M2b 作业事件出口（由 <c>WebViewBridge</c> 在初始化后设置）：参数固定为
-    /// <c>{event:"JOB_UPDATED", data:JobDto}</c> 的对象，由桥在 UI 线程序列化后 PostWebMessageAsJson。
+    /// <c>{ event:"JOB_UPDATED", jobId, current:JobDto, data:JobDto, state, total, cancellable }</c>
+    /// 的对象，由桥在 UI 线程序列化后 PostWebMessageAsJson。
     /// </summary>
     public Action<object>? EventSink
     {

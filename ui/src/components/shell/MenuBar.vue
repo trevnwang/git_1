@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useWorkbench } from '../../stores/workbench'
+import { BATCH_ACTIONS } from '../../viewmodel'
 import type { MenuItemVm } from '../../types/workbench'
 
 const w = useWorkbench()
@@ -12,7 +13,7 @@ interface MenuDef {
   items: MenuItemVm[]
 }
 
-const MENUS: MenuDef[] = [
+const BASE_MENUS: MenuDef[] = [
   {
     key: 'file',
     label: '文件(F)',
@@ -54,13 +55,6 @@ const MENUS: MenuDef[] = [
       { key: 'actions.CHKOUT', label: '单仓 CHKOUT', shortcut: 'Alt+3' },
       { key: 'actions.COMMIT', label: '单仓 COMMIT', shortcut: 'Alt+4' },
       { key: 'actions.PUSH', label: '单仓 PUSH', shortcut: 'Alt+5' },
-      { key: 'sep3', label: '', separator: true },
-      { key: 'component.SYNC', label: '组件 SYNC…（四仓，远程覆盖本地）' },
-      { key: 'component.CREATE', label: '组件 CREATE…（四仓建同名分支）' },
-      { key: 'component.CLONE', label: '批量 Clone…（缺失仓）' },
-      { key: 'component.TAG', label: '批量打 Tag…（四仓同名 Tag）' },
-      { key: 'component.RESTORE', label: '批量 Restore…（从 .trash 恢复缺失仓）' },
-      { key: 'component.DELETE', label: '批量 Delete…（仅本地，软删到 .trash）', danger: true },
     ],
   },
   {
@@ -86,7 +80,32 @@ const MENUS: MenuDef[] = [
   },
 ]
 
-const openMenu = computed(() => MENUS.find((menu) => menu.key === state.menuOpen) ?? null)
+const openMenu = computed(() => MENUS.value.find((menu) => menu.key === state.menuOpen) ?? null)
+
+/**
+ * P1-2：批量动作与 BatchBar / 卡片右键共用同一清单与文案（viewmodel.BATCH_ACTIONS），
+ * 可用性统一走 store.batchActionState（未实现项禁用 + 选择模式 0 勾选禁用并提示）。
+ */
+const batchMenuItems = computed<MenuItemVm[]>(() =>
+  BATCH_ACTIONS.map((action) => {
+    const availability = w.batchActionState(action.kind)
+    return {
+      key: `component.${action.kind}`,
+      label: `${action.label}…`,
+      title: availability.title,
+      disabled: !availability.enabled,
+      danger: action.danger,
+    }
+  }),
+)
+
+const MENUS = computed<MenuDef[]>(() =>
+  BASE_MENUS.map((menu) =>
+    menu.key === 'actions'
+      ? { ...menu, items: [...menu.items, { key: 'sep-batch', label: '', separator: true }, ...batchMenuItems.value] }
+      : menu,
+  ),
+)
 
 function toggleMenu(key: string): void {
   state.menuOpen = state.menuOpen === key ? null : key
@@ -137,6 +156,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocumentPointe
               role="menuitem"
               :class="{ danger: item.danger }"
               :disabled="item.disabled"
+              :title="item.title"
               :data-testid="`menu-item-${item.key}`"
               @click="run(item)"
             >

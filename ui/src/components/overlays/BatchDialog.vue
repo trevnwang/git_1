@@ -53,11 +53,24 @@ const valueValid = computed(() => {
   return true
 })
 
-const needsValue = computed(() => dialog.value?.kind === 'branch' || dialog.value?.kind === 'tag')
+const needsValue = computed(
+  () => dialog.value?.kind === 'branch' || dialog.value?.kind === 'tag' || dialog.value?.kind === 'chkout',
+)
 const canSubmit = computed(() => Boolean(dialog.value) && (!needsValue.value || valueValid.value))
 
 const inputHint = computed(() => {
-  const label = dialog.value?.kind === 'tag' ? 'Tag' : '分支'
+  const kind = dialog.value?.kind
+  const action = dialog.value?.action
+  const label = kind === 'tag' ? 'Tag' : kind === 'chkout' ? '目标分支/Tag' : '分支'
+  if (action === 'DELETE' || action === 'SYNC') {
+    if (!trimmed.value) return '必填：输入组件 ID 确认（区分大小写，须与组件 ID 完全一致）'
+    return `将校验：${trimmed.value}（须与组件 ID 完全一致，Host 逐仓复核）`
+  }
+  if (kind === 'chkout') {
+    if (!trimmed.value) return `必填：${label}（refs/tags/ 前缀按 Tag 处理）`
+    if (valueValid.value) return `将检出：${trimmed.value}（工作区脏/ref 不存在时逐仓失败或跳过）`
+    return `名称不合法：不能含空格或 ~^:?*[\\，不能以 - . 开头/以 . / 结尾，且不能包含 ..`
+  }
   if (!trimmed.value) return `必填：${label}名称（1–200 字符）`
   if (valueValid.value) return `名称合法：${trimmed.value}（最终由 Host 校验冲突/权限）`
   return `名称不合法：不能含空格或 ~^:?*[\\，不能以 - . 开头/以 . / 结尾，且不能包含 ..`
@@ -74,6 +87,13 @@ function submit(): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    // 与 ConfirmDialog 一致：Esc 关闭并归还焦点；阻止冒泡，避免全局 Esc 继续关闭下层浮层。
+    event.preventDefault()
+    event.stopPropagation()
+    w.closeBatchDialog()
+    return
+  }
   if (event.key === 'Enter' && needsValue.value) {
     event.preventDefault()
     submit()
@@ -100,19 +120,26 @@ function trapTab(event: KeyboardEvent): void {
 </script>
 
 <template>
-  <div v-if="dialog" class="overlay" @click.self="w.closeBatchDialog()" @keydown.tab="trapTab">
+  <div v-if="dialog" class="overlay" @click.self="w.closeBatchDialog()" @keydown="onKeydown" @keydown.tab="trapTab">
     <section
       ref="root"
       class="batch-dialog"
       data-testid="batch-dialog"
       :data-batch-kind="dialog.kind"
       :data-batch-action="dialog.action"
+      :data-dryrun="dryRun ? '1' : '0'"
       role="dialog"
       aria-modal="true"
       :aria-label="dialog.title"
     >
       <header class="dialog-head">
         <span class="dialog-title">{{ dialog.title }}</span>
+        <span
+          v-if="dialog.showDryRun && dryRun"
+          class="dryrun-badge"
+          data-testid="batch-dialog-dryrun-badge"
+          title="dryRun 预览：仅预检，不执行任何写操作"
+        >预览（dryRun）</span>
         <span class="spacer" />
         <button type="button" class="icon-btn" title="关闭（Esc）" aria-label="关闭" @click="w.closeBatchDialog()">✕</button>
       </header>
@@ -174,7 +201,10 @@ function trapTab(event: KeyboardEvent): void {
           {{ dialog.dryRunHint }}
         </p>
 
-        <p class="safe-hint">确认后提交到 Host 作业队列；执行进度、取消与逐仓结果见任务中心。</p>
+        <p v-if="dialog.showDryRun && dryRun" class="dry-run-notice" data-testid="batch-dialog-dryrun-notice">
+          预览（dryRun）已开启：确认后只提交 Host 预检作业，任务中心会标注「预览（dryRun）· 未执行写操作」。
+        </p>
+        <p v-else class="safe-hint">确认后提交到 Host 作业队列；执行进度、取消与逐仓结果见任务中心。</p>
       </div>
 
       <footer class="dialog-actions">
@@ -222,6 +252,16 @@ function trapTab(event: KeyboardEvent): void {
   border-bottom: 1px solid var(--border);
 }
 .dialog-title { font-size: 13px; font-weight: 650; }
+.dryrun-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--st-warning-bd);
+  background: var(--st-warning-bg);
+  color: var(--st-warning-fg);
+  white-space: nowrap;
+}
 .spacer { flex: 1; }
 .icon-btn { border: 0; background: transparent; color: var(--text-2); font-size: 13px; cursor: pointer; }
 .icon-btn:hover { color: var(--text); }
@@ -265,6 +305,16 @@ function trapTab(event: KeyboardEvent): void {
 .dry-run { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px; cursor: pointer; }
 .dry-run input { accent-color: var(--focus); }
 .dry-run-hint { margin: 4px 0 0; font-size: 10px; line-height: 1.5; color: var(--text-2); }
+.dry-run-notice {
+  margin: 10px 0 0;
+  padding: 6px 8px;
+  border: 1px dashed var(--st-warning-bd);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--st-warning-bg) 40%, var(--surface));
+  color: var(--st-warning-fg);
+  font-size: 10px;
+  line-height: 1.6;
+}
 .safe-hint { margin: 10px 0 0; font-size: 10px; color: var(--text-2); }
 .dialog-actions {
   flex: 0 0 auto;

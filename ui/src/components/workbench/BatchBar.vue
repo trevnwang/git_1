@@ -1,21 +1,48 @@
 <script setup lang="ts">
 /**
- * 组件级批量操作条（FR-BOARD-04 / M2b）：SYNC / CREATE / Clone / Delete
- * 点击先走确认/参数对话框（overlays），确认后才 runBatch；提交后打开任务中心。
+ * 组件级批量操作条（FR-BOARD-04 / M2b / P1-2）：
+ * - 常驻按钮：SYNC / CREATE / Clone / Delete；「更多」菜单补齐 PULL / FETCH / CHKOUT / TAG / RESTORE，
+ *   未实现项（COMMIT/PUSH）显式禁用；
+ * - 动作清单、文案与可用性来自 viewmodel.BATCH_ACTIONS + store.batchActionState（与卡片右键/菜单栏单源）；
+ * - 点击先走确认/参数对话框（overlays），确认后才 runBatch（未确认 = 0 写）；
+ * - P1-3：选择模式 0 勾选时命令禁用并提示「先勾选组件」，不隐式作用于当前组件。
  */
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useWorkbench } from '../../stores/workbench'
-import type { BatchKind } from '../../types/workbench'
+import { BATCH_PRIMARY_ACTIONS, BATCH_SECONDARY_ACTIONS } from '../../viewmodel'
+import type { BatchActionDef } from '../../viewmodel'
 
 const w = useWorkbench()
 const state = w.state
 
-const checkedCount = computed(() => state.checkedIds.length)
-const repoCount = computed(() => state.checkedIds.length * 4)
+const checkedCount = computed(() => w.batchSelectionCount())
+const blocked = computed(() => w.batchCommandsBlocked())
+const moreOpen = ref(false)
+const moreRoot = ref<HTMLElement | null>(null)
 
-function run(kind: BatchKind): void {
-  w.requestBatch(kind)
+function run(action: BatchActionDef): void {
+  moreOpen.value = false
+  w.requestBatch(action.kind)
 }
+
+function actionTitle(action: BatchActionDef): string {
+  const availability = w.batchActionState(action.kind)
+  return availability.enabled ? action.title : availability.title
+}
+
+function toggleMore(): void {
+  // 即使 0 勾选也展开菜单：让用户看到完整动作清单（各项禁用并给出原因），
+  // 主按钮点击时再由 store 给出「先勾选组件」提示。
+  moreOpen.value = !moreOpen.value
+}
+
+function onDocumentPointerDown(event: MouseEvent): void {
+  const target = event.target as Node | null
+  if (!moreRoot.value || !target || !moreRoot.value.contains(target)) moreOpen.value = false
+}
+
+onMounted(() => document.addEventListener('mousedown', onDocumentPointerDown))
+onBeforeUnmount(() => document.removeEventListener('mousedown', onDocumentPointerDown))
 </script>
 
 <template>
@@ -25,48 +52,76 @@ function run(kind: BatchKind): void {
         type="button"
         class="batch-btn primary"
         data-testid="batch-select-toggle"
-        title="进入批量选择模式（对选中组件集合执行 SYNC / CREATE / Clone / Delete，经任务中心执行）"
+        title="进入批量选择模式（勾选组件后对选中集合执行 SYNC / CREATE / Clone / PULL / FETCH / CHKOUT / Tag / Restore / Delete，经任务中心执行）"
+        aria-label="进入批量选择模式"
         @click="w.toggleSelectMode()"
       >☑</button>
       <span class="hint">批量</span>
     </template>
     <template v-else>
-      <span class="count" :title="`已选 ${checkedCount} 组件 / ${repoCount} 仓（未勾选时对当前选中组件执行）`">{{ checkedCount }}/{{ state.components.length }}</span>
+      <span
+        class="count"
+        :class="{ blocked }"
+        :title="`已选 ${checkedCount} / ${state.components.length} 个组件；批量命令只对已勾选组件生效（未勾选不会作用于当前组件）`"
+        data-testid="batch-count"
+      >{{ checkedCount }}/{{ state.components.length }}</span>
+      <span
+        v-if="blocked"
+        class="blocked-flag"
+        data-testid="batch-blocked-hint"
+        title="先勾选组件：批量命令只对已勾选组件生效"
+        aria-label="先勾选组件"
+        role="img"
+      >⚠</span>
       <div class="commands">
         <button
+          v-for="action in BATCH_PRIMARY_ACTIONS"
+          :key="action.kind"
           type="button"
           class="batch-btn"
-          data-testid="batch-sync"
+          :class="{ danger: action.danger, blocked: blocked }"
+          :data-testid="`batch-${action.kind.toLowerCase()}`"
           :disabled="state.batchPending"
-          title="SYNC：远程覆盖本地（先预检 + 备份 ref，需确认）→ 任务中心"
-          @click="run('SYNC')"
-        >⟳</button>
-        <button
-          type="button"
-          class="batch-btn"
-          data-testid="batch-create"
-          :disabled="state.batchPending"
-          title="CREATE：四仓创建同名分支（需输入分支名）→ 任务中心"
-          @click="run('CREATE')"
-        >＋</button>
-        <button
-          type="button"
-          class="batch-btn"
-          data-testid="batch-clone"
-          :disabled="state.batchPending"
-          title="Clone 缺失仓（预览缺失清单，可选 dryRun）→ 任务中心"
-          @click="run('CLONE')"
-        >⤓</button>
-        <button
-          type="button"
-          class="batch-btn danger"
-          data-testid="batch-delete"
-          :disabled="state.batchPending"
-          title="Delete：仅本地软删到 .trash（保留 30 天，需确认）→ 任务中心"
-          @click="run('DELETE')"
-        >⋯</button>
+          :aria-disabled="blocked || state.batchPending"
+          :aria-label="action.label"
+          :title="actionTitle(action)"
+          @click="run(action)"
+        >{{ action.icon }}</button>
+        <div ref="moreRoot" class="more-root">
+          <button
+            type="button"
+            class="batch-btn more-btn"
+            :class="{ blocked }"
+            data-testid="batch-more"
+            :disabled="state.batchPending"
+            :aria-disabled="blocked || state.batchPending"
+            aria-haspopup="menu"
+            :aria-expanded="moreOpen"
+            aria-label="更多批量操作"
+            title="更多批量操作：PULL / FETCH / CHKOUT / Tag / Restore（COMMIT/PUSH 未接入，显式禁用）"
+            @click.stop="toggleMore"
+          >▾</button>
+          <ul v-if="moreOpen" class="more-menu" role="menu" data-testid="batch-more-menu" aria-label="更多批量操作">
+            <li v-for="action in BATCH_SECONDARY_ACTIONS" :key="action.kind" role="none">
+              <button
+                type="button"
+                role="menuitem"
+                class="more-item"
+                :class="{ danger: action.danger }"
+                :data-testid="`batch-more-${action.kind.toLowerCase()}`"
+                :disabled="!w.batchActionState(action.kind).enabled"
+                :aria-disabled="!w.batchActionState(action.kind).enabled"
+                :title="actionTitle(action)"
+                @click="run(action)"
+              >
+                <span class="more-icon" aria-hidden="true">{{ action.icon }}</span>
+                <span class="more-label">{{ action.label }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
       </div>
-      <button type="button" class="batch-btn" title="全选筛选结果" @click="w.selectAllVisible()">全</button>
+      <button type="button" class="batch-btn" data-testid="batch-select-all" title="全选筛选结果" @click="w.selectAllVisible()">全</button>
       <button type="button" class="close-btn" data-testid="batch-select-toggle" title="退出批量选择" @click="w.clearChecked()">✕</button>
     </template>
   </footer>
@@ -74,6 +129,7 @@ function run(kind: BatchKind): void {
 
 <style scoped>
 .batch-bar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -82,11 +138,26 @@ function run(kind: BatchKind): void {
   border: 1px solid var(--border);
   border-radius: var(--r-panel);
   background: var(--surface);
-  overflow: hidden;
+  overflow: visible;
   white-space: nowrap;
 }
 .hint { font-size: 10px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; }
-.count { font-size: 10px; font-weight: 600; white-space: nowrap; padding: 0 2px; color: var(--text-2); }
+.count { font-size: 10px; font-weight: 600; white-space: nowrap; padding: 0 2px; color: var(--text-2); flex: 0 0 auto; }
+.count.blocked { color: var(--st-warning-fg); }
+.blocked-flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--st-warning-fg);
+  border: 1px solid var(--st-warning-bd);
+  background: var(--st-warning-bg);
+  border-radius: 999px;
+  cursor: help;
+}
 .commands { display: flex; flex: 0 0 auto; gap: 3px; }
 .batch-btn {
   height: 26px;
@@ -105,6 +176,44 @@ function run(kind: BatchKind): void {
 .batch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .batch-btn.primary { border-color: var(--st-info-bd); background: var(--st-info-bg); color: var(--st-info-fg); }
 .batch-btn.danger { color: var(--st-danger-fg); border-color: var(--st-danger-bd); }
+.batch-btn.blocked { opacity: 0.55; }
+.batch-btn.blocked:hover:not(:disabled) { color: var(--st-warning-fg); border-color: var(--st-warning-bd); }
+.more-root { position: relative; flex: 0 0 auto; }
+.more-btn { font-size: 11px; padding: 0 4px; }
+.more-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: var(--z-menu);
+  min-width: 190px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  box-shadow: 0 -8px 24px rgb(16 24 40 / 18%);
+}
+.more-item {
+  width: 100%;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+.more-item:hover:not(:disabled) { background: var(--surface-2); }
+.more-item:disabled { opacity: 0.45; cursor: not-allowed; }
+.more-item.danger { color: var(--st-danger-fg); }
+.more-icon { width: 12px; text-align: center; color: var(--text-2); }
 .close-btn {
   flex: 0 0 auto;
   width: 24px;

@@ -14,6 +14,7 @@ import type {
 import { HostError, toErrorMessage } from './api'
 import type {
   ActionAvailability,
+  BatchKind,
   CommitVm,
   ComponentVm,
   GitStatus,
@@ -747,18 +748,125 @@ export function actionDisabledTitle(reason: string, code: string | undefined, al
   return `${reasonText} [${codeText}] → ${altText}`
 }
 
-/** 组件级批量操作（M2b：经任务中心 runBatch 提交；单独入口在 store）。 */
-export const BATCH_COMMANDS = [
-  'SYNC',
-  'CREATE',
-  'CLONE',
-  'PULL',
-  'FETCH',
-  'CHKOUT',
-  'TAG',
-  'DELETE',
-  'RESTORE',
-] as const
+/**
+ * 批量入口动作单源（P1-2）：BatchBar / 组件卡片右键菜单 / 菜单栏「操作」三处
+ * 使用同一清单与文案，可用性由 store.batchActionState() 统一计算。
+ *
+ * `implemented=false` 的项（批量 COMMIT/PUSH：Host 已支持 kind，但 UI 尚无
+ * message 输入/推送确认流程）在三处入口一律显式禁用，不静默隐藏。
+ */
+export interface BatchActionDef {
+  kind: BatchKind
+  /** 三处入口统一文案（批量条按钮用 aria-label，菜单追加 …）。 */
+  label: string
+  /** 批量条主按钮图标（仅 primary 项使用）。 */
+  icon: string
+  /** 悬停说明（动作语义/安全提示）。 */
+  title: string
+  danger?: boolean
+  implemented: boolean
+  /** true = 批量条常驻主按钮；false = 收进「更多」菜单。 */
+  primary?: boolean
+}
+
+export const BATCH_ACTIONS: readonly BatchActionDef[] = [
+  {
+    kind: 'SYNC',
+    label: '批量 SYNC',
+    icon: '⟳',
+    title: 'SYNC：四仓受控同步（远程覆盖本地；先预检 + 备份 ref，需确认）→ 任务中心',
+    danger: true,
+    implemented: true,
+    primary: true,
+  },
+  {
+    kind: 'CREATE',
+    label: '批量 CREATE',
+    icon: '＋',
+    title: 'CREATE：四仓创建同名分支（需输入分支名；可选 dryRun）→ 任务中心',
+    implemented: true,
+    primary: true,
+  },
+  {
+    kind: 'CLONE',
+    label: '批量 Clone',
+    icon: '⤓',
+    title: 'Clone 缺失仓（预览缺失清单，可选 dryRun）→ 任务中心',
+    implemented: true,
+    primary: true,
+  },
+  {
+    kind: 'DELETE',
+    label: '批量 Delete',
+    icon: '⋯',
+    title: 'Delete：仅本地软删到 .trash（保留 30 天，需确认）→ 任务中心',
+    danger: true,
+    implemented: true,
+    primary: true,
+  },
+  {
+    kind: 'PULL',
+    label: '批量 PULL',
+    icon: '↓',
+    title: 'PULL：四仓拉取并快进合并（本地有改动/分叉则失败，需确认）→ 任务中心',
+    implemented: true,
+  },
+  {
+    kind: 'FETCH',
+    label: '批量 FETCH',
+    icon: '⇣',
+    title: 'FETCH：四仓只读拉取远端引用（不修改工作区，需确认）→ 任务中心',
+    implemented: true,
+  },
+  {
+    kind: 'CHKOUT',
+    label: '批量 CHKOUT',
+    icon: '⌁',
+    title: 'CHKOUT：四仓检出指定分支/Tag（需输入 ref，可选 dryRun）→ 任务中心',
+    implemented: true,
+  },
+  {
+    kind: 'TAG',
+    label: '批量 Tag',
+    icon: '⚑',
+    title: 'Tag：四仓打同名 Tag（需输入 Tag 名称；可选 dryRun）→ 任务中心',
+    implemented: true,
+  },
+  {
+    kind: 'RESTORE',
+    label: '批量 Restore',
+    icon: '↺',
+    title: 'Restore：从工作区 .trash 恢复缺失仓（目标已存在则跳过，需确认）→ 任务中心',
+    danger: true,
+    implemented: true,
+  },
+  {
+    kind: 'COMMIT',
+    label: '批量 COMMIT（M2b-2）',
+    icon: '✓',
+    title: 'M2b-2 未接入：Host 已支持 COMMIT kind，UI 的提交说明输入/确认流程尚未实现',
+    implemented: false,
+  },
+  {
+    kind: 'PUSH',
+    label: '批量 PUSH（M2b-2）',
+    icon: '↑',
+    title: 'M2b-2 未接入：Host 已支持 PUSH kind，UI 的推送确认流程尚未实现',
+    implemented: false,
+  },
+]
+
+export const BATCH_PRIMARY_ACTIONS = BATCH_ACTIONS.filter((action) => action.primary)
+export const BATCH_SECONDARY_ACTIONS = BATCH_ACTIONS.filter((action) => !action.primary)
+
+/** 由 kind 取统一动作定义（菜单/右键/批量条共用）。 */
+export function batchActionDef(kind: string): BatchActionDef | undefined {
+  return BATCH_ACTIONS.find((action) => action.kind === kind)
+}
+
+export function batchActionLabel(kind: string): string {
+  return batchActionDef(kind)?.label ?? `批量 ${kind}`
+}
 
 export function componentSearchHit(
   component: ComponentVm,
@@ -853,6 +961,7 @@ const JOB_STATE_META: Record<JobState, JobStateMeta> = {
   FAILED: { tone: 'danger', icon: '✕', label: '失败' },
   CANCELED: { tone: 'neutral', icon: '⊘', label: '已取消' },
   INTERRUPTED: { tone: 'danger', icon: '⚠', label: '已中断' },
+  PREVIEW: { tone: 'info', icon: '◷', label: '预览完成' },
 }
 
 const JOB_ITEM_META: Record<JobItemState, JobStateMeta> = {
@@ -864,6 +973,7 @@ const JOB_ITEM_META: Record<JobItemState, JobStateMeta> = {
   SKIPPED: { tone: 'warning', icon: '↷', label: '跳过' },
   CANCELED: { tone: 'neutral', icon: '⊘', label: '已取消' },
   INTERRUPTED: { tone: 'danger', icon: '⚠', label: '已中断' },
+  PREVIEW: { tone: 'warning', icon: '◷', label: '预览（未执行）' },
 }
 
 export function jobStateMeta(state: string): JobStateMeta {
@@ -886,6 +996,9 @@ export const JOB_KIND_LABEL: Record<string, string> = {
   RESTORE: '恢复备份',
   PULL: '批量 PULL',
   FETCH: '批量 FETCH',
+  CHKOUT: '批量 CHKOUT',
+  COMMIT: '批量 COMMIT',
+  PUSH: '批量 PUSH',
 }
 
 export function jobKindLabel(kind: string): string {
@@ -905,6 +1018,7 @@ export function mapJobItem(dto: JobDto['items'][number]): JobVm['items'][number]
     preHead: dto.preHead ?? null,
     postHead: dto.postHead ?? null,
     backupRef: dto.backupRef ?? null,
+    preview: dto.preview === true,
   }
 }
 
@@ -925,7 +1039,50 @@ export function mapJob(dto: JobDto): JobVm {
     cancellable: Boolean(dto.cancellable),
     items,
     active: state === 'PENDING' || state === 'RUNNING',
+    dryRun: dto.dryRun === true ? true : undefined,
+    partial: dto.partial === true,
   }
+}
+
+/**
+ * dryRun 预览作业识别（P1-1）：提交时 args.dryRun=true 由 store 记录 jobId；
+ * 历史/重启后无 args 可用，按「逐仓全部 SKIPPED 且消息含 DRY_RUN/预览」识别。
+ * 仅用于展示（徽标/文案），不影响执行语义。
+ */
+const DRY_RUN_MESSAGE = /(DRY[_-]?RUN|dryRun|仅预览|未执行任何写操作)/i
+
+export function jobIsDryRun(job: JobVm): boolean {
+  // Host M2b-1 修复后直接提供 dryRun / state=PREVIEW；历史数据走「全 SKIPPED + DRY_RUN 消息」兜底。
+  if (job.dryRun || job.state === 'PREVIEW') return true
+  if (job.items.length === 0) return false
+  if (job.items.some((item) => item.state === 'PREVIEW')) return true
+  if (job.items.some((item) => item.state !== 'SKIPPED')) return false
+  return job.items.some((item) => DRY_RUN_MESSAGE.test(item.message ?? ''))
+}
+
+/** 逐仓已取消计数（job 行展示“已取消 N”，替代对 skipped 的误读）。 */
+export function jobCanceledCount(job: JobVm): number {
+  return job.items.filter((item) => item.state === 'CANCELED').length
+}
+
+/**
+ * 逐仓错误码展示（P0-1 前端侧）：取消不是错误。
+ * - CANCELED 项不展示错误码（旧 Host 数据把未开始项写成 CANCELED+E_TIMEOUT，一律不展示，避免“超时”误导）；
+ * - 其余状态照常展示 errorCode。
+ */
+export function jobItemVisibleErrorCode(item: JobVm['items'][number]): string | null {
+  if (item.state === 'CANCELED') return null
+  return item.errorCode ?? null
+}
+
+/** 取消项说明：明确“已取消（未开始）”，不透传 E_TIMEOUT/超时语义。 */
+export function jobItemCancelNote(item: JobVm['items'][number]): string {
+  if (item.state !== 'CANCELED') return ''
+  const message = (item.message ?? '').trim()
+  if (!message) return '已取消（未开始）'
+  if (/E_TIMEOUT|超时|timeout/i.test(message)) return '已取消（未开始）'
+  if (/未开始|未执行/.test(message)) return '已取消（未开始）'
+  return `已取消 · ${message}`
 }
 
 /** 进度百分比（ok+failed+skipped 已完成项；0 total 时为 0）。 */
