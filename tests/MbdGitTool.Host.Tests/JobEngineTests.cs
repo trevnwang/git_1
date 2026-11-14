@@ -1456,6 +1456,36 @@ public sealed class JobEngineTests
         });
     }
     [Fact]
+    public async Task RunBatch_Sync_RemoteBranchGone_RejectedZeroWrite()
+    {
+        using var fixture = BatchWorkspace.Create("CF211A_Gone_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        // 删除远端 main（模拟 UPSTREAM_GONE）。
+        var bare = fixture.Bares["CF211A_Gone_IMPL"];
+        TestGit.Run(bare, "update-ref", "-d", "refs/heads/main");
+        var clone = fixture.Clones["CF211A_Gone_IMPL"];
+        var head = TestGit.Capture(clone, "rev-parse", "HEAD");
+
+        var batch = await DispatchAsync(router, "runBatch", new
+        {
+            kind = "SYNC",
+            componentIds = new[] { "CF211A_Gone" },
+            repoTypes = new[] { "IMPL" },
+            args = new { confirm = true }
+        });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+        var item = Assert.Single(job.Items);
+        Assert.Equal("FAILED", item.State);
+        Assert.Equal(BridgeErrorCodes.RefNotFound, item.ErrorCode);
+        Assert.Equal(head, TestGit.Capture(clone, "rev-parse", "HEAD"));
+        Assert.Empty(TestGit.Capture(clone, "for-each-ref", "--format=%(refname)", "refs/backup/sync"));
+    }
+    [Fact]
     public async Task ComponentManagement_LocalDelete_RunsDeleteJobThenMarksDeleted()
     {
         using var fixture = BatchWorkspace.Create("CF210A_Del_IMPL");
