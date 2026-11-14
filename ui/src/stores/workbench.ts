@@ -527,6 +527,16 @@ function baseAvailability(): Record<RepoAction, ActionAvailability> {
 function availability(): Record<RepoAction, ActionAvailability> {
   const result = baseAvailability()
   const repo = focusedRepo()
+  // FR-REPO-05：真正 unborn 的 EMPTY 仓没有可推送提交；矩阵虽允许首推，UI 必须禁用并给出原因。
+  if (repo && repo.state === 'EMPTY' && !repo.headSha) {
+    result.PUSH = {
+      enabled: false,
+      reason: '空仓无提交：请先 COMMIT 生成首个提交后再 PUSH（首推将建立 upstream）',
+      confirm: false,
+      code: 'E_REF_NOT_FOUND',
+      alt: '先 COMMIT（含 message）生成首个提交，再 PUSH 发布分支',
+    }
+  }
   if (!repo || state.action.pending || !state.remoteOffline.offline) return result
   result.FETCH = {
     enabled: false,
@@ -891,7 +901,7 @@ function detectRemoteOffline(snapshot: SnapshotDto): OfflineStateVm {
   if (snapshot.offline === true) markers.push('Host 标记远程离线')
   if (snapshot.remoteError) markers.push(snapshot.remoteError)
   if (snapshot.error) markers.push(snapshot.error)
-  if (snapshot.freshness?.remoteStale) markers.push('远程数据过期/未就绪（当前仅有本地扫描）')
+  // 仅 source=local + remoteStale 不能判定离线（未配置 Gitea 的正常本地模式）；必须有显式错误/标记。
   for (const component of snapshot.components) {
     for (const repo of component.repos) {
       if (repo.errorCode && REMOTE_OFFLINE_ERROR.test(repo.errorCode)) {
@@ -2876,7 +2886,7 @@ function requestRestoreBackupRef(ref: BackupRefVm): void {
   const repoLabel = repoType
   openConfirm({
     title: '从备份 ref 恢复？',
-    body: `将把 ${componentId}/${repoLabel} 从当前状态恢复到备份 ref ${ref.ref}（${shortSha(ref.sha)}）。这会覆盖当前分支状态：恢复后本地 HEAD 指向备份 SHA，未包含在该备份中的未推送改动可能丢失。`,
+    body: `将把 ${componentId}/${repoLabel} 从当前状态恢复到备份 ref ${ref.ref}（${shortSha(ref.sha)}）。这会覆盖当前分支状态：恢复后本地 HEAD 指向备份 SHA，未包含在该备份中的未推送改动可能丢失。恢复前工作区必须干净（无已跟踪改动、无未跟踪/忽略文件），否则 Host 会拒绝且不改动任何文件。`,
     detail: `备份 ref：${ref.ref}\n备份 SHA：${ref.sha}\n本次操作会真实写入本地仓库（不写远端）。`,
     confirmLabel: '确认恢复',
     danger: true,

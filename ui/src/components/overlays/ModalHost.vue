@@ -344,7 +344,7 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_U
             <table class="audit-table" data-testid="audit-table">
               <thead>
                 <tr>
-                  <th>时间</th><th>actor</th><th>动作</th><th>组件</th><th>仓</th><th>结果</th><th>错误码</th><th>HEAD（前→后）</th><th>job</th>
+                  <th>时间</th><th>actor</th><th>动作</th><th>组件</th><th>仓</th><th>结果</th><th>错误码</th><th>HEAD（前→后）</th><th>job</th><th>备份</th>
                 </tr>
               </thead>
               <tbody>
@@ -374,6 +374,7 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_U
                     {{ shortSha(item.beforeHead) }} → {{ shortSha(item.afterHead) }}
                   </td>
                   <td class="mono truncate" :title="item.jobId ?? ''" data-testid="audit-job">{{ item.jobId || '—' }}</td>
+                  <td class="mono truncate" :title="item.backupRef ?? ''" data-testid="audit-backup-ref">{{ item.backupRef || '—' }}</td>
                 </tr>
               </tbody>
             </table>
