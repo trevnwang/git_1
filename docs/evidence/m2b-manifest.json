@@ -1,36 +1,36 @@
 {
-  "commit": "ec01cb9",
-  "generatedAt": "2026-11-14T23:37:16.482Z",
+  "commit": "527ab76",
+  "generatedAt": "2026-11-14T23:38:40.797Z",
   "suite": [
     {
       "name": "cdp-m2a-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2a-selfcheck.mjs",
-      "startedAt": "2026-11-14T23:35:55.818Z",
-      "finishedAt": "2026-11-14T23:35:59.507Z",
+      "startedAt": "2026-11-14T23:37:21.069Z",
+      "finishedAt": "2026-11-14T23:37:24.772Z",
       "result": "PASS",
       "artifact": "artifacts/m2a-selfcheck/result.json"
     },
     {
       "name": "cdp-m2b1-fix-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2b1-fix-selfcheck.mjs",
-      "startedAt": "2026-11-14T23:35:59.507Z",
-      "finishedAt": "2026-11-14T23:36:30.290Z",
-      "result": "PASS",
+      "startedAt": "2026-11-14T23:37:24.772Z",
+      "finishedAt": "2026-11-14T23:37:55.528Z",
+      "result": "FAIL",
       "artifact": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
       "name": "cdp-m2b2-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2b2-selfcheck.mjs",
-      "startedAt": "2026-11-14T23:36:30.290Z",
-      "finishedAt": "2026-11-14T23:37:03.697Z",
+      "startedAt": "2026-11-14T23:37:55.528Z",
+      "finishedAt": "2026-11-14T23:38:28.052Z",
       "result": "PASS",
       "artifact": "artifacts/m2b2-selfcheck/result.json"
     },
     {
       "name": "cdp-m2b2-realhost-check.mjs",
       "command": "node ui/scripts/cdp-m2b2-realhost-check.mjs",
-      "startedAt": "2026-11-14T23:37:03.736Z",
-      "finishedAt": "2026-11-14T23:37:16.430Z",
+      "startedAt": "2026-11-14T23:38:28.089Z",
+      "finishedAt": "2026-11-14T23:38:40.737Z",
       "result": "PASS",
       "artifact": "artifacts/m2b2-realhost/result.json"
     }
@@ -255,13 +255,13 @@
     {
       "suite": "cdp-m2b1-fix-selfcheck.mjs",
       "check": "task.history-dryrun-badge",
-      "status": "PASS",
+      "status": "FAIL",
       "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
       "suite": "cdp-m2b1-fix-selfcheck.mjs",
       "check": "task.history-dryrun-no-success-0",
-      "status": "PASS",
+      "status": "FAIL",
       "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
