@@ -11,6 +11,22 @@ const logLevel = ref('全部')
 
 const kind = computed(() => state.overlays.modal)
 const hostInfo = computed(() => state.hostInfo ?? mockHostInfo())
+const management = computed(() => state.management)
+const bindId = ref('')
+const bindDisplay = ref('')
+async function onBindComponent(): Promise<void> {
+  await w.bindComponent(bindId.value, bindDisplay.value)
+  bindId.value = ''
+  bindDisplay.value = ''
+}
+function onStopManage(componentId: string): void {
+  void w.unbindComponent(componentId, 'STOP_MANAGE')
+}
+function onLocalDelete(componentId: string): void {
+  const typed = window.prompt('将本地删除组件 ' + componentId + ' 的四个仓库（进 .trash，保留 30 天）。请输入组件 ID 确认：')
+  if (typed === null) return
+  void w.unbindComponent(componentId, 'LOCAL_DELETE', typed)
+}
 
 // ── M2b-2 操作审计（「日志与诊断」内嵌） ──
 const audit = computed(() => state.audit)
@@ -392,6 +408,30 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_U
       </div>
 
       <!-- 未绑定仓库 -->
+      <div v-else-if="kind === 'components'" class="modal-body" data-testid="components-modal">
+        <div class="section-title">组件管理</div>
+        <p class="hint">纳入时只读校验 Gitea 四仓；移出默认“停止管理”（保留本地目录），本地删除需输入组件 ID。</p>
+        <div class="form">
+          <label class="form-label">纳入组件</label>
+          <div class="inline">
+            <input v-model="bindId" class="input" data-testid="bind-component-id" placeholder="组件 ID" />
+            <input v-model="bindDisplay" class="input" data-testid="bind-component-name" placeholder="显示名（可选）" />
+            <button type="button" class="btn primary" data-testid="bind-component-submit" :disabled="!bindId.trim()" @click="onBindComponent">校验并纳入</button>
+          </div>
+        </div>
+        <p v-if="management.status === 'error'" class="fallback-note">⚠ {{ management.error }}</p>
+        <p v-else-if="management.status === 'loading'" class="hint">正在读取组件管理状态…</p>
+        <p v-else-if="management.items.length === 0" class="hint">暂无纳入/移出记录；扫描发现的组件默认纳管。</p>
+        <ul v-else class="management-list" data-testid="component-management-list">
+          <li v-for="item in management.items" :key="item.componentId" class="management-row" data-testid="component-management-row" :data-component-id="item.componentId">
+            <span class="mono truncate">{{ item.displayName || item.componentId }}</span>
+            <span class="muted">{{ item.isDeleted ? '已移出' : item.isManaged ? '纳管' : '停止管理' }}</span>
+            <button v-if="item.isManaged" type="button" class="btn" data-testid="unbind-stop" @click="onStopManage(item.componentId)">停止管理</button>
+            <button v-if="!item.isDeleted" type="button" class="btn danger" data-testid="unbind-delete" @click="onLocalDelete(item.componentId)">本地删除…</button>
+          </li>
+        </ul>
+      </div>
+
       <div v-else-if="kind === 'unbound'" class="modal-body">
         <div class="ci-empty">
           <div class="big">未绑定仓库（0）</div>

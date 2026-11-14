@@ -64,6 +64,7 @@ const BASE_MENUS: MenuDef[] = [
       { key: 'tools.tasks', label: '任务中心' },
       { key: 'tools.ci', label: 'CI 流水线' },
       { key: 'tools.unbound', label: '未绑定仓库' },
+    { key: 'tools.components', label: '组件管理' },
       { key: 'tools.logs', label: '日志与诊断' },
       { key: 'sep4', label: '', separator: true },
       { key: 'tools.settings', label: '设置', shortcut: 'Ctrl+,' },

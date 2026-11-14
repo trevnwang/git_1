@@ -551,6 +551,10 @@ export type RequestMethod =
   | 'getBackupRefs'
   | 'restoreBackupRef'
   | 'cleanupRetention'
+  | 'bindComponent'
+  | 'unbindComponent'
+  | 'getComponentManagement'
+  | 'undoCreate'
 
 export const TIMEOUTS: Record<RequestMethod, number> = {
   getSnapshot: 45_000,
@@ -577,6 +581,10 @@ export const TIMEOUTS: Record<RequestMethod, number> = {
   getBackupRefs: 10_000,
   restoreBackupRef: 120_000,
   cleanupRetention: 60_000,
+  bindComponent: 45_000,
+  unbindComponent: 120_000,
+  getComponentManagement: 5_000,
+  undoCreate: 60_000,
 }
 
 /** 旧入口默认超时（与 M1 保持一致）。 */
@@ -1862,6 +1870,20 @@ export const api = {
     if (filters.result) payload.result = filters.result
     if (filters.componentId) payload.componentId = filters.componentId
     return normalizeExportOperationLogResult(await request<unknown>('exportOperationLog', payload))
+  },
+  // ── M2b 组件管理（AC-OP-31/32 / AC-UI-16） ──
+  async bindComponent(componentId: string, displayName?: string): Promise<{ componentId: string; missingRepos: string[] }> {
+    const payload: Record<string, unknown> = { componentId }
+    if (displayName) payload.displayName = displayName
+    return (await request<unknown>('bindComponent', payload)) as { componentId: string; missingRepos: string[] }
+  },
+  async unbindComponent(componentId: string, mode: 'STOP_MANAGE' | 'LOCAL_DELETE', confirmText?: string): Promise<unknown> {
+    const payload: Record<string, unknown> = { componentId, mode }
+    if (confirmText) payload.confirmText = confirmText
+    return await request<unknown>('unbindComponent', payload)
+  },
+  async getComponentManagement(): Promise<{ items: Array<{ componentId: string; displayName?: string | null; isManaged: boolean; isDeleted: boolean; updatedAt?: string }> }> {
+    return (await request<unknown>('getComponentManagement', {})) as { items: Array<{ componentId: string; displayName?: string | null; isManaged: boolean; isDeleted: boolean; updatedAt?: string }> }
   },
   // ── M2b-2 备份 ref 恢复（按组件/仓列出 SYNC 备份 ref，确认后恢复） ──
   /** 按组件（可选仓类型）读取可恢复的备份 ref（契约 `{componentId,repoType?}` → `{refs}`）。 */

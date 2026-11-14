@@ -13,7 +13,7 @@ public sealed record GetComponentDetailParams(string? ComponentId = null);
 public sealed record BindComponentParams(string? ComponentId = null, string? DisplayName = null);
 
 /// <summary>M2b 组件移出参数（AC-OP-32）。</summary>
-public sealed record UnbindComponentParams(string? ComponentId = null, string? Mode = null);
+public sealed record UnbindComponentParams(string? ComponentId = null, string? Mode = null, string? ConfirmText = null);
 
 /// <summary>M2b CREATE 撤销参数（AC-OP-25）。</summary>
 public sealed record UndoCreateParams(string? JobId = null);

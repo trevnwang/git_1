@@ -375,9 +375,48 @@ public sealed class HostCommandRouter : IDisposable
                 var mode = parsedUnbind.Mode?.Trim().ToUpperInvariant();
                 if (mode == "LOCAL_DELETE")
                 {
-                    return CommandResult.Failure(
-                        BridgeErrorCodes.NotImplemented,
-                        "LOCAL_DELETE 请通过批量 DELETE job 执行（确认+输入组件 ID+四阻断+.trash）；完成后由扫描/管理状态收口");
+                    if (string.IsNullOrWhiteSpace(componentId))
+                        return CommandResult.Failure(BridgeErrorCodes.InvalidArgument, "缺少 componentId");
+                    if (!string.Equals(parsedUnbind.ConfirmText?.Trim(), componentId, StringComparison.Ordinal))
+                        return CommandResult.Failure(BridgeErrorCodes.ConfirmRequired, "LOCAL_DELETE 需输入组件 ID 强确认");
+                    var batchParams = new RunBatchParams(
+                        Kind: "DELETE",
+                        ComponentIds: new[] { componentId },
+                        RepoTypes: new[] { "DESIGN", "IMPL", "MIL", "SIL" },
+                        Args: new Dictionary<string, System.Text.Json.JsonElement>
+                        {
+                            ["confirm"] = System.Text.Json.JsonSerializer.SerializeToElement(true),
+                            ["confirmText"] = System.Text.Json.JsonSerializer.SerializeToElement(componentId),
+                        });
+                    var accepted = _jobs.RunBatch(batchParams);
+                    if (!accepted.Ok) return accepted;
+                    var acceptedData = accepted.Data;
+                    var jobId = acceptedData?.GetType().GetProperty("JobId")?.GetValue(acceptedData)?.ToString();
+                    if (string.IsNullOrWhiteSpace(jobId))
+                        return CommandResult.Failure(BridgeErrorCodes.Internal, "DELETE 作业未返回 jobId");
+                    JobDto? job = null;
+                    for (var i = 0; i < 240; i++)
+                    {
+                        var polled = _jobs.GetJob(new GetJobParams(jobId));
+                        if (!polled.Ok) return polled;
+                        job = polled.Data as JobDto;
+                        if (job is not null && job.State is "SUCCESS" or "PARTIAL" or "FAILED" or "CANCELED" or "INTERRUPTED") break;
+                        await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                    }
+                    if (job is null) return CommandResult.Failure(BridgeErrorCodes.Timeout, "DELETE 作业等待超时");
+                    var allDeleted = job.Items.All(item => item.State is "OK" or "SKIPPED");
+                    if (!allDeleted || job.State != "SUCCESS")
+                    {
+                        _audit.Record("COMPONENT_UNBIND", componentId, null, null, null, null, false,
+                            "E_DELETE_PENDING", 0, actor: Environment.UserName,
+                            requestId: Guid.NewGuid().ToString("N"), jobId: jobId, result: job.State);
+                        return CommandResult.Success(new { componentId, mode = "LOCAL_DELETE", jobId, state = job.State, isManaged = true, isDeleted = false, items = job.Items });
+                    }
+                    var (markOk, markError) = _management.MarkDeleted(componentId);
+                    if (!markOk) return CommandResult.Failure(markError!);
+                    _audit.Record("COMPONENT_UNBIND", componentId, null, null, null, null, true,
+                        null, 0, actor: Environment.UserName, requestId: Guid.NewGuid().ToString("N"), jobId: jobId, result: "OK");
+                    return CommandResult.Success(new { componentId, mode = "LOCAL_DELETE", jobId, state = job.State, isManaged = false, isDeleted = true, items = job.Items });
                 }
                 if (mode is not (null or "STOP_MANAGE"))
                     return CommandResult.Failure(BridgeErrorCodes.InvalidArgument, "mode 必须是 STOP_MANAGE 或 LOCAL_DELETE");

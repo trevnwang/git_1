@@ -1456,6 +1456,31 @@ public sealed class JobEngineTests
         });
     }
     [Fact]
+    public async Task ComponentManagement_LocalDelete_RunsDeleteJobThenMarksDeleted()
+    {
+        using var fixture = BatchWorkspace.Create("CF210A_Del_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var noConfirm = await DispatchAsync(router, "unbindComponent", new { componentId = "CF210A_Del", mode = "LOCAL_DELETE" });
+        Assert.False(noConfirm.Ok);
+        Assert.Equal(BridgeErrorCodes.ConfirmRequired, noConfirm.Error!.Code);
+
+        var result = await DispatchAsync(router, "unbindComponent", new
+        {
+            componentId = "CF210A_Del",
+            mode = "LOCAL_DELETE",
+            confirmText = "CF210A_Del"
+        });
+        Assert.True(result.Ok, result.Error?.Code);
+        Assert.False(Directory.Exists(Path.Combine(fixture.Root, "CF210A_Del_IMPL")));
+        var management = await DispatchAsync(router, "getComponentManagement", null);
+        var json = System.Text.Json.JsonSerializer.Serialize(management.Data, WebJson);
+        Assert.Contains("\"isDeleted\":true", json.Replace(" ", string.Empty), StringComparison.OrdinalIgnoreCase);
+    }
+    [Fact]
     public async Task ComponentManagement_StopManage_FiltersSnapshotAndListsState()
     {
         using var fixture = BatchWorkspace.Create("CF208A_Mgmt_IMPL");

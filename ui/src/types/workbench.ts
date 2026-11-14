@@ -24,6 +24,7 @@ export type ModalKind =
   | 'settings'
   | 'logs'
   | 'unbound'
+  | 'components'
   | 'about'
   | 'shortcuts'
 

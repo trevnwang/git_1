@@ -79,6 +79,15 @@ public sealed class ComponentManagementService
         return ok ? (true, null) : (false, new BridgeError(BridgeErrorCodes.Internal, "组件管理状态写入失败"));
     }
 
+    /// <summary>LOCAL_DELETE 全部成功/已不存在后标记已移出。</summary>
+    public (bool Ok, BridgeError? Error) MarkDeleted(string componentId)
+    {
+        var ok = _database.UpsertComponentManagement(new AuditDatabase.ComponentManagementRecord(
+            componentId, null, IsManaged: false, IsDeleted: true,
+            UpdatedAt: DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)));
+        return ok ? (true, null) : (false, new BridgeError(BridgeErrorCodes.Internal, "组件管理状态写入失败"));
+    }
+
     /// <summary>默认视图：只保留 is_managed=1 且 is_deleted=0；无记录视为默认管理（兼容旧安装）。</summary>
     public IReadOnlyList<string> HiddenComponentIds()
     {

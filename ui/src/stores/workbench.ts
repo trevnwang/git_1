@@ -191,6 +191,11 @@ interface WorkbenchState {
     exportError: string
   }
   // ── M2b-2 备份 ref 恢复 ──
+  management: {
+    status: 'idle' | 'loading' | 'ready' | 'error'
+    items: Array<{ componentId: string; displayName: string; isManaged: boolean; isDeleted: boolean; updatedAt: string }>
+    error: string
+  }
   backupRefs: {
     status: 'idle' | 'loading' | 'ready' | 'error' | 'unavailable'
     componentId: string
@@ -415,6 +420,7 @@ const state = reactive<WorkbenchState>({
     lastExport: null,
     exportError: '',
   },
+  management: { status: 'idle', items: [], error: '' },
   backupRefs: {
     status: 'idle',
     componentId: '',
@@ -673,6 +679,7 @@ function openModal(kind: ModalKind): void {
   if (kind === 'ci' && state.hostLinked && !state.mockFallback) void refreshCi()
   // 「日志与诊断」内嵌操作审计：打开时按当前过滤条件重新拉取（Host 未实现时显示不可用态，不伪造数据）。
   if (kind === 'logs') void refreshOperationLog(true)
+  if (kind === 'components') void loadComponentManagement()
 }
 
 function closeModal(): void {
@@ -2833,6 +2840,54 @@ async function fallbackCopyExportPath(path: string, reason: string): Promise<voi
  * 按组件 + 仓类型加载可恢复备份 ref（Host `getBackupRefs`）。
  * 无备份为空态；接口不可用/失败为 unavailable/error 空态，绝不伪造 ref。
  */
+/** 组件管理（AC-UI-16）：加载/纳入/移出；Host 不可用时不伪造。 */
+async function loadComponentManagement(): Promise<void> {
+  state.management = { ...state.management, status: 'loading', error: '' }
+  try {
+    if (!hasHostBridge() || state.mockFallback) {
+      state.management = { status: 'ready', items: [], error: '' }
+      return
+    }
+    const data = await api.getComponentManagement()
+    state.management = {
+      status: 'ready',
+      items: data.items.map((item) => ({
+        componentId: item.componentId,
+        displayName: item.displayName ?? item.componentId,
+        isManaged: item.isManaged,
+        isDeleted: item.isDeleted,
+        updatedAt: item.updatedAt ?? '',
+      })),
+      error: '',
+    }
+  } catch (error) {
+    state.management = { status: 'error', items: [], error: toErrorMessage(error) }
+  }
+}
+
+async function bindComponent(componentId: string, displayName?: string): Promise<void> {
+  const id = componentId.trim()
+  if (!id) return
+  try {
+    const result = await api.bindComponent(id, displayName?.trim() || undefined)
+    notify(`已纳入组件 ${result.componentId}${result.missingRepos?.length ? `；缺仓 ${result.missingRepos.length} 个` : ''}`, result.missingRepos?.length ? 'warning' : 'success')
+    await loadComponentManagement()
+    await refresh()
+  } catch (error) {
+    notify(`纳入失败：${toErrorMessage(error)}`, 'error')
+  }
+}
+
+async function unbindComponent(componentId: string, mode: 'STOP_MANAGE' | 'LOCAL_DELETE', confirmText?: string): Promise<void> {
+  try {
+    await api.unbindComponent(componentId, mode, confirmText)
+    notify(mode === 'STOP_MANAGE' ? `已停止管理 ${componentId}` : `已本地删除 ${componentId}`, 'success')
+    await loadComponentManagement()
+    await refresh()
+  } catch (error) {
+    notify(`移出失败：${toErrorMessage(error)}`, 'error')
+  }
+}
 async function loadBackupRefs(componentId: string, repoType?: RepoType): Promise<void> {
   if (!componentId) {
     backupRefsSeq += 1
@@ -3615,6 +3670,9 @@ export interface WorkbenchStore {
   exportAudit: typeof exportAudit
   openAuditExportDir: typeof openAuditExportDir
   loadBackupRefs: typeof loadBackupRefs
+  loadComponentManagement: typeof loadComponentManagement
+  bindComponent: typeof bindComponent
+  unbindComponent: typeof unbindComponent
   requestRestoreBackupRef: typeof requestRestoreBackupRef
   executeRestoreBackupRef: typeof executeRestoreBackupRef
   notifyAction: typeof notifyAction
@@ -3738,6 +3796,9 @@ export const workbench: WorkbenchStore = {
   exportAudit,
   openAuditExportDir,
   loadBackupRefs,
+  loadComponentManagement,
+  bindComponent,
+  unbindComponent,
   requestRestoreBackupRef,
   executeRestoreBackupRef,
   notifyAction,
