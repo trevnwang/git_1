@@ -166,16 +166,17 @@ public sealed class BackupRefService
                 new Dictionary<string, object?> { ["ref"] = refText }));
         }
 
-        // 2) 脏工作区策略：有跟踪文件改动时默认阻断（reset --hard 会丢弃）；untracked 不受 reset 影响。
-        var status = await _git
+        // 2) 脏工作区策略（FR-OP-11/AC-OP-30/FR-SAFE-01）：tracked + untracked + ignored 均阻断。
+        // reset --hard 会覆盖/删除挡路的 untracked/ignored 文件；恢复前必须让用户先处理，禁止静默丢失。
+        var tracked = await _git
             .RunAsync(path, new[] { "status", "--porcelain", "--untracked-files=no" }, cancellationToken)
             .ConfigureAwait(false);
-        if (!status.Success)
+        if (!tracked.Success)
         {
-            return (null, GitFailure("读取工作区状态失败", status));
+            return (null, GitFailure("读取工作区状态失败", tracked));
         }
 
-        if (status.Stdout.Trim().Length > 0)
+        if (tracked.Stdout.Trim().Length > 0)
         {
             return (null, new BridgeError(
                 BridgeErrorCodes.DirtyWorktree,
@@ -183,8 +184,31 @@ public sealed class BackupRefService
                 new Dictionary<string, object?>
                 {
                     ["ref"] = refText,
-                    ["dirtyFiles"] = status.Stdout
+                    ["dirtyFiles"] = tracked.Stdout
                         .Split('\n', StringSplitOptions.RemoveEmptyEntries).Length
+                }));
+        }
+
+        // 2b) untracked/ignored 也可能被 reset --hard 覆盖/删除：默认阻断（FR-OP-11/AC-OP-30）。
+        var untracked = await _git
+            .RunAsync(path, new[] { "status", "--porcelain", "--untracked-files=normal", "--ignored=matching" }, cancellationToken)
+            .ConfigureAwait(false);
+        if (!untracked.Success)
+        {
+            return (null, GitFailure("读取工作区状态失败", untracked));
+        }
+
+        if (untracked.Stdout.Trim().Length > 0)
+        {
+            return (null, new BridgeError(
+                BridgeErrorCodes.WorktreeOverwrite,
+                "工作区存在未跟踪/忽略文件，restore 可能覆盖或删除它们；请先移走后重试（未改动任何文件）",
+                new Dictionary<string, object?>
+                {
+                    ["ref"] = refText,
+                    ["untrackedFiles"] = untracked.Stdout
+                        .Split('\n', StringSplitOptions.RemoveEmptyEntries).Length,
+                    ["requiresCommit"] = false
                 }));
         }
 
@@ -196,7 +220,7 @@ public sealed class BackupRefService
         string? safetyRef = null;
         if (preHead is not null)
         {
-            var safetyStamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+            var safetyStamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N")[..8];
             safetyRef = RestoreRefPrefix + safetyStamp + "/" + normalizedType;
             var updateSafety = await _git
                 .RunAsync(path, new[] { "update-ref", safetyRef, preHead }, cancellationToken, WriteTimeout)

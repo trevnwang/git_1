@@ -134,7 +134,7 @@ public sealed class M2b2BackupRefTests : IDisposable
     }
 
     [Fact]
-    public async Task Restore_UntrackedFileIsPreserved()
+    public async Task Restore_UntrackedFile_IsBlockedAndPreserved()
     {
         var repo = CreateRepoWithCommits(out var first, out _);
         var stamp = DaysAgo(1);
@@ -145,8 +145,8 @@ public sealed class M2b2BackupRefTests : IDisposable
         var (result, error) = await new BackupRefService().RestoreAsync(
             repo, "IMPL", $"refs/backup/sync/{stamp}/IMPL", CancellationToken.None);
 
-        Assert.Null(error);
-        Assert.True(result!.Restored);
+        Assert.Null(result);
+        Assert.Equal(BridgeErrorCodes.WorktreeOverwrite, error!.Code);
         Assert.Equal("untracked", File.ReadAllText(untracked));
     }
 

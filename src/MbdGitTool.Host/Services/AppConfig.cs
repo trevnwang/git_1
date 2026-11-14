@@ -76,7 +76,7 @@ public sealed record AppConfig
     public string? LoadError { get; init; }
 
     /// <summary>规范化审计保留天数（缺省/越界回落到默认；读取方也应按范围夹取）。</summary>
-    public int EffectiveAuditRetentionDays => ClampDays(AuditRetentionDays, DefaultAuditRetentionDays, min: 1, max: 3650);
+    public int EffectiveAuditRetentionDays => ClampDays(AuditRetentionDays, DefaultAuditRetentionDays, min: 90, max: 3650);
 
     /// <summary>规范化备份 ref 保留天数（附录 D：7–90；缺省/越界回落到默认）。</summary>
     public int EffectiveBackupRetentionDays => ClampDays(BackupRetentionDays, DefaultBackupRetentionDays, min: 7, max: 90);
@@ -149,7 +149,7 @@ public sealed record AppConfig
             GiteaOrg = Normalize(org),
             GiteaToken = string.IsNullOrWhiteSpace(token) ? null : token.Trim(),
             AllowInsecureHttp = allowInsecure,
-            AuditRetentionDays = ClampDays(auditRetention, DefaultAuditRetentionDays, min: 1, max: 3650),
+            AuditRetentionDays = ClampDays(auditRetention, DefaultAuditRetentionDays, min: 90, max: 3650),
             BackupRetentionDays = ClampDays(backupRetention, DefaultBackupRetentionDays, min: 7, max: 90),
             LoadError = loadError
         };

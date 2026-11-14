@@ -59,6 +59,9 @@ public sealed class OperationAuditService
 
     private readonly object _sync;
     private readonly int _auditRetentionDays;
+    private static string? _testIsolationRoot;
+    /// <summary>测试模块初始化调用：把默认审计库/导出目录固定到临时根，避免污染真实 %LOCALAPPDATA%。</summary>
+    public static void ConfigureTestIsolation(string root) => _testIsolationRoot = root;
 
     /// <summary>按配置创建（<see cref="AppConfig.AuditRoot"/>/<see cref="AppConfig.DatabasePath"/> 可注入）。</summary>
     public OperationAuditService(AppConfig? config = null)
@@ -81,6 +84,11 @@ public sealed class OperationAuditService
             return config!.DatabasePath;
         }
 
+        if (_testIsolationRoot is not null)
+        {
+            return Path.Combine(_testIsolationRoot, "db", AuditDatabase.DatabaseFileName);
+        }
+
         return string.IsNullOrWhiteSpace(config?.AuditRoot)
             ? null
             : Path.Combine(config!.AuditRoot!.Trim(), AuditDatabase.DatabaseFileName);
@@ -92,6 +100,11 @@ public sealed class OperationAuditService
         if (!string.IsNullOrWhiteSpace(config?.ExportsRoot))
         {
             return config!.ExportsRoot;
+        }
+
+        if (_testIsolationRoot is not null)
+        {
+            return Path.Combine(_testIsolationRoot, "exports");
         }
 
         return string.IsNullOrWhiteSpace(config?.AuditRoot)
