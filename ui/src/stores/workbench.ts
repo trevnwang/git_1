@@ -3438,6 +3438,9 @@ function command(key: string): void {
     case 'tools.unbound':
       openModal('unbound')
       break
+    case 'tools.components':
+      openModal('components')
+      break
     case 'tools.logs':
       openModal('logs')
       break
