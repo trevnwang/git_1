@@ -56,6 +56,9 @@ public static class BridgeErrorCodes
     public const string Network = "E_NETWORK";
     public const string DiskFull = "E_DISK_FULL";
     public const string PathTooLong = "E_PATH_TOO_LONG";
+    public const string DeletePending = "E_DELETE_PENDING";
+    public const string RepairFailed = "E_REPAIR_FAILED";
+    public const string RecloneFailed = "E_RECLONE_FAILED";
 }
 
 /// <summary>桥错误：<c>code</c> 稳定错误码 + 人类可读 <c>message</c> + 可选 <c>details</c>（诊断/确认流程）。</summary>

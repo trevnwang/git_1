@@ -1389,6 +1389,38 @@ public sealed class JobEngineTests
         }
     }
     [Fact]
+    public async Task Delete_FileLocked_WritesPendingAndRetrySucceeds()
+    {
+        using var fixture = BatchWorkspace.Create("CF207A_Pending_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        var clone = fixture.Clones["CF207A_Pending_IMPL"];
+        var head = TestGit.Capture(clone, "rev-parse", "HEAD");
+        var repoRef = MakeRepoRef("CF207A_Pending", "IMPL", clone, "SYNCED", head);
+        var batch = new BatchOperationService(config, new RepoActionService(config: config), paths: new PathPolicy(fixture.Root));
+        var args = new StoredJobArguments(null, null, null, true, false, false, false, false, false, null, "CF207A_Pending");
+        Environment.SetEnvironmentVariable("MBD_FAULT_INJECT", "DIR_MOVE_BUSY");
+        BatchItemResult blocked;
+        try
+        {
+            blocked = await batch.DeleteAsync(repoRef, "CF207A_Pending", "IMPL", args, CancellationToken.None);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("MBD_FAULT_INJECT", null);
+        }
+        Assert.Equal(JobItemStates.Failed, blocked.State);
+        Assert.Equal(BridgeErrorCodes.DeletePending, blocked.ErrorCode);
+        Assert.True(Directory.Exists(clone));
+        var pending = Path.Combine(fixture.Root, ".trash", ".pending");
+        Assert.True(Directory.Exists(pending));
+        Assert.NotEmpty(Directory.GetFiles(pending, "*-CF207A_Pending_IMPL.json"));
+
+        var retry = await batch.DeleteAsync(repoRef, "CF207A_Pending", "IMPL", args, CancellationToken.None);
+        Assert.Equal(JobItemStates.Ok, retry.State);
+        Assert.False(Directory.Exists(clone));
+        Assert.Empty(Directory.GetFiles(pending, "*-CF207A_Pending_IMPL.json"));
+    }
+    [Fact]
     public async Task RunBatch_ExternalIndexLock_ReturnsBusyWithoutWriteOrDeletingLock()
     {
         using var fixture = BatchWorkspace.Create("CF204A_Lock_IMPL");

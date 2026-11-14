@@ -574,6 +574,13 @@ public sealed partial class BatchOperationService
         try
         {
             Directory.CreateDirectory(trashRoot);
+            // 测试/故障注入：DIR_MOVE_BUSY 仅在 Debug/Test 构建生效（§16.6）。
+#if DEBUG
+            if (string.Equals(Environment.GetEnvironmentVariable("MBD_FAULT_INJECT"), "DIR_MOVE_BUSY", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("injected DIR_MOVE_BUSY");
+            }
+#endif
             MoveDirectory(localPath, destination);
         }
         catch (Exception ex) when (ex is IOException
@@ -581,10 +588,20 @@ public sealed partial class BatchOperationService
             or NotSupportedException
             or ArgumentException)
         {
-            return Failed(
-                BridgeErrorCodes.IoError,
-                $"软删除失败（{ex.GetType().Name}）：{repoName}；源仓库保持不变");
+            // AC-OP-23 / FR-OP-06：可恢复占用 → 保留目录并写 pending 记录；重试会重新预检。
+            var pending = TryWriteDeletePending(_paths.Root, stamp, componentId, repoType, repoName, localPath, ex);
+            return new BatchItemResult(
+                JobItemStates.Failed,
+                BridgeErrorCodes.DeletePending,
+                $"软删除被占用/拒绝（{ex.GetType().Name}）：{repoName}；目录与文件保持不变"
+                + (pending is null ? "；pending 记录写入失败" : $"；pending 记录：{pending}"),
+                preHead,
+                preHead,
+                null);
         }
+
+        // 成功删除后清理该仓旧 pending 记录（同仓重试成功）。
+        ClearDeletePending(_paths.Root, repoName);
 
         var relativeTrash = TrashDirectoryName + "/" + stamp + "/" + Path.GetFileName(destination);
         var message = $"已软删除到 .trash（保留 {RetentionDays} 天，可 RESTORE）：{relativeTrash}；远端仓库未改动";
@@ -1203,6 +1220,63 @@ public sealed partial class BatchOperationService
             : 0;
         notes.Add($"stash：{stashCount} 条；影响仓：1（本仓）");
         return notes;
+    }
+    /// <summary>AC-OP-23：写 `<workspace>/.trash/.pending/<stamp>-<repo>.json`；失败返回 null。</summary>
+    private static string? TryWriteDeletePending(
+        string workspaceRoot,
+        string stamp,
+        string componentId,
+        string repoType,
+        string repoName,
+        string localPath,
+        Exception error)
+    {
+        try
+        {
+            var pendingDir = Path.Combine(workspaceRoot, TrashDirectoryName, ".pending");
+            Directory.CreateDirectory(pendingDir);
+            var file = Path.Combine(pendingDir, stamp + "-" + SanitizeFileName(repoName) + ".json");
+            var payload = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                componentId,
+                repoType,
+                repoName,
+                localPath,
+                errorCode = BridgeErrorCodes.DeletePending,
+                errorType = error.GetType().Name,
+                createdAt = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+            });
+            File.WriteAllText(file, payload, new System.Text.UTF8Encoding(false));
+            return TrashDirectoryName + "/.pending/" + Path.GetFileName(file);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            HostLog.Warn($"写 DELETE_PENDING 记录失败（{ex.GetType().Name}）：{repoName}");
+            return null;
+        }
+    }
+
+    private static void ClearDeletePending(string workspaceRoot, string repoName)
+    {
+        try
+        {
+            var pendingDir = Path.Combine(workspaceRoot, TrashDirectoryName, ".pending");
+            if (!Directory.Exists(pendingDir)) return;
+            foreach (var file in Directory.EnumerateFiles(pendingDir, "*-" + SanitizeFileName(repoName) + ".json"))
+            {
+                File.Delete(file);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            HostLog.Warn($"清理 DELETE_PENDING 记录失败（{ex.GetType().Name}）");
+        }
+    }
+
+    private static string SanitizeFileName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        return new string(value.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
     }
     // ---------------------------------------------------------------- .trash 保留期清理
 
