@@ -14,10 +14,13 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { requireGiteaOrSkip } from './lib/gitea-gate.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const outDir = join(here, '..', '..', 'artifacts', 'm2b2-realhost')
 mkdirSync(outDir, { recursive: true })
+// 换机器时 192.168.50.20 可能不可达：真实 Gitea 自检必须跳过而不是失败。
+await requireGiteaOrSkip('cdp-m2b2-realhost-check', outDir)
 const port = Number(process.argv[2] ?? 9222)
 
 const results = []
