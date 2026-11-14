@@ -42,7 +42,10 @@ public sealed record ComponentRepoDto(
     IReadOnlyList<RepoActionAvailabilityDto> Actions,
     CiHintDto? Ci);
 
-/// <summary>单仓操作可用性（M2：enabled = matrixAllowed；矩阵取 spec §6.2 / SRS §7.6）。</summary>
+/// <summary>
+/// 单仓操作可用性（M2：enabled = matrixAllowed；矩阵取 spec §6.2 / SRS §7.6）。
+/// <para><c>RequiresConfirm</c>：COMMIT/PUSH 恒为 true（SRS §7.6 冻结 C / ADR AC-UI-08），其余取矩阵 C。</para>
+/// </summary>
 public sealed record RepoActionAvailabilityDto(
     string Action,
     bool Enabled,

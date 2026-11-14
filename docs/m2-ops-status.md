@@ -1,8 +1,10 @@
 # M2 单仓操作阶段报告（2026-11-14）
 
-> **Gate 状态（2026-11-14 13:25）：三路对抗评审完成，结论「不通过」；`m2-ops` tag 已撤销，本文件不代表已签收。**
-> 评审报告：`docs/review-m2-code.md`（P0=1/P1=8）、`docs/review-m2-req.md`（P0=12/P1=10）、`docs/review-m2-ux-fixcheck.md`（P0 闭环 2/8，新 P0=1）。
-> 需先修安全 P0（PAT origin 绑定）、确认条/PUSH 确认、焦点、tooltip 错误码、CHKOUT 数据源等并复评通过后才能打 tag。
+> **Gate 状态（2026-11-14 14:25 更新）：M2a 待复评（修复中）**；`m2-ops` tag 已撤销，本文件不代表已签收，也**不得**被引用为“M2a/M2 已通过”。
+> Gate 复评报告：`docs/review-m2-gate-ux.md`（5 PASS/1 FAIL；G-P0-1…G-P0-5，UX P0 行为层已闭环但 M2a 出口未满足）、`docs/review-m2-gate-security.md`（原 6 项 PASS，新 P1=N-1：AC-SAFE-17 未全绿；N-2 需在验收报告交代）。
+> 当前阻断：N-1（PULL 显式分支）、N-2（read-through 重扫）、G-P0-1（矩阵单源/RequiresConfirm）、G-P0-2（审计-lite）、G-P0-3（M2b 边界文案）、G-P0-5（状态栏模板）、G-P1-1（COMMIT 确认条文案）。
+> 本轮（gate-fix-docs，仅文档/夹具，不改代码）已补齐 M2a 出口 AC 的**可验收材料**：SRS v0.3.1-r2 **§13.1.2**（AC-UI-10a/10b/10c/15、AC-SAFE-14…17、AC-OP-33 的完整 Given/When/Then）、单源夹具 `reqs/v0.2/fixtures/m2-matrix.json`、验收证据模板 `docs/m2a-ac-report.md`、CDP 断言清单占位 `ui/scripts/cdp-m2a-selfcheck.mjs`（旧 `cdp-m2-selfcheck.mjs` 作废）。**材料齐全 ≠ AC 通过**；代码侧修复在并行进行，未合入，复评后再另写签收结论。
+> 需先关闭上述阻断并在**真实 Host + 真实 Gitea** 上补五键写证据、复跑 CDP/Host 单测后，才能打 `m2a` tag；M2a 通过也不得宣告“M2 交付完成”（M2b 未接入）。
 
 > 阶段：S6（PULL / FETCH / CHKOUT / COMMIT / PUSH 从 M1 只读升级为真实可用）
 > 验证环境：真实 Gitea `RTCRepos` + 本地工作区 `artifacts/real-test/workspace`（15 仓，真实提交/推送）。
@@ -58,8 +60,20 @@
 
 ## 5. 已知未完成（下一阶段）
 
-1. 确认条形态（spec FR-ACT-04 的 ≤48px 内联 confirm bar）与 PUSH 发布分支/upstream 文案。
-2. CHKOUT 分支选择器接入 remote_ref/Tag 列表、搜索、stash 选项。
-3. 禁用 tooltip 错误码、替代动作；状态栏模板/版本号与 Host appVersion 对齐。
-4. 批量写操作（SYNC/CREATE/Clone/Delete）、任务中心作业化（job/JOB_UPDATED）。
-5. CI 接入（v2）、GitWorker 命名管道迁移、M3 收口。
+1. 确认条形态（spec FR-ACT-04 的 ≤48px 内联 confirm bar）与 PUSH 发布分支/upstream 文案。**（Gate 复评：PUSH/COMMIT 确认条已实现且行为 PASS，但 COMMIT 文案未对齐冻结正则 G-P1-1；见 `docs/review-m2-gate-ux.md` §3.1）**
+2. CHKOUT 分支选择器接入 remote_ref/Tag 列表、搜索、stash 选项。**（Gate 复评：已实现并在真实 Host 验证；P2 残留 refs 含 `origin/HEAD`）**
+3. 禁用 tooltip 错误码、替代动作；状态栏模板/版本号与 Host appVersion 对齐。**（tooltip 已实现，冻结格式按实现回写为 `原因 [E_*] → 替代动作`；状态栏模板 G-P0-5 未交付）**
+4. 批量写操作（SYNC/CREATE/Clone/Delete）、任务中心作业化（job/JOB_UPDATED）。**（归 M2b；M2a 构建须明示“M2b 未接入（批量/作业/审计）”，当前仍未改文案 G-P0-3）**
+5. 审计-lite / 矩阵单源 / M2a 出口 AC 证据链：见 §6。
+6. CI 接入（v2）、GitWorker 命名管道迁移、M3 收口。
+
+## 6. M2a Gate 复评与修复轮记录（2026-11-14）
+
+| 时间 | 事件 | 结论/产物 |
+|---|---|---|
+| 14:07–14:20 | `docs/review-m2-gate-ux.md` Gate 复评（UX/需求） | 行为层 UX P0 5/5 闭环；但 M2a 出口 5 项 Gate P0 未满足（G-P0-1…5），SRS §13.1.2 缺失、三件证据全缺 → **不建议打 tag** |
+| 14:07–14:20 | `docs/review-m2-gate-security.md` Gate 复评（安全/代码） | 原 P0/P1 6/6 关闭；**新 P1 N-1**（AC-SAFE-17 PULL 显式分支）阻断 M2a；N-2（read-through）需在验收报告交代 → **不建议打 tag** |
+| 14:19–14:30 | 文档回写（本文件更新者 gate-fix-docs） | 新增 SRS §13.1.2（9 条 AC）、`reqs/v0.2/fixtures/m2-matrix.json`、`docs/m2a-ac-report.md`、`ui/scripts/cdp-m2a-selfcheck.mjs`（占位）；ADR §5/§6 同步 tooltip 冻结格式与 AC-UI-10a 两步口径；**未执行代码修复/真实写/CDP** |
+| 并行中 | 代码修复（安全 N-1/审计/确认标志、矩阵单源/状态栏/M2b 文案） | 未合入；复评前不得更新本文件 Gate 结论 |
+
+> **复评前置**：① 代码修复合入并通过 262+ 单测；② `docs/m2a-ac-report.md` 13 条 AC 状态更新、真实 Gitea 五键写证据齐全；③ `cdp-m2a-selfcheck.mjs` 实现并跑出 exit 0（附输出）；④ N-1/N-2/G-P0-1…5/G-P1-1 关闭或按 ADR 修订口径记录。四项齐备后由 Gate 复评另写报告，本文件才可更新为“M2a 已通过（M2b 未接入）”。

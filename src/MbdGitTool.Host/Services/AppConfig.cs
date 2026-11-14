@@ -29,6 +29,13 @@ public sealed record AppConfig
     /// </summary>
     public bool AllowInsecureHttp { get; init; }
 
+    /// <summary>
+    /// 审计-lite（G-P0-2/AC-OP-33）目录；为空时使用默认
+    /// <c>%LOCALAPPDATA%\MbdGitTool\audit</c>（文件 <c>operations.jsonl</c>）。
+    /// <para>仅供测试/诊断注入临时目录，不写入 token 等敏感信息。</para>
+    /// </summary>
+    public string? AuditRoot { get; init; }
+
     /// <summary>配置加载问题（文件缺失/JSON 非法等）；不影响环境变量覆盖后的可用配置。</summary>
     public string? LoadError { get; init; }
 

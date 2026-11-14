@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useWorkbench } from '../../stores/workbench'
+import { M2B_BOUNDARY_TEXT } from '../../viewmodel'
 
 const w = useWorkbench()
 const state = w.state
@@ -24,10 +25,10 @@ const repoCount = computed(() => state.checkedIds.length * 4)
     <template v-else>
       <span class="count" :title="`已选 ${checkedCount} 组件 / ${repoCount} 仓`">{{ checkedCount }}/{{ state.components.length }}</span>
       <div class="commands">
-        <button type="button" class="batch-btn" title="SYNC（M2 接入）" @click="w.batchCommand('SYNC')">⟳</button>
-        <button type="button" class="batch-btn" title="CREATE（M2 接入）" @click="w.batchCommand('CREATE')">＋</button>
-        <button type="button" class="batch-btn" title="Clone 缺失仓（M2 接入）" @click="w.batchCommand('CLONE')">⤓</button>
-        <button type="button" class="batch-btn danger" title="删除 / 恢复 / 纳入 / 移出（M2 接入）" @click="w.batchCommand('DELETE')">⋯</button>
+        <button type="button" class="batch-btn" data-testid="batch-sync" :title="`SYNC：${M2B_BOUNDARY_TEXT}`" @click="w.batchCommand('SYNC')">⟳</button>
+        <button type="button" class="batch-btn" data-testid="batch-create" :title="`CREATE：${M2B_BOUNDARY_TEXT}`" @click="w.batchCommand('CREATE')">＋</button>
+        <button type="button" class="batch-btn" data-testid="batch-clone" :title="`Clone 缺失仓：${M2B_BOUNDARY_TEXT}`" @click="w.batchCommand('CLONE')">⤓</button>
+        <button type="button" class="batch-btn danger" data-testid="batch-delete" :title="`删除 / 恢复 / 纳入 / 移出：${M2B_BOUNDARY_TEXT}`" @click="w.batchCommand('DELETE')">⋯</button>
       </div>
       <button type="button" class="batch-btn" title="全选筛选结果" @click="w.selectAllVisible()">全</button>
       <button type="button" class="close-btn" data-testid="batch-select-toggle" title="退出批量选择" @click="w.clearChecked()">✕</button>

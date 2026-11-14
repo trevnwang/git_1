@@ -62,7 +62,7 @@ function title(action: (typeof REPO_ACTIONS)[number]): string {
     if (action === 'CHKOUT') return `${base} · ${scopeText}（执行前弹出分支/Tag 输入对话框）`
     return `${base} · ${scopeText}（免确认，直接执行）`
   }
-  // 禁用 tooltip 三段式：原因 [E_*] → 替代动作（FR-ACT-02 / AC-UI-08）。
+  // 禁用 tooltip 冻结格式（v0.3.1-r2）：`原因 [E_*] → 替代动作`（FR-ACT-02 / AC-UI-08）。
   return actionDisabledTitle(cell.reason, cell.code, cell.alt)
 }
 
@@ -154,6 +154,8 @@ function onBarKeydown(event: KeyboardEvent): void {
         :data-testid="`action-${action.toLowerCase()}`"
         :data-action="action"
         :data-reason-code="availability[action].code ?? ''"
+        :data-requires-confirm="availability[action].confirm ? 'true' : 'false'"
+        :data-enabled="availability[action].enabled ? 'true' : 'false'"
         :disabled="!availability[action].enabled"
         :aria-disabled="!availability[action].enabled"
         :aria-busy="state.action.pending === action"

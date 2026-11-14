@@ -7,7 +7,7 @@
 | 项目 | 内容 |
 |---|---|
 | 文档 ID | MBD-GIT-SRS |
-| 版本 | **v0.3.1（M2a/M2b 拆分修订）** |
+| 版本 | **v0.3.1-r2（M2a/M2b 拆分修订 + M2a 出口 AC 定义/证据物补齐）** |
 | 日期 | 2026-11-14 |
 | 状态 | **v0.3.1 M2 阶段拆分（D-025）**：M2 拆为 **M2a 单仓安全交付** 与 **M2b 批量/作业/审计**，M2 整体出口 = M2a ∧ M2b。**M2a 当前状态 = 待复评（Gate 未通过，不可宣称已通过）**；M2b 未交付。v0.3 UI 基线（D-022）与 v0.2.1 其余冻结内容继续有效 |
 | 替代 | v0.2.1（历史冻结证据见 `reqs/v0.2/`）；草案 docx（仅作历史证据） |
@@ -28,6 +28,7 @@
 | v0.2.1 | 2026-11-14 | 按独立冻结复评 07 修订 SRS 侧阻断/高危项（AC/图集/夹具由并行角色回写）：C-02 `BINDING_ERROR` 按 `binding_cause` 拆分严重度（INVALID/AMBIGUOUS=1，仅缺仓=12）；C-04 §7.6 SYNC 强覆盖矩阵（DIRTY/DIVERGED/SYNCED）；C-05 §8.1 补 `job.skipped`、`job_item.started_at/finished_at`、`job_item.state=INTERRUPTED`、`sync_run.duration_ms`、`component.last_activity_at`，`job.state` 统一 `PARTIAL`，新增 §8.3 契约↔DDL 映射；H-01 远程未就绪中间态统一为 `UNKNOWN`+`incomplete=1`；H-02 冻结首扫进度阶段枚举与字段；H-03 新鲜度按表定义并补齐字段；H-04 hatched 对比度修正 + 对比度脚本入 M0 门禁；H-05 备份 ref 保留/清理/恢复；H-06 P2 功能 v1 仅保留入口不存在；C-06 里程碑出口与 §13.4 追溯矩阵改用 AC 目录新编号；M-09 凭据头统一 `Authorization: token <PAT>` | `reqs/review/07-freeze-review.md` §一致性缺陷 / §进入 M0 前必须修 |
 | v0.3 | 2026-11-14 | **UI 以用户参考图为准重构**：重写 §11 主界面为工作台（菜单栏 / 标题区 / 左侧组件卡片列表 / 中间 2×2 四仓文件树 / 右侧选中仓信息面板 / 底部 PULL·FETCH·CHKOUT·COMMIT·PUSH 按钮条 / 状态栏），新增 §11.5 文件夹视图、§11.6 批量入口、§11.0.1 冲突裁决；旧看板表格 + 侧栏 + App Shell 左侧导航**废弃**，表格视图降级 v1.1（v1 入口不存在）；新增 §9.13–9.17 六组 32 条 FR 与 §13.1.1 的 AC-UI-01…AC-UI-14；10 个 CI 锚点全部给出新落点（10/10，CI 仍不参与聚合/卡片底色）；更新 §3 范围与 M0/M1/M2/M3 里程碑、§13 追溯矩阵、§10 性能/离线措辞、附录 D 设置键 | 用户参考图 `docs/images/reference/main-ui-reference.png` + `docs/ui-redesign-plan.md` + ADR D-022…D-024 |
 | v0.3.1 | 2026-11-14 | **M2 拆分为 M2a 单仓安全交付 / M2b 批量·作业·审计（D-025）**：§3.3 M2 行拆为 M2a/M2b（出口标准与依赖）；§9.16/§9.17 标注 M2a 范围（取消/job/任务中心/仅重试失败项归 M2b）；§7.6 冻结按钮语义（DIVERGED Pull=❌、`—` 按禁用断言、EMPTY 首推归 M2b）；§13.1.1 修订 AC-UI-08/09/10 并新增 AC-UI-10a（COMMIT 确认条）/AC-UI-10b（PUSH 确认条）/AC-UI-10c（取消·job，M2b）/AC-UI-15（M2b 边界提示）；新增 §13.1.2 AC-SAFE-14（凭据作用域）/15（CAS）/16（ignored）/17（ref 校验）与 AC-OP-33（审计-lite）；§13.4 追溯矩阵与门禁更新。**当前状态：M2a 待复评，不写“已通过”** | `reqs/adr/D-025-m2a-m2b.md` + `docs/review-m2-req.md`（RQ-01…RQ-08/P0 清单）+ `docs/review-m2-code.md`（P0-1/P1-1/2/3）+ `docs/review-m2-ux-fixcheck.md`（NP0-1） |
+| v0.3.1-r2 | 2026-11-14 | **M2a 出口 AC 定义与证据物补齐（Gate G-P0-4 回写；不放宽任何安全要求）**：新增 **§13.1.2**——AC-UI-10a/10b/10c/15、AC-SAFE-14…17、AC-OP-33 的完整 Given/When/Then 与可测断言、M2a 出口 13 条口径、单源矩阵夹具 `reqs/v0.2/fixtures/m2-matrix.json`（**Host 单测 + CDP 共用，禁止第三份手写期望**）、tooltip 冻结格式改 `原因 [E_*] → 替代动作`、COMMIT「对话框→确认条→执行」两步口径；§13.1.1 修正 AC-UI-08/09/10 拆分引用；§13.4 补 FR-ACT/FR-SAFE/FR-OPS 追溯行与 M2a 门禁注；新增 `docs/m2a-ac-report.md`（证据模板）与 `ui/scripts/cdp-m2a-selfcheck.mjs`（旧 `cdp-m2-selfcheck.mjs` 作废）。**状态仍为 M2a 待复评（修复中），不写“已通过”** | `docs/review-m2-gate-ux.md` §4.2/§4.4/G-P0-4 + `docs/review-m2-gate-security.md`（N-1/N-2）+ `reqs/adr/D-025-m2a-m2b.md` §2.2/§3/§5 |
 
 **已确认决策（ADR）**
 
@@ -1023,7 +1024,7 @@ interface ICiProvider {
 
 > **权威 AC 目录 = `reqs/v0.2/ac-catalog.md`（v0.2 口径：162 条 AC，覆盖 72 条 FR，含 FR→AC 追溯矩阵与红队逐项处置；v0.3 另增 32 条 FR 与 §13.1.1 的 14 条 AC-UI，回写口径见 §13.4 末注）**。**自 v0.2.1 起，AC 目录新编号（`AC-<域>-<NN>`，如 `AC-OP-15`）为唯一权威；旧编号仅在 §13.1 作历史映射，不得再用于验收或里程碑出口引用**；两者冲突时以 AC 目录为准。执行图集见 `reqs/v0.2/diagrams.md`（D1–D6），状态矩阵夹具见 `reqs/v0.2/fixtures/`，冻结门禁见 `reqs/v0.2/freeze-checklist.md`。
 > **v0.3 例外（UI 部分）**：v0.3 新增的 **AC-UI-01…AC-UI-15（§13.1.1）** 尚未回写进 `ac-catalog.md`；在回写完成前，**UI 布局/交互/文件树/文件夹视图/单仓按钮/CI 锚点以 §13.1.1 为权威**，其后恢复“ac-catalog 唯一权威”口径（回写责任与验收见 §13.4 末注）。
-> **v0.3.1 例外（M2a/M2b 部分，D-025）**：新增/修订的 **AC-UI-10a/10b/10c/15（§13.1.1）** 与 **AC-SAFE-14…17、AC-OP-33（§13.1.2）** 尚未回写 `ac-catalog.md`；回写完成前以本节为权威，回写时保持编号不变（AC-OP-33 为 AC 目录下一个未占用序号）。**M2a 出口以 §13.1.1 + §13.1.2 的 AC 子集为唯一依据，不得用“M2 全量 AC 未过”或“234 单测绿”替代。**
+> **v0.3.1 例外（M2a/M2b 部分，D-025）**：新增/修订的 **AC-UI-10a/10b/10c/15、AC-SAFE-14…17、AC-OP-33** 的**权威定义统一在 §13.1.2**（§13.1.1 的 AC-UI-10 仅保留拆分引用）；该 9 条尚未回写 `ac-catalog.md`，回写完成前以 §13.1.2 为权威，回写时保持编号不变（AC-OP-33 为 AC 目录下一个未占用序号）。**M2a 出口以 §13.1.1 + §13.1.2 的 AC 子集为唯一依据，不得用“M2 全量 AC 未过”或“234 单测绿”替代。**
 
 ### 13.1 AC 清单（v0.1：27 条旧编号；红队复审后补；M0 冻结为 Given/When/Then 全量版）
 
@@ -1061,7 +1062,7 @@ interface ICiProvider {
 
 ### 13.1.1 v0.3 UI/交互 AC（新增，CDP/截图可测；工作台/文件夹视图/文件树/单仓按钮/CI 锚点）
 
-> 本节 **AC-UI-01…AC-UI-15** 为 v0.3 §11 重构后的 UI 验收权威源；与 `reqs/v0.2/ac-catalog.md` 中 AC-BOARD/AC-DETAIL/AC-CI 的**布局与交互断言冲突时以本节为准**（ac-catalog 由并行角色按本节回写；回写完成前本节即 v0.3 UI 验收源）。驱动方式固定为 **WebView2 CDP**（`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`）+ `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent` 真实事件（不用 JS click）+ DOM bbox/`scrollWidth` 断言 + 截图归档 `docs/images/ui-v3/`。**M2a 出口 AC = AC-UI-08/09/10/10a/10b/11/13/15 + §13.1.2 的 AC-SAFE-14…17 与 AC-OP-33；AC-UI-10c 属 M2b。**
+> 本节 **AC-UI-01…AC-UI-14** 为 v0.3 §11 重构后的 UI 验收权威源；与 `reqs/v0.2/ac-catalog.md` 中 AC-BOARD/AC-DETAIL/AC-CI 的**布局与交互断言冲突时以本节为准**（ac-catalog 由并行角色按本节回写；回写完成前本节即 v0.3 UI 验收源）。驱动方式固定为 **WebView2 CDP**（`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`）+ `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent` 真实事件（不用 JS click）+ DOM bbox/`scrollWidth` 断言 + 截图归档 `docs/images/ui-v3/`。**D-025 新增/拆分的 AC-UI-10a/10b/10c/15 不在本表重复定义，统一见 §13.1.2（避免双源）；M2a 出口 AC = AC-UI-08/09/10/10a/10b/11/13/15 + §13.1.2 的 AC-SAFE-14…17 与 AC-OP-33；AC-UI-10c 属 M2b。**
 
 | AC | Given/When/Then（可测） |
 |---|---|
@@ -1072,13 +1073,101 @@ interface ICiProvider {
 | AC-UI-05 文件树状态标记 | Given 附录 C 状态夹具，When 打开文件树，Then 仓库根徽标=该仓主状态（§11.2 token/图标/文案）、tracked 改动文件 `●`、untracked `○`、STALE 灰化+数据时间；展开文件树不新增 git 进程（进程计数断言） |
 | AC-UI-06 文件夹视图 | Given 工作区根含 1 个未克隆组件 + 1 个未纳管目录，When 切换文件夹视图，Then 树层级为 根→组件→四仓→文件；未克隆淡显、未纳管入分组；组件/仓库节点状态与工作台同快照逐字一致；过滤与搜索生效；400 组件/1,600 仓滚动 ≥58fps |
 | AC-UI-07 视图切换 | Given 工作台已选中组件 X 且展开某仓目录，When `Ctrl+2` 切到文件夹视图再 `Ctrl+1` 返回，Then 切换 ≤200ms、selection 与展开路径保留、两视图状态一致；**旧看板表格视图入口不存在**（D-023） |
-| AC-UI-08 单仓按钮条 | Given 工作台且未选中聚焦仓，Then 5 按钮全部禁用并提示“请先在文件树中选择仓库”；Given 选中仓，Then 按 §7.6 逐格断言启用/禁用（14 主状态 × 5 按钮矩阵）；按钮顺序/文案固定 `PULL→FETCH→CHKOUT→COMMIT→PUSH`、不换行、1280 下不隐藏 |
-| AC-UI-09 M1 只读边界 | Given M1 构建，When 点击任一底部按钮，Then 5 按钮全部不可执行（含 FETCH）、只给出“M1 只读”理由，写操作数=0、仓库零改动；Given M0 构建，Then 按钮禁用 + 占位说明；Given M2 构建，Then 按 FR-ACT-02…06 逐项启用 |
-| AC-UI-10 按钮前置/确认/失败 | Given 无 staged 的 DIRTY 仓，Then COMMIT 禁用并给原因；Given 非快进 PULL，Then 显示 ff-only 失败指引且无 merge commit；Given PUSH 无 upstream，Then 提示“发布分支”；Given COMMIT/PUSH，Then 确认条出现且未确认时写操作数=0；Given 外部 `index.lock`，Then 返回 BUSY、不删锁；Given 操作失败，Then 状态栏显示错误码+中文文案且可重试；取消/进行中语义符合 FR-ACT-05；完成后 ≤2s 回写并写审计 |
+| AC-UI-08 单仓按钮条 | Given 工作台且未选中聚焦仓，Then 5 按钮全部禁用并提示“请先在文件树中选择仓库”；Given 选中仓，Then 按 §7.6 逐格断言启用/禁用（14 主状态 × 5 按钮矩阵）；按钮顺序/文案固定 `PULL→FETCH→CHKOUT→COMMIT→PUSH`、不换行、1280 下不隐藏；**M2a 出口的逐格期望一律取单源夹具 `reqs/v0.2/fixtures/m2-matrix.json`（Host 单测与 CDP 共用，禁止第三份手写期望）**，Host `GetAvailability` 的 `enabled/requiresConfirm/reasonCode` 与 UI 逐格一致，禁用 tooltip 冻结格式见 §13.1.2 前言（`原因 [E_*] → 替代动作`） |
+| AC-UI-09 M1 只读边界 | Given M1 构建，When 点击任一底部按钮，Then 5 按钮全部不可执行（含 FETCH）、只给出“M1 只读”理由，写操作数=0、仓库零改动；Given M0 构建，Then 按钮禁用 + 占位说明；Given **M2a 构建**，Then 按 FR-ACT-02…04 与 FR-ACT-05/06 的 **M2a 子集**逐项启用（取消/job/任务中心除外，归 M2b，见 §13.1.2 AC-UI-10c），且每次点击必须有可感知结果（执行/确认条/明确错误码/禁用原因/M2b 未接入提示），禁止“可点无效果”；Given M2b 构建，Then 按 FR-ACT-02…06 全量启用 |
+| AC-UI-10 按钮前置/确认/失败 | Given 无 staged 的 DIRTY 仓，Then COMMIT 禁用并给原因；Given 非快进 PULL，Then 显示 ff-only 失败指引且无 merge commit；Given PUSH 无 upstream，Then 提示“发布分支”；Given COMMIT/PUSH，Then 确认条出现且未确认时写操作数=0；Given 外部 `index.lock`，Then 返回 BUSY、不删锁；Given 操作失败，Then 状态栏显示错误码+中文文案且可重试；取消/进行中语义符合 FR-ACT-05；完成后 ≤2s 回写并写审计。**v0.3.1 拆分（D-025）**：确认条细则拆为 **AC-UI-10a（COMMIT，对话框→确认条两步）/ AC-UI-10b（PUSH）**，取消/job 归 **AC-UI-10c（M2b）**；三者定义见 §13.1.2，本行只保留 M2a 通用前置/失败/回写断言 |
 | AC-UI-11 右侧信息面板 | Given 选中仓，Then E 区显示 §11.3 三段字段（含主状态+数据时间、CI 空态）；未选中显示引导空态且无残留数据；同一时刻 E 与 F 指向同一聚焦仓；1280/200% 下窄栏不横向溢出、标签列 ≤72px；详情抽屉开/关后 A–G bbox 不变 |
 | AC-UI-12 CI 10 锚点新落点 | Given v1 构建，Then §11.4 的 CI-1…CI-10 **全部存在（10/10）**；CI 槽位定高不换行；注入 CI FAIL 后组件卡片/信息面板底色与聚合徽标不变；`ci.enabled=true` 后仅数据变化、锚点位置与布局 bbox 不变；全站无裸 TODO |
 | AC-UI-13 二级入口与抽屉 | Given 工作台，Then 任务/通知/日志/设置/CI/未绑定 6 个入口经菜单栏或标题区可达（6/6）；抽屉打开时 C/D/E bbox 不变、ESC 关闭且焦点回落、焦点陷阱生效；**无左侧图标导航、无第三条全宽工具栏** |
 | AC-UI-14 旧布局废弃回归 | Given v1 构建，Then 页面不存在左侧图标导航、表格表头/表格行、340px 详情列；默认入口为工作台；§11.7 速查表逐项 CDP 断言通过；截图区域顺序与参考图一致 |
+
+### 13.1.2 v0.3.1 M2a/M2b 新增与拆分 AC（AC-UI-10a/10b/10c/15、AC-SAFE-14…17、AC-OP-33；权威定义）
+
+> 本小节是 D-025 冻结的 **M2a 出口 AC 中新增/拆分项的唯一权威定义**（2026-11-14 Gate G-P0-4 回写；此前本节缺失，导致 M2a 出口 8 条 AC 不可独立验收）。§13.1.1 的 AC-UI-10 行只保留“拆分引用”，不再重复定义；本节与 §13.1.1 冲突时以本节为准，二者均与 `reqs/adr/D-025-m2a-m2b.md` §2.2/§3/§5 一致，**不得以任何理由放宽安全要求**。
+>
+> **M2a 出口 13 条**（与 ADR §3 逐条对应）= §13.1.1 的 `AC-UI-08/09/10/11/13` + 本节的 `AC-UI-10a/10b/15`、`AC-SAFE-14/15/16/17`、`AC-OP-33`。**`AC-UI-10c` 属 M2b**：M2a 验收报告不得把 10c、`AC-OP-01…32`、`AC-REPO-01…11`、`AC-SAFE-01…13` 记为通过或“等价通过”。
+>
+> **单源矩阵夹具（v0.3.1 冻结）**：14 主状态 × 5 键的 `enabled/requiresConfirm/reasonCode` 一律取 `reqs/v0.2/fixtures/m2-matrix.json`（由 §7.6 与 D-025 冻结口径派生）；**Host 单测（`RepoActionAvailabilityMatrixTests` 等）与 CDP 脚本 `ui/scripts/cdp-m2a-selfcheck.mjs` 共用该夹具，禁止第三份手写期望**。`requiresConfirm` 规则（逐格冻结在夹具内）= **矩阵 C 单元 ∨ 动作 ∈ {COMMIT, PUSH}**；`reasonCode` ∈ `AVAILABLE / CONFIRM_REQUIRED / STATE_BLOCKED`。夹具的 M2a 构建口径含两处冻结覆盖：① `DIVERGED.PULL` 按禁用（原 ⚠ 作废）；② `EMPTY.PUSH` 按“空仓无提交”禁用且 tooltip 指向 M2b 首推（M2b 构建恢复矩阵）。
+>
+> **禁用 tooltip 冻结格式（v0.3.1 修订）**：固定 `原因 [E_*] → 替代动作`，例：`无已暂存改动：请先 git add 暂存后提交 [E_NOTHING_TO_COMMIT] → 先 git add 暂存改动`。旧的冒号三段式 `原因：…；替代：…；错误码：…` **作废**（避免 85 个按钮 title 过长）；错误码仍须为 Host `E_*`，附录 D 映射走 `details.srsCode`。CDP 断言正则：`/^.+ \[E_[A-Z_]+\] → .+$/`。
+>
+> **COMMIT 两步（v0.3.1 修订）**：AC-UI-10a 的点击路径固定为「**提交信息对话框 → 确认条 → 执行**」两步（旧“点击按钮直出确认条”字面作废），确认条文案以 `将提交 N 个文件` 为准；未确认 0 写、ESC 0 写、5 键 bbox 不变等安全不变量**不变**。
+>
+> **证据要求**：逐 AC 证据、复跑命令与“未通过/待验证”状态见 `docs/m2a-ac-report.md`；真实 Gitea 写操作证据不得用 Mock 回执替代（Mock 只允许用于注入 14 状态/错误态）。M2a 报告须按 ADR §2.2 末注写明 FR-ACT-05/06 仅 M2a 子集、离线 FETCH 子项与 FR-REPO-05 其余修复类归 M2b。
+
+#### AC-UI-10a · COMMIT 确认条：对话框（提交信息）→ 确认条（将提交 N 个文件）→ 执行
+- **覆盖 FR**：FR-ACT-04、FR-ACT-03、FR-ACT-06
+- **测试层级/依赖**：UI/CDP（真实 Host 快照；`C-SYNTH`/附录 C `F-*` 夹具注入 `stagedCount=N≥1` 的状态；确认真实写回执另见 AC-UI-10 与 `docs/m2a-ac-report.md`）
+- **Given**：选中一个矩阵允许 COMMIT 且有已暂存改动的仓（`stagedCount=N≥1`，如 SYNCED/DIRTY 夹具）；`runRepoAction` 桥调用计数清零；记录 5 键 `[data-testid=repo-actions]` 的 bbox。
+- **When**：① CDP 真实鼠标点击 `[data-testid=action-commit]`；② 在 `[data-testid=action-dialog]` 的 `[data-testid=action-dialog-message]` 输入 `m2a-gate`（不勾选 `[data-testid=commit-stage-all]`）；③ 点击 `[data-testid=action-dialog-confirm]`（文案「下一步：确认提交」）；④ 在确认条上按 `Escape` 或点 `[data-testid=confirm-bar-cancel]`；⑤ 重走 ①→③ 后点 `[data-testid=confirm-bar-accept]`；⑥ 另起一轮勾选 `commit-stage-all` 后接受。
+- **Then**：① 步骤①只出现 COMMIT **提交信息对话框**，**不得直接出现确认条、不得发起 `runRepoAction`（两步中的第一步）**；② 对话框正文/信息格含「已暂存 N 个文件 / 将提交 N 个文件」，与快照 `stagedCount` 一致；③ 步骤③后 `[data-testid=confirm-bar]` 可见、高度 ≤48px，`[data-testid=confirm-bar-text]` 匹配 `/将提交 \d+ 个文件/`（`\d+`=N；「已暂存」不得插入「N 个」与「文件」之间，可在「个文件」后以括注补充）；④ 步骤③后 5 键 bbox（x/y/w/h）与开条前逐像素一致，确认条不遮挡/不移动按钮；⑤ 步骤③后 `runRepoAction` 计数=0；步骤④后仍=0 且确认条消失、焦点回到 `[data-testid=action-commit]`；⑥ 步骤⑤后恰 1 次 `runRepoAction(COMMIT,{message:'m2a-gate'})`（未勾选时**无** `stageAll`），消息内容不含 token；⑦ 步骤⑥的 args 含 `stageAll:true,confirm:true`，且对话框 hint 明示将执行 `git add -A`（未勾选时不得出现 `-A` 行为）；⑧ 全程无 `[data-testid=confirm-dialog]` 打断、无 console error。
+- **关联 NFR/OQ**：FR-ACT-04、FR-ACT-03；D-025 §2.5-②；Gate G-P1-1（旧字面/文案偏差）
+
+#### AC-UI-10b · PUSH 确认条：零确认写禁止 + NO_UPSTREAM 发布分支
+- **覆盖 FR**：FR-ACT-04、FR-ACT-03、FR-REPO-05（M2a 唯一子项）
+- **测试层级/依赖**：UI/CDP（真实 Host 快照 + `NO_UPSTREAM`/`DETACHED_*`/`AHEAD` 夹具注入；桥拦截计数）
+- **Given**：选中 `AHEAD`/`SYNCED` 仓（`ahead=N≥1`、upstream 可解析）；另有 `NO_UPSTREAM` 与 `DETACHED_TAG` 夹具；`runRepoAction` 计数清零；记录 5 键 bbox。
+- **When**：① 点击 `[data-testid=action-push]`；② 未确认按 `Escape`；③ 重开条后点取消；④ 在非输入焦点按 `Alt+5`；⑤ 重开条后点 `[data-testid=confirm-bar-accept]`；⑥ `NO_UPSTREAM` 夹具重走 ①→⑤；⑦ DETACHED 夹具查看 `action-push` 禁用态与 title。
+- **Then**：① 仅出现 `[data-testid=confirm-bar]`（无对话框/confirm-dialog），高度 ≤48px，文案匹配 `/将推送 \d+ 个提交（[^（）]+ → [^（）]+）/`；② 5 键 bbox 开条前后一致；③ 步骤①–④全程 `runRepoAction` 计数=0（**禁止零确认写**），ESC/取消后条消失、焦点回 `action-push`；④ `Alt+5` 与点击同路径（同样开条、未确认 0 写，**不得绕过确认条**）；⑤ 步骤⑤后恰 1 次 `runRepoAction(PUSH,{})`；⑥ `NO_UPSTREAM` 条含「发布分支」「建立 upstream（setUpstream=true）」文案，接受后 `args.setUpstream===true`；⑦ DETACHED PUSH `disabled=true` 且 title 匹配 `/^.+ \[E_[A-Z_]+\] → .+$/`；⑧ 确认条接受按钮可键盘操作（Tab/Enter），焦点陷阱不逃逸。
+- **关联 NFR/OQ**：FR-ACT-04；D-025 §2.5-④；Gate G-P0-1/NP0-1
+
+#### AC-UI-10c · 取消与 job（**M2b，不计 M2a 出口**）
+- **覆盖 FR**：FR-ACT-05、FR-ACT-06
+- **测试层级/依赖**：E2E/UI（M2b 构建；`G-E2E` 批量夹具 + `CLK`）
+- **Given**：M2b 构建；批量 PULL 作业 4 仓（2 仓已开始、2 仓未开始）；任务中心可打开。
+- **When**：① 任务中心点“取消”；② 取消结束后点“仅重试失败项”；③ 重启 Host 后查任务历史；④ 订阅 `JOB_UPDATED`。
+- **Then**：① 返回 `jobId`；取消后 job 状态 `CANCELLED`，已开始仓记 `CANCELLED` 并触发重扫、未开始仓保持原状（**不整体回滚**），终态以实际扫描为准；② `JOB_UPDATED` 含 `{jobId,state,current,total,cancellable}` 且 `cancellable=false` 于取消后；③ 重启后 job 不重复执行、历史可查且状态一致；④ “仅重试失败项”只对失败/取消仓发新 item，不复跑成功仓；⑤ M2a 构建中本 AC **不验收**，验证方法仅需确认入口给出“M2b 未接入（批量/作业/审计）”提示（见 AC-UI-15）。
+- **关联 NFR/OQ**：FR-ACT-05/06；ADR §2.3/§4（M2b 出口）
+
+#### AC-UI-15 · M2b 边界：批量/任务中心入口明示“M2b 未接入（批量/作业/审计）”
+- **覆盖 FR**：FR-ACT-07、FR-CARD-04、§11.6
+- **测试层级/依赖**：UI/CDP（M2a 构建；真实 Host + 桥计数）
+- **Given**：M2a 构建；批量条 `[data-testid=batch-bar]`、菜单批量项、任务中心 `[data-testid=title-tasks]`、组件卡片快速入口均可见；`runRepoAction`/`getJob`/`listJobs` 计数清零。
+- **When**：① 依次点击批量条 `SYNC`/`CREATE`/`CLONE`/`DELETE`；② 菜单栏“批量”各项；③ 点 `[data-testid=title-tasks]` 打开任务中心，点“了解批量入口”与“取消 / 重试失败项”；④ 点卡片快速 `SYNC`/`CREATE`。
+- **Then**：① 每次点击都出现**可见文案包含“M2b 未接入（批量/作业/审计）”**（括号内文字不可省略/改写）；② `runRepoAction`、`getJob`、`listJobs` 增量均为 0；③ 不得静默无响应（每次点击有 toast 或抽屉文案变化）；④ 不得伪造成功（不出现“已提交/已同步/已完成”等成功回执）；⑤ C/D/E 主区 bbox 不变（入口不改变布局）；⑥ 页面不存在“M2 接入”“M2 接入后”等旧措辞命中。
+- **关联 NFR/OQ**：FR-ACT-07；ADR §2.2-8/§2.4-1；Gate G-P0-3
+
+#### AC-SAFE-14 · 凭据作用域：URL 不匹配 → E_CREDENTIAL_SCOPE，配置不完整 → fail-closed
+- **覆盖 FR**：FR-SAFE-06、FR-ACT-03
+- **测试层级/依赖**：Host 单测/黑盒集成（临时 git 仓 + 回环 HTTP stub 抓包 + `GIT_TRACE2_EVENT` argv 审计）
+- **Given**：token 哨兵 `ghp_CANARY_…` 与合法 `GiteaBaseUrl/GiteaOrg`；临时仓 `origin`/`remote.origin.pushurl` 分别构造为：① fetch host 不一致；② pushurl 指向其它 port/org；③ 配置缺 base 或 org + 有 token；④ 明文 http 未显式 `allowInsecureHttp`；⑤ fetch/push URL 与 base 完全一致（正例）。
+- **When**：分别执行 FETCH/PULL/PUSH，并采集：①②的抓包请求数与 Host 实际启动的 git 子命令 argv；③④⑤的返回码与响应 JSON；⑤时检查发出的 `Authorization` 头与 URL 作用域。
+- **Then**：① fetch or push URL 与 Gitea base（scheme/host/port/org 前缀）不一致 → `E_CREDENTIAL_SCOPE`，`details` 仅含 failedFields/scheme/host/port/路径前缀，**不含 URL/token**；抓包请求数=0，argv 中无 fetch/push（`rev-parse`/`remote` 之外不启动网络 git）；② pushurl 不一致同样 `E_CREDENTIAL_SCOPE` 且 0 请求；③ 配置缺/非法 + 有 token → `E_GITEA_CONFIG_INVALID`（fail-closed），0 网络请求；④ 明文 http 未显式允许 → `E_GITEA_INSECURE_HTTP`，0 网络请求；⑤ 仅 canonical base 收到 `Authorization: Basic base64(token:)`，且注入方式为 `http.<base>.extraHeader` URL 作用域（其它 host/org 收不到）；⑥ argv、Host 日志、响应 JSON、remote URL 中 token/base64 哨兵命中=0。
+- **关联 NFR/OQ**：FR-SAFE-06、D-006、§10.3；ADR §2.2-1；Gate P0-1
+
+#### AC-SAFE-15 · 写前 read-through 重扫 + HEAD CAS：E_CONCURRENT_CHANGE、零改动、scan_at 前进
+- **覆盖 FR**：FR-SAFE-03、FR-ACT-03
+- **测试层级/依赖**：Host 单测/黑盒集成（临时 git 仓；`CLK`/扫描时间戳可读）
+- **Given**：宿主完成一次扫描形成快照（HEAD=`H0`、`scan_at=T0`）；外部进程在不通知 Host 的情况下将 HEAD 改为 `H1`（另备 dirty/upstream 变化样本）。
+- **When**：对**旧快照**分别执行 PULL/CHKOUT/COMMIT/PUSH（`confirm=true`），并比对执行前后 `git rev-parse HEAD`/`git status --porcelain=v2`/分支/远端 refs 与 `local_state.scan_at`。
+- **Then**：① 执行时 HEAD≠快照 HEAD → `E_CONCURRENT_CHANGE`，四动作逐项均拒绝；仓库 HEAD/分支/index/工作区/远端 refs **零改动**；② 动作前 **read-through 重扫**成立：`local_state.scan_at` 单调前进（`T1>T0`）且**矩阵判定基于动作前状态**（非 TTL 旧快照）；非 HEAD 变化（dirty/upstream/remote）同样在动作前被重算捕获并给出对应拒绝码，**不得仅以动作内部 git 报错兜底**（“安全失败”不能替代本断言）；③ 动作成功后快照失效，≤2s 内回写新状态；④ 快照 TTL 不作为门禁依据。
+- **关联 NFR/OQ**：FR-SAFE-03、§7.5；ADR §2.2-2；Gate P1-2/N-2（实现偏差须在 `docs/m2a-ac-report.md` 显式记录，不得据此放宽本 AC）
+
+#### AC-SAFE-16 · ignored 文件不被静默覆盖（CHKOUT/PULL）
+- **覆盖 FR**：FR-SAFE-03、FR-REPO-01
+- **测试层级/依赖**：Host 单测/黑盒集成（临时 git 仓；ignored 内容哨兵 `LOCAL-PRECIOUS`）
+- **Given**：clean 仓 + `.gitignore` 忽略 `build.log`（内容 `LOCAL-PRECIOUS`）；目标分支/远端更新中含同路径 **tracked** 文件。
+- **When**：① CHKOUT 到目标分支；② PULL（远端已含该 tracked 文件）；③ 采集实际 git argv。
+- **Then**：① CHKOUT 命令必须含 `--no-overwrite-ignore`；PULL 必须为 `fetch` + `merge --ff-only --no-overwrite-ignore`（**不得**用不接受该开关的 `git pull`）；② git 拒绝覆盖时返回 `E_WORKTREE_OVERWRITE`（或等价明确错误码，不得静默成功），`build.log` 内容仍为 `LOCAL-PRECIOUS`、HEAD/分支未变、数据零丢失；③ 任何路径都不得出现 `-f`/`--force` 覆盖；④ 失败时状态栏/响应含可读原因，仓库零改动。
+- **关联 NFR/OQ**：FR-SAFE-03；ADR §2.2-2③；Gate P1-1
+
+#### AC-SAFE-17 · ref 校验：不存在 ref / 前缀注入 / PULL 显式分支 / detached PUSH / 无 force
+- **覆盖 FR**：FR-ACT-03、FR-REPO-01、FR-SAFE-03
+- **测试层级/依赖**：Host 单测/黑盒集成（临时 git 仓 + `GIT_TRACE2_EVENT`）
+- **Given**：仓在 `main`，含 `README.md`（同名文件但无同名 ref）、tag `v1.0.0`、远端新分支 `feature`（`main` 为其祖先）、detached 夹具、可正常 push 的仓。
+- **When**：① CHKOUT `branch="README.md"`；② CHKOUT `tag="v9.9.9"`；③ CHKOUT/PULL `branch="+main"`/`"-main"`；④ PULL `args.branch="feature"`（当前分支 `main`）；⑤ DETACHED 状态 PUSH；⑥ 正常 PUSH 并采集 argv。
+- **Then**：① `E_REF_NOT_FOUND`（kind=branch），HEAD/分支不变（禁止“假成功”走路径模式）；② `E_REF_NOT_FOUND`（kind=tag）；③ `E_INVALID_ARGUMENT`；④ **拒绝**（`E_ACTION_NOT_ALLOWED` 或 `E_INVALID_ARGUMENT`，details 给 expected/current），当前分支**不得**被快进到 `origin/feature`，且拒绝发生在任何 git 网络命令之前（argv 无 fetch/push）；⑤ `E_ACTION_NOT_ALLOWED`，HEAD 不变；⑥ PUSH argv 无 `--force`/`-f`/`--mirror`/`--delete`/前导 `+`；⑦ 仅远端存在的分支不得静默 DWIM 成假成功：要么真实建本地跟踪分支（需 M2a 明确支持并记录），要么 `E_REF_NOT_FOUND` + UI 明确文案。
+- **关联 NFR/OQ**：FR-REPO-01；ADR §2.2-2④；Gate P1-3/N-1（N-1 未修复前本 AC 判未通过）
+
+#### AC-OP-33 · 审计-lite：每次单仓动作恰 1 行 operation_log
+- **覆盖 FR**：FR-ACT-06、FR-OP-09（M2a 子集）
+- **测试层级/依赖**：Host 集成/E2E（真实 Host + SQLite `operation_log`；成功与失败样本）
+- **Given**：Host 数据目录可写（`%LOCALAPPDATA%\MbdGitTool\`，以实现落点为准）；分别准备：① 成功 COMMIT/PUSH；② 失败动作（`E_REPO_BUSY` 锁冲突、`E_CONCURRENT_CHANGE`、`E_REF_NOT_FOUND` 各 1）；记录动作前 `operation_log` 行数。
+- **When**：逐个执行动作后查询 `select ts,actor,target_json,before_json,after_json,action,result,error_code,request_id from operation_log order by id desc limit 1`；同一 request_id 前后行数比对；重启 Host 后再次查询。
+- **Then**：① 每个动作**恰写 1 行**（同一 `request_id` 不产生 0 行/多行；重试产生新行并独立审计）；② 最小语义字段齐全且可读：时间、actor、组件 ID、RepoType、动作、操作前 HEAD、操作后 HEAD、结果、错误码、request_id（若物理列采用 §8.1 的 `target_json/before_json/after_json`，必须能通过 SQL JSON 投影得到同名字段，语义不丢）；③ 成功与失败**都写**；失败时 `error_code` 非空、result 可区分成功/失败；④ 重启 Host 后审计行仍可查（持久化），同一 request_id 不重复；⑤ 审计不含 token/Authorization 明文；⑥ M2a 仅要求“一条最小列审计”，查询/导出/≥90 天保留归 M2b（不得以 M2b 能力缺失判 M2a 通过或失败混淆）。
+- **关联 NFR/OQ**：FR-ACT-06、FR-OP-09；ADR §2.2-6；Gate G-P0-2
+
+> **M2a 出口不覆盖（诚实口径，禁止写成通过）**：AC-UI-10c（取消/job/任务中心）、`AC-OP-01…32`、`AC-REPO-01…11`、`AC-SAFE-01…13`、故障注入全集、离线 FETCH 子项、FR-REPO-05 其余修复类、写前 journal/崩溃 reconcile —— 均属 M2b 出口。M2a 报告只能写“M2a 子集已验证 + 上述未覆盖”。
 
 ### 13.2 测试策略
 
@@ -1103,7 +1192,7 @@ interface ICiProvider {
 
 ### 13.4 AC 追溯矩阵（FR 分组 → 新 AC；M0 冻结；旧号仅映射）
 
-| FR 分组 | 覆盖新 AC（权威：`ac-catalog.md` §3 FR→AC 矩阵 + 本文件 §13.1.1） | 缺口处理 |
+| FR 分组 | 覆盖新 AC（权威：`ac-catalog.md` §3 FR→AC 矩阵 + 本文件 §13.1.1/§13.1.2） | 缺口处理 |
 |---|---|---|
 | FR-CFG | AC-CFG-01…AC-CFG-11 | — |
 | FR-SYNC | AC-SYNC-01…AC-SYNC-14 | — |
@@ -1113,18 +1202,20 @@ interface ICiProvider {
 | FR-DETAIL | AC-DETAIL-01…AC-DETAIL-09；跨域 AC-SAFE-10、**AC-UI-03/04/11/13** | 详情抽屉化由 AC-UI-11/13 覆盖 |
 | FR-OP | AC-OP-01…AC-OP-32；跨域 AC-SYNC-05/14、AC-SCAN-06、AC-OPS-04 | — |
 | FR-REPO | AC-REPO-01…AC-REPO-11；跨域 AC-OP-05、**AC-UI-08/10** | 底部按钮为单仓操作 v1 入口 |
-| FR-SAFE | AC-SAFE-01…AC-SAFE-13；跨域 AC-OP-16/20/26、AC-CFG-06、AC-DETAIL-06/07、AC-OPS-06、**AC-UI-04** | — |
-| FR-OPS | AC-OPS-01…AC-OPS-17；跨域 AC-SAFE-06、**AC-UI-13**（二级入口）、**AC-UI-01**（状态栏模板） | — |
+| FR-SAFE | AC-SAFE-01…AC-SAFE-17（**v0.3.1 新增 AC-SAFE-14 凭据作用域 / 15 CAS / 16 ignored / 17 ref 校验，定义见 §13.1.2，M2a 出口**）；跨域 AC-OP-16/20/26、AC-CFG-06、AC-DETAIL-06/07、AC-OPS-06、**AC-UI-04** | M2a 出口=AC-SAFE-14…17；AC-SAFE-01…13 归 M2b 出口，不得混记 |
+| FR-OPS | AC-OPS-01…AC-OPS-17；跨域 AC-SAFE-06、**AC-UI-13**（二级入口）、**AC-UI-01**（状态栏模板）、**AC-OP-33**（v0.3.1 新增审计-lite，定义见 §13.1.2，M2a 出口） | M2a 只要求“一次操作一条最小列审计”；查询/导出/90 天保留归 M2b |
 | FR-CI | AC-CI-01…AC-CI-11；跨域 AC-DETAIL-03、AC-OPS-02、**AC-UI-12**（10 锚点新落点） | CI-1/3/4/7 位置迁移由 AC-UI-12 断言 |
 | **FR-WS** | **AC-UI-01、AC-UI-05、AC-UI-07、AC-UI-13** | v0.3 新增；ac-catalog 回写待并行角色同步 |
 | **FR-TREE** | **AC-UI-03、AC-UI-04、AC-UI-05** | 同上 |
 | **FR-FOLDER** | **AC-UI-06、AC-UI-07** | 同上 |
-| **FR-ACT** | **AC-UI-08、AC-UI-09、AC-UI-10** | M1 只读边界=AC-UI-09；M2 写操作=AC-UI-08/10 |
+| **FR-ACT** | **AC-UI-08、AC-UI-09、AC-UI-10、AC-UI-10a、AC-UI-10b、AC-UI-15**（v0.3.1 拆分/新增定义见 §13.1.2；AC-UI-10c 属 M2b） | M1 只读边界=AC-UI-09；M2a 写操作=AC-UI-08/10/10a/10b；M2b 边界=AC-UI-15；取消/job=AC-UI-10c |
 | **FR-CARD** | **AC-UI-01、AC-UI-02、AC-UI-07** | 同上 |
 | **FR-INFO** | **AC-UI-03、AC-UI-11、AC-UI-12** | 同上 |
 | NFR | 性能：AC-BOARD-03/05/14、AC-SCAN-08/09、AC-SYNC-12、AC-DETAIL-04、**AC-UI-01/02/06**；安全：AC-SAFE-05/06/07/12/13、AC-CFG-06/07、**AC-UI-04**；可靠/并发：AC-OPS-09/10、AC-OP-29、AC-SAFE-08/09 | — |
 
-> **v0.3 UI AC 回写说明**：`reqs/v0.2/ac-catalog.md` 当前仍为 v0.2 版本（未含 AC-UI-01…14）。v0.3 的 UI 验收以 **§13.1.1 为权威源**；AC 目录、图集（D1–D6）与夹具由并行角色按本节回写后，§13.4 才恢复“ac-catalog 唯一权威”的口径。**回写完成前，M0/M1/M2 出口引用 AC-UI 编号须同时注记本文件 §13.1.1。**
+> **v0.3 UI AC 回写说明**：`reqs/v0.2/ac-catalog.md` 当前仍为 v0.2 版本（未含 AC-UI-01…14 与 §13.1.2 的 9 条）。v0.3 的 UI 验收以 **§13.1.1 为权威源**、v0.3.1 新增/拆分项以 **§13.1.2 为权威源**；AC 目录、图集（D1–D6）与夹具由并行角色按本节回写后，§13.4 才恢复“ac-catalog 唯一权威”的口径。**回写完成前，M0/M1/M2 出口引用 AC-UI 编号须同时注记本文件 §13.1.1/§13.1.2。**
+>
+> **v0.3.1 M2a 门禁（D-025，Gate G-P0-4 回写）**：M2a 出口 = **13 条 AC 全绿 + 每条都有可复跑证据**：`AC-UI-08/09/10/10a/10b/11/13/15`（§13.1.1 + §13.1.2）+ `AC-SAFE-14/15/16/17` + `AC-OP-33`（§13.1.2）。证据物三件缺一不得宣布 M2a 通过：① `docs/m2a-ac-report.md`（逐 AC 证据 + 真实 Gitea 五键写 + 审计行查询）；② `reqs/v0.2/fixtures/m2-matrix.json`（14×5 单源，**Host 单测与 CDP 共用**，禁止第三份手写期望）；③ `ui/scripts/cdp-m2a-selfcheck.mjs`（旧 `cdp-m2-selfcheck.mjs` 作废，不得作为证据）。**M2a 通过 ≠ M2 交付完成**；M2b 未接入前只能写“M2a 通过、M2b 未接入”。
 
 > **门禁**：M0 结束时上表所有“缺口处理”关闭并冻结 AC 版本；无 AC 的 FR 不得进入 M2；M3 以“AC 基线冻结版本全绿”为出口（不是“第 13 章全绿”的移动靶）。
 

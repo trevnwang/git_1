@@ -1,0 +1,168 @@
+{
+  "schemaVersion": "1.0",
+  "id": "m2-matrix",
+  "title": "M2a 单仓五键可用性/确认 单源矩阵夹具（14 主状态 × 5 动作）",
+  "source": "SRS v0.3.1-r2 §7.6（D-025 冻结口径）+ reqs/adr/D-025-m2a-m2b.md §2.2/§3/§5",
+  "buildVariant": "M2a",
+  "generatedAt": "2026-11-14T14:23:00+08:00",
+  "freezeVersion": "v0.3.1-r2",
+  "actionOrder": ["PULL", "FETCH", "CHKOUT", "COMMIT", "PUSH"],
+  "requiresConfirmRule": "cell == 'C' || action in {COMMIT, PUSH}",
+  "reasonCodeValues": ["AVAILABLE", "CONFIRM_REQUIRED", "STATE_BLOCKED"],
+  "consumers": [
+    "Host 单测：tests/MbdGitTool.Host.Tests（RepoActionAvailabilityMatrixTests 等）",
+    "CDP：ui/scripts/cdp-m2a-selfcheck.mjs"
+  ],
+  "status": "SINGLE_SOURCE_PENDING_CODE_ALIGNMENT",
+  "freezeNotes": [
+    "本夹具是 AC-UI-08 的唯一期望源：Host GetAvailability 输出与 UI 逐格状态都必须与本文件一致；禁止第三份手写矩阵。",
+    "enabled：取自 SRS §7.6 映射（PULL= Pull(ff) 列、FETCH= Fetch 列、CHKOUT= Checkout 分支列、COMMIT= Commit 列、PUSH= Push 列）；矩阵中 — 按禁用编码（D-025 冻结）。",
+    "requiresConfirm：矩阵 C 单元或动作属于 {COMMIT, PUSH} 即为 true；COMMIT/PUSH 的确认标志是全局冻结要求，优先于单元格语义，对禁用单元同样按规则为 true（表示“若执行则需确认”，不代表可执行）。",
+    "M2a 构建覆盖①：DIVERGED.PULL 为禁用（原“⚠ 仅展示不自动 merge”按更严格语义作废，替代 action 见 Host/UI tooltip）。",
+    "M2a 构建覆盖②：EMPTY.PUSH 为禁用（空仓无提交，首推归 M2b FR-REPO-05；M2b 构建恢复矩阵），tooltip 指向“M2b 未接入”。",
+    "reasonCode 取值与 Host RepoActionAvailabilityDto.ReasonCode 对齐：AVAILABLE / CONFIRM_REQUIRED / STATE_BLOCKED；tooltip 文案格式由 SRS §13.1.2 冻结为「原因 [E_*] → 替代动作」，不在本夹具重复冻结。",
+    "本文件状态为 SINGLE_SOURCE_PENDING_CODE_ALIGNMENT：截至 2026-11-14 提交 1afa014，Host 仍对 COMMIT/PUSH 返回 requiresConfirm=false、UI 仍持第二套 MATRIX、EMPTY.PUSH 仍为启用；代码对齐完成并复跑 Host 单测/CDP 后才可改状态。"
+  ],
+  "states": [
+    {
+      "state": "UNKNOWN",
+      "actions": {
+        "PULL": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "FETCH": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "CHKOUT": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "COMMIT": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" },
+        "PUSH": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" }
+      }
+    },
+    {
+      "state": "INVALID",
+      "actions": {
+        "PULL": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "FETCH": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "CHKOUT": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "COMMIT": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" },
+        "PUSH": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" }
+      }
+    },
+    {
+      "state": "MISSING",
+      "actions": {
+        "PULL": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "FETCH": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "CHKOUT": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "COMMIT": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" },
+        "PUSH": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" }
+      }
+    },
+    {
+      "state": "EMPTY",
+      "actions": {
+        "PULL": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "FETCH": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "CHKOUT": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" },
+        "COMMIT": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" },
+        "PUSH": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" }
+      }
+    },
+    {
+      "state": "UNMERGED",
+      "actions": {
+        "PULL": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "FETCH": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "CHKOUT": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "COMMIT": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" },
+        "PUSH": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" }
+      }
+    },
+    {
+      "state": "IN_PROGRESS",
+      "actions": {
+        "PULL": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "FETCH": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "CHKOUT": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "COMMIT": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" },
+        "PUSH": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" }
+      }
+    },
+    {
+      "state": "DETACHED_TAG",
+      "actions": {
+        "PULL": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "FETCH": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "CHKOUT": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" },
+        "COMMIT": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" },
+        "PUSH": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" }
+      }
+    },
+    {
+      "state": "DETACHED_COMMIT",
+      "actions": {
+        "PULL": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "FETCH": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "CHKOUT": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" },
+        "COMMIT": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" },
+        "PUSH": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" }
+      }
+    },
+    {
+      "state": "DIVERGED",
+      "actions": {
+        "PULL": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "FETCH": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "CHKOUT": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" },
+        "COMMIT": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" },
+        "PUSH": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" }
+      }
+    },
+    {
+      "state": "BEHIND",
+      "actions": {
+        "PULL": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "FETCH": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "CHKOUT": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" },
+        "COMMIT": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" },
+        "PUSH": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" }
+      }
+    },
+    {
+      "state": "AHEAD",
+      "actions": {
+        "PULL": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "FETCH": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "CHKOUT": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" },
+        "COMMIT": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" },
+        "PUSH": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" }
+      }
+    },
+    {
+      "state": "NO_UPSTREAM",
+      "actions": {
+        "PULL": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "FETCH": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "CHKOUT": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "COMMIT": { "enabled": false, "requiresConfirm": true, "reasonCode": "STATE_BLOCKED" },
+        "PUSH": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" }
+      }
+    },
+    {
+      "state": "DIRTY",
+      "actions": {
+        "PULL": { "enabled": false, "requiresConfirm": false, "reasonCode": "STATE_BLOCKED" },
+        "FETCH": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "CHKOUT": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" },
+        "COMMIT": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" },
+        "PUSH": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" }
+      }
+    },
+    {
+      "state": "SYNCED",
+      "actions": {
+        "PULL": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "FETCH": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "CHKOUT": { "enabled": true, "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "COMMIT": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" },
+        "PUSH": { "enabled": true, "requiresConfirm": true, "reasonCode": "CONFIRM_REQUIRED" }
+      }
+    }
+  ]
+}

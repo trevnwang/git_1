@@ -51,6 +51,7 @@ public sealed class HostCommandRouter : IDisposable
     private readonly GitStatusIndex _gitStatus;
     private readonly CommitsService _commits;
     private readonly RepoActionService _actions;
+    private readonly OperationAuditService _audit;
     private readonly RemoteRefsService _remoteRefs;
     private readonly ComponentDetailService _componentDetail;
     private readonly RepoDetailService _repoDetail;
@@ -77,6 +78,9 @@ public sealed class HostCommandRouter : IDisposable
         // 单仓操作（M2）：网络类动作凭据由 token 注入（仅环境变量，不进入参数/日志/响应）；
         // P0-1 起 RepoActionService 还会在注入前校验 origin fetch/pushurl 与 Gitea base 的作用域。
         _actions = new RepoActionService(config: _snapshots.Config);
+
+        // G-P0-2 / AC-OP-33：审计-lite（每次 runRepoAction 成功/失败写 1 行 JSONL；不含 token/output）。
+        _audit = new OperationAuditService(_snapshots.Config);
         _remoteRefs = new RemoteRefsService();
 
         Func<SnapshotIndex> indexProvider = () => _snapshots.Index;
@@ -245,8 +249,15 @@ public sealed class HostCommandRouter : IDisposable
             {
                 await EnsureSnapshotAsync(cancellationToken).ConfigureAwait(false);
                 var parsed = ParseParams<RunRepoActionParams>(parameters);
+
                 // M2：真实单仓操作（异步执行，不走 _ioGate，避免长任务占满 FS/git 并发闸）。
-                var result = await _actions.RunAsync(parsed, _snapshots.Index, cancellationToken)
+                // G-P0-2 / AC-OP-33：动作返回前写审计-lite（成功/失败/异常都写 1 行，不含 token/output）。
+                var result = await _actions
+                    .RunAsync(
+                        parsed,
+                        _snapshots.Index,
+                        cancellationToken,
+                        execution => _audit.Record(execution))
                     .ConfigureAwait(false);
 
                 // M2 P1-2：写操作成功后失效快照缓存/派生缓存，下一次请求按现有 refresh 机制重建（CAS 才能拿到新 HEAD）。

@@ -171,7 +171,7 @@ public sealed class RepoActionSecurityTests
         };
         var service = new RepoActionService(config: config);
 
-        var result = await service.RunAsync(Params("PUSH"), IndexFor(repo.RepoPath), CancellationToken.None);
+        var result = await service.RunAsync(Params("PUSH", new { confirm = true }), IndexFor(repo.RepoPath), CancellationToken.None);
 
         Assert.False(result.Ok);
         Assert.Equal(BridgeErrorCodes.CredentialScope, result.Error!.Code);
@@ -201,7 +201,8 @@ public sealed class RepoActionSecurityTests
 
         foreach (var action in new[] { "FETCH", "PULL", "PUSH" })
         {
-            var result = await service.RunAsync(Params(action), IndexFor(fixture.CloneB), CancellationToken.None);
+            var args = action == "PUSH" ? (object)new { confirm = true } : null;
+            var result = await service.RunAsync(Params(action, args), IndexFor(fixture.CloneB), CancellationToken.None);
 
             Assert.False(result.Ok);
             Assert.Equal(BridgeErrorCodes.GiteaConfigInvalid, result.Error!.Code);
@@ -373,8 +374,8 @@ public sealed class RepoActionSecurityTests
         object? args = action switch
         {
             "CHKOUT" => new { branch = "feature" },
-            "COMMIT" => new { message = "cas should block" },
-            "PUSH" => new { },
+            "COMMIT" => new { message = "cas should block", confirm = true },
+            "PUSH" => new { confirm = true },
             _ => null
         };
         var result = await service.RunAsync(Params(action, args), staleIndex, CancellationToken.None);
@@ -407,7 +408,7 @@ public sealed class RepoActionSecurityTests
         var first = await DispatchAsync(
             router,
             "runRepoAction",
-            new { componentId = "CF100A_Demo", repoType = "IMPL", action = "COMMIT", args = new { message = "first" } });
+            new { componentId = "CF100A_Demo", repoType = "IMPL", action = "COMMIT", args = new { message = "first", confirm = true } });
         Assert.True(first.Ok, first.Error?.Code);
         var headAfterFirst = GitRemoteFixture.Head(fixture.CloneB);
         Assert.NotEqual(headBefore, headAfterFirst);
@@ -417,7 +418,7 @@ public sealed class RepoActionSecurityTests
         var second = await DispatchAsync(
             router,
             "runRepoAction",
-            new { componentId = "CF100A_Demo", repoType = "IMPL", action = "PUSH" });
+            new { componentId = "CF100A_Demo", repoType = "IMPL", action = "PUSH", args = new { confirm = true } });
         Assert.True(second.Ok, second.Error?.Code);
         Assert.Equal(headAfterFirst, GitRemoteFixture.Head(fixture.BarePath));
 
@@ -441,7 +442,7 @@ public sealed class RepoActionSecurityTests
         fixture.CommitAndPushFromA("remote diverged");
         var service = new RepoActionService();
 
-        var result = await service.RunAsync(Params("PUSH"), IndexFor(fixture.CloneB), CancellationToken.None);
+        var result = await service.RunAsync(Params("PUSH", new { confirm = true }), IndexFor(fixture.CloneB), CancellationToken.None);
 
         Assert.False(result.Ok);
         Assert.Equal(BridgeErrorCodes.PushRejected, result.Error!.Code);

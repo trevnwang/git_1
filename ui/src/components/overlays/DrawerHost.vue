@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useWorkbench } from '../../stores/workbench'
-import { formatAgo } from '../../viewmodel'
+import { formatAgo, M2B_BOUNDARY_TEXT } from '../../viewmodel'
 
 const w = useWorkbench()
 const state = w.state
@@ -36,13 +36,13 @@ const ciNotifications = [
         <div class="empty">
           <div class="empty-icon" aria-hidden="true">◷</div>
           <div class="empty-title">暂无进行中的任务</div>
-          <div class="empty-desc">批量 Clone / Pull / 切 Tag / SYNC / Delete 将在 M2 接入后在此显示逐仓进度与失败明细。</div>
-          <button type="button" class="drawer-btn" @click="w.notify('任务批量提交：M2 接入', 'info')">了解批量入口</button>
+          <div class="empty-desc">批量 Clone / Pull / 切 Tag / SYNC / Delete：{{ M2B_BOUNDARY_TEXT }}，接入后在此显示逐仓进度与失败明细。</div>
+          <button type="button" class="drawer-btn" data-testid="drawer-batch-entry" @click="w.notify(`任务批量提交：${M2B_BOUNDARY_TEXT}`, 'warning')">了解批量入口</button>
         </div>
         <div class="section-title">任务队列字段（契约占位）</div>
         <div class="kv"><span>jobId</span><span class="muted">—</span></div>
         <div class="kv"><span>逐仓进度</span><span class="muted">—</span></div>
-        <div class="kv"><span>取消 / 重试失败项</span><span class="muted">M2 接入</span></div>
+        <div class="kv"><span>取消 / 重试失败项</span><span class="muted">{{ M2B_BOUNDARY_TEXT }}</span></div>
       </div>
 
       <div v-else class="drawer-body">

@@ -19,8 +19,8 @@ import type {
   WorkspaceNodeDto,
   WorkspaceTreeDto,
 } from '../api'
-import type { GitStatus, RepoType } from '../types/workbench'
-import { REPO_TYPES } from '../types/workbench'
+import type { GitStatus, HostActionAvailability, RepoAction, RepoType } from '../types/workbench'
+import { REPO_ACTIONS, REPO_TYPES } from '../types/workbench'
 
 export const MOCK_WORKSPACE_ROOT = 'D:\\Work\\MBD'
 
@@ -630,6 +630,110 @@ export function mockHostInfo(): HostInfoDto {
     features: { fileTree: true, workspaceTree: true, openPath: true, repoActions: false, ci: false },
     limits: { maxTreeEntries: 2000, snapshotTimeoutMs: 45_000 },
   }
+}
+
+// ───────────────────── Mock 单源矩阵（仅 Mock/CDP 自测；运行逻辑只消费 state.hostActions） ─────────────────────
+
+/**
+ * 与单源夹具 `reqs/v0.2/fixtures/m2-matrix.json`（M2a 构建）同构的 14 态 × 5 键编码
+ * （PULL/FETCH/CHKOUT/COMMIT/PUSH）：Y=允许 / C=允许但需确认 / N=禁止。
+ * M2a 冻结覆盖：EMPTY.PUSH 禁用（空仓无提交，首推归 M2b）。
+ * 仅在无 Host（浏览器 dev / CDP）时由 store 载入 `state.hostActions`，**不得**被运行逻辑直接引用。
+ */
+const MOCK_HOST_ACTIONS_FIXTURE: Record<string, string> = {
+  SYNCED: 'YYYYY',
+  DIRTY: 'NYCYY',
+  AHEAD: 'NYCNY',
+  BEHIND: 'YYCNN',
+  DIVERGED: 'NYCNN',
+  DETACHED_TAG: 'NYCNN',
+  DETACHED_COMMIT: 'NYCNN',
+  NO_UPSTREAM: 'NYNNY',
+  EMPTY: 'NYCYN',
+  UNMERGED: 'NYNNN',
+  IN_PROGRESS: 'NNNNN',
+  INVALID: 'NNNNN',
+  MISSING: 'NNNNN',
+  UNKNOWN: 'NYNNN',
+}
+
+/** Host `RepoActionService.DisabledReason` 的 Mock 同构（仅用于 tooltip 文案自测）。 */
+function mockDisabledReason(state: string, action: RepoAction): string {
+  switch (`${state}/${action}`) {
+    case 'DIRTY/PULL':
+      return 'DIRTY：需先提交或 stash'
+    case 'DIVERGED/PULL':
+      return 'DIVERGED：需手动 Merge/Rebase'
+    case 'UNKNOWN/PULL':
+      return 'UNKNOWN：关系数据过期，先 FETCH'
+    case 'AHEAD/PULL':
+      return 'AHEAD：需先推送或手动处理'
+    case 'NO_UPSTREAM/PULL':
+      return 'NO_UPSTREAM：未配置 upstream'
+    case 'EMPTY/PULL':
+      return 'EMPTY：无首个提交'
+    case 'UNMERGED/PULL':
+      return 'UNMERGED：存在未解决冲突'
+    case 'AHEAD/COMMIT':
+      return 'AHEAD：需先推送/手动处理'
+    case 'BEHIND/COMMIT':
+      return 'BEHIND：先 PULL'
+    case 'UNMERGED/COMMIT':
+      return 'UNMERGED：存在未解决冲突'
+    case 'IN_PROGRESS/COMMIT':
+      return 'IN_PROGRESS：合并/变基未完成'
+    case 'BEHIND/PUSH':
+      return 'BEHIND：先 PULL'
+    case 'DETACHED_TAG/PUSH':
+    case 'DETACHED_COMMIT/PUSH':
+      return 'DETACHED：请先基于当前 HEAD 创建分支'
+    case 'UNMERGED/PUSH':
+      return 'UNMERGED：存在未解决冲突'
+    case 'IN_PROGRESS/FETCH':
+      return 'IN_PROGRESS：操作未完成'
+    case 'INVALID/FETCH':
+      return 'INVALID：仓库绑定异常'
+    case 'MISSING/CHKOUT':
+      return 'MISSING：仓库未克隆'
+    case 'IN_PROGRESS/CHKOUT':
+      return 'IN_PROGRESS：操作未完成'
+    default:
+      return `当前状态 ${state} 不允许 ${action}（spec §6.2）`
+  }
+}
+
+/**
+ * Mock 的 Host actions（与 `getComponentDetail.repos[].actions` 同构），用于浏览器 dev / CDP 自测。
+ * 真实 Host 下 UI 只消费 Host 返回值；本函数不得进入运行逻辑的可用性判定。
+ */
+export function mockHostActionsForState(stateRaw: string): Record<RepoAction, HostActionAvailability> {
+  const state = (stateRaw || 'UNKNOWN').toUpperCase()
+  const row = MOCK_HOST_ACTIONS_FIXTURE[state] ?? 'NNNNN'
+  const result = {} as Record<RepoAction, HostActionAvailability>
+  REPO_ACTIONS.forEach((action, index) => {
+    const cell = row[index] ?? 'N'
+    const enabled = cell === 'Y' || cell === 'C'
+    // v0.3.1-r2 冻结：RequiresConfirm = (cell == C) ∨ action ∈ {COMMIT, PUSH}（禁用单元同样透传）。
+    const requiresConfirm = cell === 'C' || action === 'COMMIT' || action === 'PUSH'
+    result[action] = {
+      action,
+      enabled,
+      reasonCode: enabled ? (requiresConfirm ? 'CONFIRM_REQUIRED' : 'AVAILABLE') : 'STATE_BLOCKED',
+      reason: enabled
+        ? requiresConfirm
+          ? '该操作会改变工作区/HEAD，需二次确认（args.confirm=true）'
+          : 'M2 已启用：可直接执行'
+        : mockDisabledReason(state, action),
+      requiresConfirm,
+    }
+  })
+  return result
+}
+
+/** 按组件 + 仓类型生成 Mock Host actions（供 store 在 Mock 模式下填充 state.hostActions）。 */
+export function mockHostActions(componentId: string, type: RepoType): Record<RepoAction, HostActionAvailability> {
+  const { repo } = resolveMockRepo(componentId, type)
+  return mockHostActionsForState(repo.state)
 }
 
 /** openPath 的 Mock 实现：仅返回成功结果，不启动外部程序。 */

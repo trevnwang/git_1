@@ -71,7 +71,7 @@ public sealed class RepoActionService
             ["DETACHED_TAG"] = "NYCNN",
             ["DETACHED_COMMIT"] = "NYCNN",
             ["NO_UPSTREAM"] = "NYNNY",
-            ["EMPTY"] = "NYCYY",
+            ["EMPTY"] = "NYCYN", // D-025 M2a：EMPTY 首推建 upstream 归 M2b，PUSH 禁用
             ["UNMERGED"] = "NYNNN",
             ["IN_PROGRESS"] = "NNNNN",
             ["INVALID"] = "NNNNN",
@@ -98,7 +98,12 @@ public sealed class RepoActionService
         _allowInsecureHttp = config?.AllowInsecureHttp ?? false;
     }
 
-    /// <summary>按仓状态给出五键可用性（固定顺序 PULL/FETCH/CHKOUT/COMMIT/PUSH；Enabled=MatrixAllowed）。</summary>
+    /// <summary>
+    /// 按仓状态给出五键可用性（固定顺序 PULL/FETCH/CHKOUT/COMMIT/PUSH；Enabled=MatrixAllowed）。
+    /// <para><b>RequiresConfirm</b>（ADR AC-UI-08 / SRS §7.6 冻结）：COMMIT/PUSH 恒为 <c>true</c>（与矩阵 cell 无关），
+    /// 其余动作取矩阵 <c>C</c>。<c>RunAsync</c> 据此强制 <c>args.confirm=true</c>（FR-ACT-04），
+    /// 防止绕过 UI 确认条直接调用桥/Win32 写。</para>
+    /// </summary>
     public IReadOnlyList<RepoActionAvailabilityDto> GetAvailability(RepoRef repo)
     {
         var state = NormalizeState(repo.Repo.State);
@@ -110,7 +115,12 @@ public sealed class RepoActionService
             var action = Actions[index];
             var cell = index < row.Length ? row[index] : 'N';
             var matrixAllowed = cell is 'Y' or 'C';
-            var requiresConfirm = cell == 'C';
+
+            // ADR AC-UI-08：RequiresConfirm = (cell == ⚠/C) ∨ action ∈ {COMMIT, PUSH}。
+            // SRS §7.6 冻结 C：COMMIT/PUSH 确认标志固定，不随矩阵行变化（即使矩阵 cell 为 Y）。
+            var requiresConfirm = cell == 'C'
+                || action.Equals("COMMIT", StringComparison.Ordinal)
+                || action.Equals("PUSH", StringComparison.Ordinal);
 
             string reasonCode;
             string reason;
@@ -147,11 +157,79 @@ public sealed class RepoActionService
     public CommandResult Run(RunRepoActionParams parameters, SnapshotIndex index) =>
         RunAsync(parameters, index, CancellationToken.None).GetAwaiter().GetResult();
 
-    /// <summary>执行单仓操作（真实 git；不抛非取消异常：全部映射为 <see cref="CommandResult"/>）。</summary>
+    /// <summary>
+    /// 执行单仓操作（真实 git；不抛非取消异常：全部映射为 <see cref="CommandResult"/>）。
+    /// <para><paramref name="onCompleted"/>：执行结束（成功或失败/异常）时回调一次审计摘要
+    /// （含 action/componentId/repoType/state/preHead/postHead/ok/errorCode/durationMs；不含 token/output），
+    /// 供 <c>HostCommandRouter</c> 在返回前写审计-lite（G-P0-2/AC-OP-33）。</para>
+    /// </summary>
     public async Task<CommandResult> RunAsync(
         RunRepoActionParams parameters,
         SnapshotIndex index,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<RepoActionExecution>? onCompleted = null)
+    {
+        var execution = new RepoActionExecution
+        {
+            Action = string.IsNullOrWhiteSpace(parameters?.Action)
+                ? parameters?.Action
+                : parameters.Action.Trim().ToUpperInvariant(),
+            ComponentId = parameters?.ComponentId,
+            RepoType = parameters?.RepoType
+        };
+
+        var stopwatch = Stopwatch.StartNew();
+        CommandResult result;
+        try
+        {
+            result = await RunCoreAsync(parameters!, index, cancellationToken, execution).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // 取消/内部异常同样落审计（失败也记），随后保持原异常语义。
+            stopwatch.Stop();
+            execution.DurationMs = (long)stopwatch.ElapsedMilliseconds;
+            execution.Ok = false;
+            execution.ErrorCode = ex is OperationCanceledException
+                ? BridgeErrorCodes.Timeout
+                : BridgeErrorCodes.Internal;
+            execution.PostHead ??= execution.PreHead;
+            NotifyCompleted(onCompleted, execution);
+            throw;
+        }
+
+        stopwatch.Stop();
+        execution.DurationMs = (long)stopwatch.ElapsedMilliseconds;
+        execution.Ok = result.Ok;
+        execution.ErrorCode = result.Error?.Code;
+        execution.PostHead ??= execution.PreHead;
+        NotifyCompleted(onCompleted, execution);
+        return result;
+    }
+
+    /// <summary>审计回调隔离：回调自身异常不得改变动作结果。</summary>
+    private static void NotifyCompleted(Action<RepoActionExecution>? onCompleted, RepoActionExecution execution)
+    {
+        if (onCompleted is null)
+        {
+            return;
+        }
+
+        try
+        {
+            onCompleted(execution);
+        }
+        catch
+        {
+            // 审计是旁路能力：回调失败不影响动作返回。
+        }
+    }
+
+    private async Task<CommandResult> RunCoreAsync(
+        RunRepoActionParams parameters,
+        SnapshotIndex index,
+        CancellationToken cancellationToken,
+        RepoActionExecution execution)
     {
         if (parameters is null)
         {
@@ -178,6 +256,10 @@ public sealed class RepoActionService
         {
             return CommandResult.Failure(resolveError);
         }
+
+        // 审计摘要（G-P0-2）：快照态/HEAD 作为失败早退时的兜底值；ExecuteAsync 会用真实 HEAD 覆盖。
+        execution.State = NormalizeState(repo.Repo.State);
+        execution.PreHead = string.IsNullOrWhiteSpace(repo.Repo.HeadSha) ? null : repo.Repo.HeadSha.Trim();
 
         // 3) §7.6 矩阵（唯一事实源）。
         var availability = GetAvailability(repo).First(item => item.Action == action);
@@ -262,7 +344,8 @@ public sealed class RepoActionService
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return await ExecuteAsync(action, repo, localPath, arguments, cancellationToken).ConfigureAwait(false);
+            return await ExecuteAsync(action, repo, localPath, arguments, execution, cancellationToken)
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -275,10 +358,12 @@ public sealed class RepoActionService
         RepoRef repo,
         string localPath,
         ActionArguments arguments,
+        RepoActionExecution execution,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
         var preHead = await ReadHeadAsync(localPath, cancellationToken).ConfigureAwait(false);
+        execution.PreHead = preHead;
 
         // M2 P0-1：网络动作先做凭据作用域校验（锁内、执行 git 前）；不匹配/配置非法一律不启动网络 git。
         IReadOnlyDictionary<string, string>? credentialEnvironment = null;
@@ -340,6 +425,8 @@ public sealed class RepoActionService
         stopwatch.Stop();
         if (outcome.Failure is not null)
         {
+            // 审计：失败动作理论上零 HEAD 改动；仍读取真实 HEAD 以记录 postHead（失败也记）。
+            execution.PostHead = await ReadHeadAsync(localPath, cancellationToken).ConfigureAwait(false) ?? preHead;
             HostLog.Warn(
                 $"runRepoAction {action} {repo.ComponentId}/{repo.Repo.RepoType} ok=false "
                 + $"code={outcome.Failure.Error?.Code ?? "<none>"} ms={stopwatch.ElapsedMilliseconds}");
@@ -348,6 +435,7 @@ public sealed class RepoActionService
 
         var postHead = await ReadHeadAsync(localPath, cancellationToken).ConfigureAwait(false) ?? preHead;
         var branch = await ReadCurrentBranchAsync(localPath, cancellationToken).ConfigureAwait(false);
+        execution.PostHead = postHead;
 
         HostLog.Info(
             $"runRepoAction {action} {repo.ComponentId}/{repo.Repo.RepoType} ok=true ms={stopwatch.ElapsedMilliseconds}");
@@ -397,18 +485,47 @@ public sealed class RepoActionService
         IReadOnlyDictionary<string, string>? credentialEnvironment,
         CancellationToken cancellationToken)
     {
+        // AC-SAFE-17 / FR-ACT-03：PULL 只允许当前分支；显式 args.branch 必须等于当前 HEAD 分支，
+        // 否则拒绝且不启动任何网络 git（防止把当前分支 FF 到其它远端分支 tip）。
         var branch = arguments.Branch;
+        var currentBranch = await ReadCurrentBranchAsync(localPath, cancellationToken).ConfigureAwait(false);
         if (branch is null)
         {
             // 未指定 branch = 当前分支；detached HEAD 无法推断，要求显式参数。
-            branch = await ReadCurrentBranchAsync(localPath, cancellationToken).ConfigureAwait(false);
-            if (branch is null)
+            if (currentBranch is null)
             {
                 return new ActionOutcome(
                     InvalidArgument("PULL 需要 branch 参数（当前 HEAD 处于 detached 状态或无法解析当前分支）", "branch"),
                     string.Empty,
                     string.Empty);
             }
+
+            branch = currentBranch;
+        }
+        else if (currentBranch is null)
+        {
+            return new ActionOutcome(
+                InvalidArgument(
+                    "PULL 显式 branch 需要当前 HEAD 处于分支状态（detached HEAD 无法校验分支一致）；请先检出分支",
+                    "branch"),
+                string.Empty,
+                string.Empty);
+        }
+        else if (!string.Equals(branch, currentBranch, StringComparison.Ordinal))
+        {
+            return new ActionOutcome(
+                CommandResult.Failure(
+                    BridgeErrorCodes.InvalidArgument,
+                    $"PULL 只允许拉取当前分支：当前分支 {currentBranch}，请求 branch={branch}；已拒绝且 HEAD 不变",
+                    new Dictionary<string, object?>
+                    {
+                        ["field"] = "branch",
+                        ["expected"] = currentBranch,
+                        ["current"] = branch,
+                        ["sdkCode"] = "GIT_PULL_BRANCH_MISMATCH"
+                    }),
+                string.Empty,
+                string.Empty);
         }
 
         // M2 P1-1：不再用 git pull（pull 无法传 --no-overwrite-ignore），改为 fetch + merge --ff-only。
@@ -1472,4 +1589,29 @@ public sealed class RepoActionService
         int? Port,
         bool NoUserInfo,
         IReadOnlyList<string> FailedFields);
+}
+
+/// <summary>
+/// 一次 <c>runRepoAction</c> 的执行审计摘要（G-P0-2/AC-OP-33）：成功/失败/异常都会产生；
+/// 仅包含可审计元数据，<b>不含 token / 命令 output / stderr</b>。
+/// </summary>
+public sealed class RepoActionExecution
+{
+    public string? Action { get; set; }
+
+    public string? ComponentId { get; set; }
+
+    public string? RepoType { get; set; }
+
+    public string State { get; set; } = "UNKNOWN";
+
+    public string? PreHead { get; set; }
+
+    public string? PostHead { get; set; }
+
+    public bool Ok { get; set; }
+
+    public string? ErrorCode { get; set; }
+
+    public long DurationMs { get; set; }
 }

@@ -1,14 +1,22 @@
 /**
- * DTO → VM 映射、状态 → tone/图标/文案、操作可用性矩阵（spec §3.6 / §6.2）。
+ * DTO → VM 映射、状态 → tone/图标/文案、单仓动作可用性（Host actions 单源，spec §3.6 / §6.2）。
  * 组件模板禁止散落状态映射，统一走这里。
  */
-import type { ComponentDto, CommitDto, RepoDto, TreeNodeDto, WorkspaceNodeDto } from './api'
+import type {
+  ComponentDto,
+  CommitDto,
+  RepoActionAvailabilityDto,
+  RepoDto,
+  TreeNodeDto,
+  WorkspaceNodeDto,
+} from './api'
 import { HostError, toErrorMessage } from './api'
 import type {
   ActionAvailability,
   CommitVm,
   ComponentVm,
   GitStatus,
+  HostActionAvailability,
   RepoAction,
   RepoDetailVm,
   RepoType,
@@ -463,34 +471,50 @@ export function flattenWorkspaceChildren(node: WorkspaceNodeVm): WorkspaceNodeVm
   return node.children
 }
 
-// ───────────────────────────── 操作可用性矩阵（spec §6.2） ─────────────────────────────
+// ───────────────────────────── 单仓动作可用性（M2a：Host 单源矩阵） ─────────────────────────────
 
-type Cell = 'y' | 'c' | string // 'y'=可用, 'c'=可用需确认, 其它=禁用原因
+/**
+ * AC-UI-08 单源矩阵：可用/禁用/确认标志**只**消费 Host `getComponentDetail.repos[].actions`
+ * （`enabled` / `requiresConfirm` / `reasonCode` / `reason`），UI 不再持有「状态 × 动作」矩阵。
+ * 本文件只负责把 Host actions 映射成按钮状态与 tooltip 文案（原因 / 替代动作 / 错误码）。
+ */
+export const HOST_ACTIONS_UNREADY_REASON = '正在读取 Host 能力'
 
-const NA = '当前仓库状态不允许该操作'
-
-/** 禁用原因 → 错误码 + 替代动作（FR-ACT-02：禁用 tooltip 固定输出「原因 [E_*] → 替代」）。 */
-const CELL_HINT: Record<string, { code: string; alt: string }> = {
-  [NA]: { code: 'E_ACTION_NOT_ALLOWED', alt: '按状态矩阵先修复仓库状态后重试' },
-  'DIRTY：需先提交或 stash': { code: 'E_DIRTY_WORKTREE', alt: '先 COMMIT 或 stash 后再 PULL' },
-  'AHEAD：本地领先，需先推送': { code: 'E_ACTION_NOT_ALLOWED', alt: '先 PUSH 本地提交' },
-  'BEHIND：先 PULL': { code: 'E_ACTION_NOT_ALLOWED', alt: '先 PULL 快进后再试' },
-  'DIVERGED：需手动 Merge/Rebase': { code: 'E_ACTION_NOT_ALLOWED', alt: '先手动 Merge/Rebase 后重扫' },
-  'DETACHED：游离 HEAD，请先创建分支': { code: 'E_ACTION_NOT_ALLOWED', alt: '基于当前 HEAD 创建分支' },
-  'NO_UPSTREAM：未配置 upstream': { code: 'E_ACTION_NOT_ALLOWED', alt: '先 PUSH 发布分支并建立 upstream' },
-  'UNMERGED：存在未解决冲突': { code: 'E_ACTION_NOT_ALLOWED', alt: '先解决冲突并 COMMIT' },
-  'IN_PROGRESS：操作未完成': { code: 'E_BUSY', alt: '等待 git 操作完成后重试' },
-  'IN_PROGRESS：合并/变基未完成': { code: 'E_BUSY', alt: '等待合并/变基完成或中止后重试' },
-  'INVALID：仓库绑定异常': { code: 'E_ACTION_NOT_ALLOWED', alt: '修复仓库绑定后重试' },
-  'MISSING：仓库未克隆': { code: 'E_REPO_NOT_LOCAL', alt: '先 Clone' },
-  '状态未知：数据过期，请先 FETCH / 重试扫描': { code: 'E_ACTION_NOT_ALLOWED', alt: '先 FETCH 或重试扫描' },
-  '无已暂存改动：请先 git add 暂存后提交': {
-    code: 'E_NOTHING_TO_COMMIT',
-    alt: '先 git add 暂存改动（已暂存后可勾选「暂存全部改动」一并提交）',
-  },
+/** Host actions 读取状态文案（供状态说明/调试；不参与可用性判定）。 */
+export const HOST_ACTIONS_STATUS_LABEL: Record<'idle' | 'loading' | 'ready' | 'error', string> = {
+  idle: '—',
+  loading: HOST_ACTIONS_UNREADY_REASON,
+  ready: 'Host 能力已就绪',
+  error: 'Host 能力读取失败',
 }
 
-/** 通用 NA 的替代动作按动作细化（不改变原矩阵启用/禁用语义）。 */
+/** Host ReasonCode → UI 错误码（未知原因码回退到 E_ACTION_NOT_ALLOWED）。 */
+const REASON_CODE_TO_ERROR: Record<string, string> = {
+  STATE_BLOCKED: 'E_ACTION_NOT_ALLOWED',
+  CONFIRM_REQUIRED: 'E_CONFIRM_REQUIRED',
+  AVAILABLE: '',
+}
+
+/**
+ * 仅用于禁用 tooltip 文案：原因关键词 → 错误码 + 替代动作。
+ * 不参与 enable/confirm 判定（那是 Host actions 的唯一职责）。
+ */
+const REASON_HINTS: { match: RegExp; code: string; alt: string }[] = [
+  { match: /未克隆|MISSING/, code: 'E_REPO_NOT_LOCAL', alt: '先 Clone' },
+  { match: /DIRTY|需先提交或 stash/, code: 'E_DIRTY_WORKTREE', alt: '先 COMMIT 或 stash 后再 PULL' },
+  { match: /NO_UPSTREAM|未配置 upstream/, code: 'E_ACTION_NOT_ALLOWED', alt: '先 PUSH 发布分支并建立 upstream' },
+  { match: /AHEAD|需先推送/, code: 'E_ACTION_NOT_ALLOWED', alt: '先 PUSH 本地提交' },
+  { match: /BEHIND|先 PULL/, code: 'E_ACTION_NOT_ALLOWED', alt: '先 PULL 快进后再试' },
+  { match: /DIVERGED|Merge\/Rebase/, code: 'E_ACTION_NOT_ALLOWED', alt: '先手动 Merge/Rebase 后重扫' },
+  { match: /DETACHED|游离 HEAD/, code: 'E_ACTION_NOT_ALLOWED', alt: '基于当前 HEAD 创建分支' },
+  { match: /UNMERGED|未解决冲突/, code: 'E_ACTION_NOT_ALLOWED', alt: '先解决冲突并 COMMIT' },
+  { match: /IN_PROGRESS|变基未完成|操作未完成/, code: 'E_BUSY', alt: '等待 git 操作完成后重试' },
+  { match: /INVALID|绑定异常/, code: 'E_ACTION_NOT_ALLOWED', alt: '修复仓库绑定后重试' },
+  { match: /无已暂存改动|已暂存为 0/, code: 'E_NOTHING_TO_COMMIT', alt: '先 git add 暂存改动（已暂存后可勾选「暂存全部改动」一并提交）' },
+  { match: /UNKNOWN|关系数据过期|状态未知|数据过期/, code: 'E_ACTION_NOT_ALLOWED', alt: '先 FETCH 或重试扫描' },
+]
+
+/** 通用禁用原因的替代动作按动作细化（仅文案，不改变 Host 的 enable/confirm）。 */
 const NA_ALT_BY_ACTION: Record<RepoAction, string> = {
   PULL: '先处理本地/远程差异后重试',
   FETCH: '先 FETCH 刷新远程引用',
@@ -499,89 +523,88 @@ const NA_ALT_BY_ACTION: Record<RepoAction, string> = {
   PUSH: '先 PULL 或解决冲突后再 PUSH',
 }
 
-const MATRIX: Record<string, Record<RepoAction, Cell>> = {
-  SYNCED: { PULL: 'y', FETCH: 'y', CHKOUT: 'c', COMMIT: 'y', PUSH: 'y' },
-  DIRTY: {
-    PULL: 'DIRTY：需先提交或 stash',
-    FETCH: 'y',
-    CHKOUT: 'c',
-    COMMIT: 'y',
-    PUSH: 'y',
-  },
-  AHEAD: {
-    PULL: 'AHEAD：本地领先，需先推送',
-    FETCH: 'y',
-    CHKOUT: 'c',
-    COMMIT: NA,
-    PUSH: 'y',
-  },
-  BEHIND: { PULL: 'y', FETCH: 'y', CHKOUT: 'c', COMMIT: NA, PUSH: 'BEHIND：先 PULL' },
-  DIVERGED: {
-    PULL: 'DIVERGED：需手动 Merge/Rebase',
-    FETCH: 'y',
-    CHKOUT: 'c',
-    COMMIT: NA,
-    PUSH: 'DIVERGED：需手动 Merge/Rebase',
-  },
-  DETACHED_TAG: {
-    PULL: 'DETACHED：游离 HEAD，请先创建分支',
-    FETCH: 'y',
-    CHKOUT: 'c',
-    COMMIT: NA,
-    PUSH: 'DETACHED：请先基于当前 HEAD 创建分支',
-  },
-  DETACHED_COMMIT: {
-    PULL: 'DETACHED：游离 HEAD，请先创建分支',
-    FETCH: 'y',
-    CHKOUT: 'c',
-    COMMIT: NA,
-    PUSH: 'DETACHED：请先基于当前 HEAD 创建分支',
-  },
-  NO_UPSTREAM: {
-    PULL: 'NO_UPSTREAM：未配置 upstream',
-    FETCH: 'y',
-    CHKOUT: NA,
-    COMMIT: NA,
-    PUSH: 'y',
-  },
-  EMPTY: { PULL: NA, FETCH: 'y', CHKOUT: 'c', COMMIT: 'y', PUSH: 'y' },
-  UNMERGED: {
-    PULL: 'UNMERGED：存在未解决冲突',
-    FETCH: 'y',
-    CHKOUT: 'UNMERGED：存在未解决冲突',
-    COMMIT: 'UNMERGED：存在未解决冲突',
-    PUSH: 'UNMERGED：存在未解决冲突',
-  },
-  IN_PROGRESS: {
-    PULL: 'IN_PROGRESS：操作未完成',
-    FETCH: 'IN_PROGRESS：操作未完成',
-    CHKOUT: 'IN_PROGRESS：操作未完成',
-    COMMIT: 'IN_PROGRESS：合并/变基未完成',
-    PUSH: 'IN_PROGRESS：操作未完成',
-  },
-  INVALID: {
-    PULL: 'INVALID：仓库绑定异常',
-    FETCH: 'INVALID：仓库绑定异常',
-    CHKOUT: 'INVALID：仓库绑定异常',
-    COMMIT: 'INVALID：仓库绑定异常',
-    PUSH: 'INVALID：仓库绑定异常',
-  },
-  MISSING: {
-    PULL: 'MISSING：仓库未克隆',
-    FETCH: 'MISSING：仓库未克隆',
-    CHKOUT: 'MISSING：仓库未克隆',
-    COMMIT: 'MISSING：仓库未克隆',
-    PUSH: 'MISSING：仓库未克隆',
-  },
-  // SRS §7.6：UNKNOWN 仍允许 FETCH（重试扫描/远程探测），其余写操作禁用。
-  UNKNOWN: {
-    PULL: '状态未知：数据过期，请先 FETCH / 重试扫描',
-    FETCH: 'y',
-    CHKOUT: '状态未知：数据过期，请先 FETCH / 重试扫描',
-    COMMIT: '状态未知：数据过期，请先 FETCH / 重试扫描',
-    PUSH: '状态未知：数据过期，请先 FETCH / 重试扫描',
-  },
+function reasonHint(
+  reason: string,
+  reasonCode: string | undefined,
+  action: RepoAction,
+): { code: string; alt: string } {
+  // M2a 冻结覆盖：EMPTY.PUSH 禁用，tooltip 指向 M2b 首推（FR-REPO-05 归 M2b）。
+  if (action === 'PUSH' && /EMPTY|无首个提交|空仓/.test(reason)) {
+    return { code: 'E_ACTION_NOT_ALLOWED', alt: `空仓无首个提交，首推归 ${M2B_BOUNDARY_TEXT}` }
+  }
+  for (const hint of REASON_HINTS) {
+    if (hint.match.test(reason)) return { code: hint.code, alt: hint.alt }
+  }
+  const rawCode = (reasonCode ?? '').trim().toUpperCase()
+  const mapped = REASON_CODE_TO_ERROR[rawCode] ?? (rawCode.startsWith('E_') ? rawCode : 'E_ACTION_NOT_ALLOWED')
+  return { code: mapped || 'E_ACTION_NOT_ALLOWED', alt: NA_ALT_BY_ACTION[action] }
 }
+
+/** getComponentDetail.repos[].actions → 按五键索引的 Host 可用性（缺失动作保持禁用）。 */
+export function mapHostActions(
+  actions: RepoActionAvailabilityDto[] | null | undefined,
+): Record<RepoAction, HostActionAvailability> {
+  const list = actions ?? []
+  const result = {} as Record<RepoAction, HostActionAvailability>
+  for (const action of REPO_ACTIONS) {
+    const dto = list.find((item) => (item.action ?? '').toUpperCase() === action)
+    result[action] = {
+      action,
+      enabled: Boolean(dto?.enabled),
+      reasonCode: dto?.reasonCode ?? (dto?.enabled ? 'AVAILABLE' : 'STATE_BLOCKED'),
+      reason: dto?.reason ?? '',
+      requiresConfirm: Boolean(dto?.requiresConfirm),
+    }
+  }
+  return result
+}
+
+/**
+ * Host actions → UI 五键可用性。
+ * - `enabled` / `confirm` 完全取自 Host（唯一权威，AC-UI-08；禁用单元的 requiresConfirm 同样透传）；
+ * - 禁用时补「原因 [E_*] → 替代动作」（FR-ACT-02 v0.3.1-r2 冻结格式）；
+ * - COMMIT 的 staged 前置（FR-ACT-03）在 Host 矩阵之外按快照计数补充（不改变 Host 可用性语义）。
+ */
+export function hostAvailability(
+  hostActions: Record<RepoAction, HostActionAvailability> | null | undefined,
+  repo: RepoVm,
+): Record<RepoAction, ActionAvailability> {
+  const result = {} as Record<RepoAction, ActionAvailability>
+  for (const action of REPO_ACTIONS) {
+    const host = hostActions?.[action]
+    if (!host) {
+      result[action] = {
+        enabled: false,
+        reason: HOST_ACTIONS_UNREADY_REASON,
+        confirm: false,
+        code: 'E_BUSY',
+        alt: '等待 Host 能力读取完成后重试',
+      }
+      continue
+    }
+    const requiresConfirm = Boolean(host.requiresConfirm)
+    if (!host.enabled) {
+      const reason = host.reason.trim() || '当前仓库状态不允许该操作'
+      const hint = reasonHint(reason, host.reasonCode, action)
+      result[action] = { enabled: false, reason, confirm: requiresConfirm, code: hint.code, alt: hint.alt }
+      continue
+    }
+    // FR-ACT-03：COMMIT 仅在有已暂存改动时可用（staged 计数来自快照，Host 只给状态矩阵）。
+    if (action === 'COMMIT' && repo.stagedCount <= 0) {
+      result[action] = {
+        enabled: false,
+        reason: '无已暂存改动：请先 git add 暂存后提交',
+        confirm: requiresConfirm,
+        code: 'E_NOTHING_TO_COMMIT',
+        alt: '先 git add 暂存改动（已暂存后可勾选「暂存全部改动」一并提交）',
+      }
+      continue
+    }
+    result[action] = { enabled: true, reason: '', confirm: requiresConfirm }
+  }
+  return result
+}
+
 
 export const ACTION_LABEL: Record<RepoAction, string> = {
   PULL: 'PULL',
@@ -708,90 +731,21 @@ export function actionErrorInfo(error: unknown): ActionErrorInfo {
 /** 无聚焦仓 / 仓缺失时的统一禁用原因（FR-ACT-01 / AC-UI-08）。 */
 export const NO_REPO_REASON = '请先在文件树中选择仓库'
 
-/** 把禁用原因解析成「错误码 + 替代动作」，保证每条禁用 tooltip 都是三段式可执行文案。 */
-function disabledHint(reason: string, action: RepoAction): { code: string; alt: string } {
-  const known = CELL_HINT[reason]
-  if (reason === NA) return { code: 'E_ACTION_NOT_ALLOWED', alt: NA_ALT_BY_ACTION[action] }
-  return known ?? { code: 'E_ACTION_NOT_ALLOWED', alt: '按状态矩阵先修复仓库状态后重试' }
-}
-
-/** 禁用 tooltip 统一格式：`原因 [E_CODE] → 替代动作`（FR-ACT-02 / AC-UI-08）。 */
+/**
+ * 禁用 tooltip 冻结格式（v0.3.1-r2）：`原因 [E_*] → 替代动作`。
+ * 例：`无已暂存改动：请先 git add 暂存后提交 [E_NOTHING_TO_COMMIT] → 先 git add 暂存改动`。
+ */
 export function actionDisabledTitle(reason: string, code: string | undefined, alt: string | undefined): string {
-  const codeText = code ? ` [${code}]` : ''
-  const altText = alt ? ` → ${alt}` : ''
-  return `${reason}${codeText}${altText}`
+  const reasonText = reason || '当前仓库状态不允许该操作'
+  const altText = alt || '按 Host 返回的能力先修复仓库状态后重试'
+  const codeText = code && /^E_[A-Z0-9_]+$/.test(code) ? code : 'E_ACTION_NOT_ALLOWED'
+  return `${reasonText} [${codeText}] → ${altText}`
 }
 
-export function actionAvailability(
-  repo: RepoVm | null,
-  pending: RepoAction | null,
-): Record<RepoAction, ActionAvailability> {
-  const result = {} as Record<RepoAction, ActionAvailability>
-  if (!repo) {
-    for (const action of REPO_ACTIONS) {
-      result[action] = {
-        enabled: false,
-        reason: NO_REPO_REASON,
-        confirm: false,
-        code: 'E_ACTION_NOT_ALLOWED',
-        alt: '先在文件树/卡片中选择仓库',
-      }
-    }
-    return result
-  }
-  const state = repo.state.toUpperCase()
-  const row = MATRIX[state]
-  for (const action of REPO_ACTIONS) {
-    if (pending) {
-      result[action] = {
-        enabled: false,
-        reason: '该仓有操作进行中',
-        confirm: false,
-        code: 'E_BUSY',
-        alt: '等待当前操作完成后重试（同仓串行）',
-      }
-      continue
-    }
-    // FR-ACT-03：COMMIT 仅在有已暂存改动时可用（Host 不再自动 git add -A）。
-    if (
-      action === 'COMMIT' &&
-      repo.stagedCount <= 0 &&
-      (row?.[action] === 'y' || row?.[action] === 'c')
-    ) {
-      const hint = disabledHint('无已暂存改动：请先 git add 暂存后提交', action)
-      result[action] = {
-        enabled: false,
-        reason: '无已暂存改动：请先 git add 暂存后提交',
-        confirm: false,
-        code: hint.code,
-        alt: hint.alt,
-      }
-      continue
-    }
-    const cell = row?.[action]
-    if (!row || cell === undefined) {
-      const reason = `『${state}』状态未知，已禁用`
-      result[action] = {
-        enabled: false,
-        reason,
-        confirm: false,
-        code: 'E_ACTION_NOT_ALLOWED',
-        alt: '刷新快照后重试',
-      }
-    } else if (cell === 'y') {
-      result[action] = { enabled: true, reason: '', confirm: false }
-    } else if (cell === 'c') {
-      result[action] = { enabled: true, reason: '需二次确认（M2 接入确认对话框）', confirm: true }
-    } else {
-      const reason = String(cell)
-      const hint = disabledHint(reason, action)
-      result[action] = { enabled: false, reason, confirm: false, code: hint.code, alt: hint.alt }
-    }
-  }
-  return result
-}
+/** M2b 边界统一文案（AC-UI-15）：批量/任务中心入口点击只提示、不产生任何 Host 写调用。 */
+export const M2B_BOUNDARY_TEXT = 'M2b 未接入（批量/作业/审计）'
 
-/** 组件级批量操作（M2 接入；M1 统一 Toast 说明）。 */
+/** 组件级批量操作（M2b 未接入：M2a 构建只保留统一提示，不提交任何 Host 写调用）。 */
 export const BATCH_COMMANDS = [
   'SYNC',
   'CREATE',

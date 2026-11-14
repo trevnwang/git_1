@@ -15,16 +15,20 @@ import type { CommitDto, HostInfoDto, RepoActionArgs, RepoTreeDto, SnapshotDto, 
 import * as mock from '../mocks/workbenchMock'
 import { REPO_ACTIONS } from '../types/workbench'
 import {
-  actionAvailability,
+  HOST_ACTIONS_UNREADY_REASON,
+  M2B_BOUNDARY_TEXT,
+  NO_REPO_REASON,
   actionErrorInfo,
   emptyComponentVm,
   filterComponents,
   formatAgo,
   formatClock,
+  hostAvailability,
   isDangerousFile,
   isSafeFile,
   mapComponent,
   mapDetail,
+  mapHostActions,
   mapTreeNodes,
   mapWorkspaceEntries,
   pickDefaultRepo,
@@ -47,6 +51,9 @@ import type {
   DrawerKind,
   FilterState,
   FolderTreeState,
+  HostActionAvailability,
+  HostActionsSource,
+  HostActionsStatus,
   InfoTab,
   ModalKind,
   OperationVm,
@@ -99,6 +106,19 @@ interface WorkbenchState {
   freshness: { localAt: string | null; remoteAt: string | null; localStale: boolean; remoteStale: boolean }
   /** SnapshotDto.capabilities（HostInfo 缺失时的能力兜底）。 */
   capabilities: { repoActions: boolean | null }
+  /**
+   * Host 单源矩阵缓存（AC-UI-08）：按 repoType 存 5 键可用性，
+   * 数据来自 Host `getComponentDetail.repos[].actions`；Mock 模式由 mocks 的测试矩阵填充。
+   */
+  hostActions: Partial<Record<RepoType, Record<RepoAction, HostActionAvailability>>>
+  /** Host actions 读取状态；非 ready 时五键禁用并提示「正在读取 Host 能力」。 */
+  hostActionsStatus: HostActionsStatus
+  /** Host actions 数据来源（host / mock）。 */
+  hostActionsSource: HostActionsSource
+  /** Host actions 读取失败原因（未就绪提示的诊断信息）。 */
+  hostActionsError: string
+  /** 当前 hostActions 所属组件（切换/刷新后重新加载）。 */
+  hostActionsComponentId: string
   components: ComponentVm[]
   search: string
   sortBy: 'severity' | 'id' | 'activity'
@@ -201,6 +221,8 @@ let snapshotRetryIndex = 0
 let snapshotRetryTimer: ReturnType<typeof setTimeout> | undefined
 /** CHKOUT refs 加载序号：关闭/重开对话框后丢弃过期响应（避免旧仓 refs 串台）。 */
 let checkoutRefsSeq = 0
+/** Host actions 加载序号：组件切换后丢弃过期响应（避免旧组件矩阵串台）。 */
+let hostActionsSeq = 0
 
 const state = reactive<WorkbenchState>({
   booted: false,
@@ -220,6 +242,11 @@ const state = reactive<WorkbenchState>({
   counts: { components: 0, repos: 0, missingRepos: 0 },
   freshness: { localAt: null, remoteAt: null, localStale: false, remoteStale: false },
   capabilities: { repoActions: null },
+  hostActions: {},
+  hostActionsStatus: 'idle',
+  hostActionsSource: 'host',
+  hostActionsError: '',
+  hostActionsComponentId: '',
   components: [],
   search: '',
   sortBy: 'severity',
@@ -245,7 +272,14 @@ const state = reactive<WorkbenchState>({
   folderSelected: null,
   action: {
     pending: null,
-    lastOp: { action: '—', scope: '', state: 'idle', at: new Date().toISOString() },
+    lastOp: {
+      action: '—',
+      componentId: '',
+      repoType: '',
+      scope: '',
+      state: 'idle',
+      at: new Date().toISOString(),
+    },
   },
   notifications: [
     {
@@ -318,7 +352,7 @@ function visibleComponents(): ComponentVm[] {
 function blockedAvailability(
   reasonFor: (action: RepoAction) => string,
   code = 'E_ACTION_NOT_ALLOWED',
-  alt = '按状态矩阵先修复仓库状态后重试',
+  alt = '按 Host 返回的能力先修复仓库状态后重试',
 ): Record<RepoAction, ActionAvailability> {
   const result = {} as Record<RepoAction, ActionAvailability>
   for (const action of REPO_ACTIONS) result[action] = { enabled: false, reason: reasonFor(action), confirm: false, code, alt }
@@ -326,44 +360,69 @@ function blockedAvailability(
 }
 
 /**
- * 五键可用性：Host 能力门禁（features.repoActions）→ 本地状态矩阵（spec §6.2）。
- * M1 Host 返回 repoActions=false：5 键全禁用并给出 M1 理由；M2=true：按状态矩阵启用。
+ * 五键可用性（AC-UI-08 单源矩阵）：
+ * 1) 未选中仓 / 有操作进行中 → 统一禁用理由；
+ * 2) **唯一可用性来源** = Host `getComponentDetail.repos[].actions`（按 repoType 缓存在 state.hostActions）；
+ * 3) Host actions 未就绪 → 五键禁用并提示「正在读取 Host 能力」；
+ * 4) 仅在 Host actions 未就绪时保留 M1 只读能力门禁（features.repoActions=false 的旧 Host）。
  */
 function availability(): Record<RepoAction, ActionAvailability> {
+  const repo = focusedRepo()
+  if (!repo) {
+    return blockedAvailability(() => NO_REPO_REASON, 'E_ACTION_NOT_ALLOWED', '先在文件树/卡片中选择仓库')
+  }
+  if (state.action.pending) {
+    return blockedAvailability(() => '该仓有操作进行中', 'E_BUSY', '等待当前操作完成后重试（同仓串行）')
+  }
+  const hostActions = state.hostActions[state.focusedRepoType]
+  if (state.hostActionsStatus === 'ready' && hostActions) {
+    return hostAvailability(hostActions, repo)
+  }
+  // Host actions 未就绪期间，旧 Host（features.repoActions=false）仍按 M1 只读给出理由。
   if (state.hostLinked) {
     const infoFlag = state.hostInfo ? state.hostInfo.features?.repoActions : undefined
     const snapshotFlag = state.capabilities.repoActions
-    if (infoFlag === undefined && snapshotFlag === null) {
-      return blockedAvailability(
-        (action) => `正在读取 Host 能力（getHostInfo / snapshot.capabilities）…${action} 暂不可用`,
-        'E_BUSY',
-        '等待 Host 能力读取完成后重试',
-      )
-    }
-    const allowed = infoFlag === true || (infoFlag === undefined && snapshotFlag === true)
-    if (!allowed) {
-      return blockedAvailability(
-        (action) => `M1 只读：${action} 需 Host 开启 features.repoActions 或 snapshot.capabilities.repoActions（M2 接入）`,
-        'E_NOT_IMPLEMENTED',
-        '在支持写操作的 Host（M2a）中运行',
-      )
+    if (infoFlag !== undefined || snapshotFlag !== null) {
+      const allowed = infoFlag === true || (infoFlag === undefined && snapshotFlag === true)
+      if (!allowed) {
+        return blockedAvailability(
+          (action) => `M1 只读：${action} 需 Host 开启 features.repoActions 或 snapshot.capabilities.repoActions`,
+          'E_NOT_IMPLEMENTED',
+          '在支持写操作的 Host（M2a）中运行',
+        )
+      }
     }
   }
-  return actionAvailability(focusedRepo(), state.action.pending)
+  const detail =
+    state.hostActionsStatus === 'error' && state.hostActionsError
+      ? `（读取失败：${state.hostActionsError}）`
+      : ''
+  return blockedAvailability(
+    () => `${HOST_ACTIONS_UNREADY_REASON}${detail}`,
+    'E_BUSY',
+    '等待 Host 能力读取完成后重试',
+  )
 }
 
 function unread(): number {
   return state.notifications.filter((item) => !item.read).length
 }
 
+/**
+ * FR-OPS-05 状态栏模板（M2a 出口）：
+ * `最近一次操作：<ACTION> <ComponentId>/<RepoType> — 成功|失败(E_*) · HH:mm`
+ * 进行中输出「进行中」，从未操作输出「无」。
+ */
 function lastOpText(): string {
   const op = state.action.lastOp
-  if (op.state === 'idle') return '就绪 · 无最近操作'
+  if (op.state === 'idle') return '最近一次操作：无'
   const clock = formatClock(op.at)
-  const scope = op.scope ? ` · ${op.scope}` : ''
-  if (op.state === 'running') return `${op.action} 执行中${scope} · ${clock}`
-  if (op.state === 'success') return `✓ ${op.action} 成功${op.message ? ` · ${op.message}` : ''}${scope} · ${clock}`
-  return `✕ ${op.action} 失败${scope} · ${op.code ?? 'E_UNKNOWN'} · ${clock}`
+  const minute = /^\d{2}:\d{2}/.test(clock) ? clock.slice(0, 5) : clock
+  const componentId = op.componentId || '—'
+  const repoType = op.repoType || op.scope || '—'
+  const result =
+    op.state === 'running' ? '进行中' : op.state === 'success' ? '成功' : `失败(${op.code ?? 'E_UNKNOWN'})`
+  return `最近一次操作：${op.action} ${componentId}/${repoType} — ${result} · ${minute}`
 }
 
 function freshnessText(): string {
@@ -565,6 +624,68 @@ async function loadComponentDetail(componentId: string): Promise<void> {
   }
 }
 
+/**
+ * AC-UI-08 单源矩阵加载：组件选择/切换/刷新后读取 Host
+ * `getComponentDetail({componentId})` 的 `repos[].actions`，按 repoType 缓存到 `state.hostActions`。
+ * - Mock/浏览器模式：由 `mocks/` 的测试矩阵生成（不进入运行逻辑判定）；
+ * - Host 未就绪/读取失败：`hostActionsStatus` 非 ready，五键禁用并提示「正在读取 Host 能力」。
+ */
+async function loadHostActions(componentId = state.selectedComponentId, force = false): Promise<void> {
+  if (!componentId) {
+    hostActionsSeq += 1
+    state.hostActions = {}
+    state.hostActionsStatus = 'idle'
+    state.hostActionsSource = 'host'
+    state.hostActionsError = ''
+    state.hostActionsComponentId = ''
+    return
+  }
+  const sameTarget = state.hostActionsComponentId === componentId
+  if (!force && sameTarget && (state.hostActionsStatus === 'loading' || state.hostActionsStatus === 'ready')) {
+    return
+  }
+  const token = ++hostActionsSeq
+  state.hostActionsComponentId = componentId
+  state.hostActions = {}
+  state.hostActionsStatus = 'loading'
+  state.hostActionsError = ''
+
+  if (isMockMode()) {
+    const byType: Partial<Record<RepoType, Record<RepoAction, HostActionAvailability>>> = {}
+    for (const type of REPO_TYPES) byType[type] = mock.mockHostActions(componentId, type)
+    if (token !== hostActionsSeq) return
+    state.hostActions = byType
+    state.hostActionsSource = 'mock'
+    state.hostActionsStatus = 'ready'
+    return
+  }
+
+  try {
+    const dto = await api.getComponentDetail({ componentId })
+    if (token !== hostActionsSeq || state.selectedComponentId !== componentId) return
+    const byType: Partial<Record<RepoType, Record<RepoAction, HostActionAvailability>>> = {}
+    let readyRepos = 0
+    for (const repo of dto.repos) {
+      const type = (repo.repoType ?? '').toUpperCase()
+      if (!(REPO_TYPES as readonly string[]).includes(type)) continue
+      if (!Array.isArray(repo.actions) || repo.actions.length === 0) continue
+      byType[type as RepoType] = mapHostActions(repo.actions)
+      readyRepos += 1
+    }
+    state.hostActions = byType
+    state.hostActionsSource = 'host'
+    state.hostActionsStatus = readyRepos > 0 ? 'ready' : 'error'
+    state.hostActionsError =
+      readyRepos > 0 ? '' : 'Host getComponentDetail 未返回 repos[].actions（Host 未就绪）'
+  } catch (error) {
+    if (token !== hostActionsSeq || state.selectedComponentId !== componentId) return
+    state.hostActions = {}
+    state.hostActionsSource = 'host'
+    state.hostActionsStatus = 'error'
+    state.hostActionsError = toErrorMessage(error)
+  }
+}
+
 function openContextMenu(x: number, y: number, items: ContextMenuState['items']): void {
   state.overlays.contextMenu = { x, y, items }
 }
@@ -729,6 +850,8 @@ async function refresh(): Promise<void> {
       state.focusedRepoType = keepRepo
     }
     resetCaches()
+    // 手动刷新：强制重新读取 Host 单源矩阵（Host 可能已随扫描更新）。
+    void loadHostActions(state.selectedComponentId, true)
     await loadActive()
     notify(`已刷新 · ${sourceLabel()}`, 'success')
   } catch (error) {
@@ -752,6 +875,8 @@ async function loadActive(): Promise<void> {
   state.selectedPath = null
   state.folderSelected = null
   state.tab = 'overview'
+  // 组件选择/刷新后重新加载 Host 单源矩阵（失败不影响详情/文件树加载）。
+  void loadHostActions(state.selectedComponentId)
   await Promise.all([loadDetail(), ...REPO_TYPES.map((type) => loadTree(type))])
   if (state.view === 'folder') void ensureFolderLoaded()
 }
@@ -778,6 +903,8 @@ async function selectComponent(id: string): Promise<void> {
   state.commits = { items: [], total: 0, loading: false, error: '', loaded: false }
   state.tab = 'overview'
   if (currentEpoch !== epoch) return
+  // 组件切换：重新加载 Host actions（旧矩阵立即作废，避免沿用上一组件能力）。
+  void loadHostActions(id)
   await Promise.all([loadDetail(), ...REPO_TYPES.map((type) => loadTree(type))])
 }
 
@@ -1068,6 +1195,8 @@ async function doOpenPath(
       notify(result.message ?? `已打开：${path}`, 'success')
       state.action.lastOp = {
         action: mode === 'open' ? 'OPEN' : 'REVEAL',
+        componentId: component.id,
+        repoType: repo?.repoType ?? state.focusedRepoType,
         scope: repo?.repoType ?? state.focusedRepoType,
         state: 'success',
         at: new Date().toISOString(),
@@ -1184,22 +1313,23 @@ function openCommitDialog(target: ActionTarget, repo: RepoVm): void {
   })
 }
 
-/** COMMIT 的 F 区确认条：文案固定「将提交 N 个已暂存文件」，accept 后才执行写操作。 */
+/** COMMIT 的 F 区确认条：文案「将提交 N 个文件（已暂存 M）」，accept 后才执行写操作。 */
 function openCommitConfirmBar(target: ActionTarget, repo: RepoVm, message: string, stageAll: boolean): void {
   const staged = Math.max(0, repo.stagedCount)
   const extra = Math.max(0, repo.dirtyCount) + Math.max(0, repo.untrackedCount)
+  const willCommit = stageAll ? staged + extra : staged
   const label = repo.branch && repo.branch !== '—' ? repo.branch : 'HEAD'
   openConfirmBar({
     action: 'COMMIT',
-    text: `将提交 ${staged} 个已暂存文件`,
+    text: `将提交 ${willCommit} 个文件（已暂存 ${staged}）`,
     detail: stageAll
-      ? `已勾选「暂存全部改动（git add -A）」：将在提交前暂存剩余 ${extra} 处改动，然后提交全部 ${staged + extra} 个文件（分支 ${label}）`
+      ? `已勾选「暂存全部改动（git add -A）」：将在提交前暂存剩余 ${extra} 处改动，然后提交全部 ${willCommit} 个文件（分支 ${label}）`
       : `分支 ${label} · 仅提交已暂存内容，不自动 git add -A`,
     confirmLabel: '确认提交',
     danger: false,
     onAccept: () => {
-      const args: RepoActionArgs = stageAll ? { message, stageAll: true, confirm: true } : { message }
-      void executeRepoAction('COMMIT', args, false, target)
+      const args: RepoActionArgs = stageAll ? { message, stageAll: true, confirm: true } : { message, confirm: true }
+      void executeRepoAction('COMMIT', args, true, target)
     },
   })
 }
@@ -1221,8 +1351,8 @@ function openPushConfirmBar(target: ActionTarget, repo: RepoVm): void {
     confirmLabel: '确认推送',
     danger: true,
     onAccept: () => {
-      const args: RepoActionArgs = noUpstream ? { setUpstream: true } : {}
-      void executeRepoAction('PUSH', args, false, target)
+      const args: RepoActionArgs = noUpstream ? { setUpstream: true, confirm: true } : { confirm: true }
+      void executeRepoAction('PUSH', args, true, target)
     },
   })
 }
@@ -1405,6 +1535,8 @@ async function refreshSnapshot(): Promise<void> {
 /** 成功后刷新 snapshot + 详情/四仓树（FR-ACT-06：≤2s 回写）。 */
 async function refreshAfterAction(): Promise<void> {
   await refreshSnapshot()
+  // 动作后 Host 矩阵可能随仓状态变化：强制重新读取（AC-UI-08 单源）。
+  void loadHostActions(state.selectedComponentId, true)
   await loadActive()
 }
 
@@ -1418,6 +1550,8 @@ async function executeRepoAction(
   state.action.pending = action
   state.action.lastOp = {
     action,
+    componentId: target.componentId,
+    repoType: target.repoType,
     scope: target.repoType,
     state: 'running',
     at: new Date().toISOString(),
@@ -1442,6 +1576,8 @@ async function executeRepoAction(
     const headText = short === '—' ? '' : short
     state.action.lastOp = {
       action,
+      componentId: target.componentId,
+      repoType: target.repoType,
       scope: target.repoType,
       state: 'success',
       at: new Date().toISOString(),
@@ -1469,7 +1605,14 @@ async function executeRepoAction(
     const info = actionErrorInfo(error)
     if (info.code === 'E_CONFIRM_REQUIRED' && !confirmed) {
       // Host 要求二次确认：只重试一次（confirmed=true），再次要求确认即停止，避免无限循环。
-      state.action.lastOp = { action, scope: target.repoType, state: 'idle', at: new Date().toISOString() }
+      state.action.lastOp = {
+        action,
+        componentId: target.componentId,
+        repoType: target.repoType,
+        scope: target.repoType,
+        state: 'idle',
+        at: new Date().toISOString(),
+      }
       openConfirm({
         title: `${action} 需要二次确认`,
         body: info.detail || info.message,
@@ -1477,7 +1620,14 @@ async function executeRepoAction(
         confirmLabel: '确认并重试',
         danger: true,
         onCancel: () => {
-          state.action.lastOp = { action, scope: target.repoType, state: 'idle', at: new Date().toISOString() }
+          state.action.lastOp = {
+            action,
+            componentId: target.componentId,
+            repoType: target.repoType,
+            scope: target.repoType,
+            state: 'idle',
+            at: new Date().toISOString(),
+          }
         },
         onConfirm: () => {
           closeConfirm()
@@ -1488,6 +1638,8 @@ async function executeRepoAction(
     }
     state.action.lastOp = {
       action,
+      componentId: target.componentId,
+      repoType: target.repoType,
       scope: target.repoType,
       state: 'error',
       at: new Date().toISOString(),
@@ -1533,24 +1685,12 @@ function selectAllVisible(): void {
   state.checkedIds = visibleComponents().map((component) => component.id)
 }
 
+/**
+ * AC-UI-15 M2b 边界：批量条/任务中心/卡片右键/菜单中的批量入口在 M2a 构建一律只 Toast
+ * 「M2b 未接入（批量/作业/审计）」，不打开确认框、不调用 runRepoAction（Host 写调用=0）。
+ */
 function batchCommand(command: string): void {
-  const count = state.checkedIds.length || 1
-  const repoCount = state.checkedIds.length * 4 || 4
-  if ((count > 10 || repoCount > 40) && command === 'DELETE') {
-    openConfirm({
-      title: `批量 ${command} 确认`,
-      body: `将对 ${count} 个组件 / ${repoCount} 个仓执行 ${command}；远程仓库不受影响，本地文件进入 .trash 可恢复。`,
-      confirmLabel: '确认执行',
-      danger: true,
-      onConfirm: () => {
-        closeConfirm()
-        notify(`批量 ${command}：M2 接入`, 'warning', 3600)
-      },
-    })
-    return
-  }
-  void count
-  notify(`批量 ${command}（${state.checkedIds.length || '当前'} 个组件）：M2 接入`, 'warning', 3600)
+  notify(`批量 ${command}：${M2B_BOUNDARY_TEXT}`, 'warning', 3600)
 }
 
 // ───────────────────────────── 右键菜单 ─────────────────────────────
@@ -1564,10 +1704,10 @@ function cardContextMenu(event: MouseEvent, componentId: string): void {
     { key: 'card.detail', label: '查看组件详情（抽屉）' },
     { key: 'card.locateFolder', label: '在文件夹视图定位' },
     { key: '-', label: '', separator: true },
-    { key: 'component.SYNC', label: 'SYNC…（四仓，远程覆盖本地）', danger: true },
-    { key: 'component.CREATE', label: 'CREATE…（四仓建同名分支）' },
-    { key: 'component.CLONE', label: 'Clone 缺失仓…', disabled: !hasMissing },
-    { key: 'component.DELETE', label: 'Delete…（仅本地，软删到 .trash）', danger: true },
+    { key: 'component.SYNC', label: `SYNC…（四仓，远程覆盖本地）· M2b 未接入`, danger: true },
+    { key: 'component.CREATE', label: 'CREATE…（四仓建同名分支）· M2b 未接入' },
+    { key: 'component.CLONE', label: 'Clone 缺失仓…· M2b 未接入', disabled: !hasMissing },
+    { key: 'component.DELETE', label: 'Delete…（仅本地，软删到 .trash）· M2b 未接入', danger: true },
     { key: '-', label: '', separator: true },
     { key: 'copy.componentId', label: '复制组件 ID' },
     { key: 'copy.componentPath', label: '复制组件路径' },
@@ -1891,7 +2031,7 @@ function command(key: string): void {
   state.menuOpen = null
   switch (key) {
     case 'file.openWorkspace':
-      notify('打开工作区：由 Host 配置（M2 接入文件选择器）', 'info', 3200)
+      notify('打开工作区：由 Host 配置（文件选择器将在后续版本接入）', 'info', 3200)
       break
     case 'file.rescan':
       void refresh()
@@ -1922,7 +2062,7 @@ function command(key: string): void {
       notify(state.ignoreIgnored ? '显示已忽略文件' : '隐藏已忽略文件', 'info')
       break
     case 'view.compact':
-      notify('紧凑密度将在 M2 接入', 'info')
+      notify('紧凑密度将在后续版本接入', 'info')
       break
     case 'view.theme':
       toggleTheme()
@@ -2135,6 +2275,7 @@ export interface WorkbenchStore {
   openComponentDrawer: typeof openComponentDrawer
   closeComponentDrawer: typeof closeComponentDrawer
   loadComponentDetail: typeof loadComponentDetail
+  loadHostActions: typeof loadHostActions
   refreshSnapshot: typeof refreshSnapshot
   toggleTheme: typeof toggleTheme
   cardContextMenu: typeof cardContextMenu
@@ -2217,6 +2358,7 @@ export const workbench: WorkbenchStore = {
   openComponentDrawer,
   closeComponentDrawer,
   loadComponentDetail,
+  loadHostActions,
   refreshSnapshot,
   toggleTheme,
   cardContextMenu,

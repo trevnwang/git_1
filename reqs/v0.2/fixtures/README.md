@@ -14,6 +14,7 @@
 |---|---|
 | `state-matrix.ps1` | 生成 **25 个** 4 仓组件夹具（附录 C 全覆盖 + C-03 顺序锁定组合），逐仓用只读 `git` 命令自校验，输出 `manifest.json` |
 | `expected.json` | 期望值静态副本（`fixture_id → expected_primary_state / expected_sub_type / expected_flags / expected_component_aggregate / expected_repos`），测试直接比对；脚本启动时校验它与内部定义一致 |
+| `m2-matrix.json` | **M2a 单源操作矩阵夹具（v0.3.1-r2 新增）**：14 主状态 × 5 动作 `{state, actions:{PULL:{enabled,requiresConfirm,reasonCode},…}}`；Host 单测与 CDP 共用，见 §10 |
 | `README.md` | 本文件：用法、输出结构、接入测试方法、已知限制、验证记录 |
 
 状态名严格取自 SRS v0.2.1 §7.2（14 个主状态）、§7.3（11 flag）、§7.4（15 个组件聚合态；**聚合顺序以 SRS v0.2.1 为准**）；`NO_UPSTREAM` 子型
@@ -374,3 +375,49 @@ C:\Users\Trevn\AppData\Local\Temp\MbdGitFixtures\run-20261114-002804\manifest.js
 > 任何新增夹具应先在 `expected.json` 登记再跑 `-Only` 验证。
 
 > 上述 1–5 只影响夹具的“命名/期望值选取”，不改变夹具构造本身；建议在 M0 冻结时同步修订附录 C 与 §7.4。
+
+---
+
+## 10. `m2-matrix.json`（M2a 单源操作矩阵夹具，v0.3.1-r2 新增）
+
+> 适用：M2a 出口 `AC-UI-08`（14 主状态 × 5 键逐格）与其“矩阵单源”要求；**不是**本地 git 状态构造夹具（那仍由 `state-matrix.ps1` 负责）。
+
+### 10.1 定位与权威
+
+- 权威来源：`reqs/requirements.md` v0.3.1-r2 **§7.6**（D-025 冻结口径）+ `reqs/adr/D-025-m2a-m2b.md` §2.2/§3/§5；**本文件是 AC-UI-08 逐格期望的唯一源**（`enabled/requiresConfirm/reasonCode`），禁止在 Host 单测或 CDP 脚本里另写第三份手写矩阵。
+- 消费方：① Host 单测 `tests/MbdGitTool.Host.Tests`（如 `RepoActionAvailabilityMatrixTests`，可直接反序列化本 JSON 逐格断言 `GetAvailability`）；② CDP 脚本 `ui/scripts/cdp-m2a-selfcheck.mjs`（`node` 读同一 JSON，断言按钮 `disabled` / `title`）。
+- **状态字段** `status = SINGLE_SOURCE_PENDING_CODE_ALIGNMENT`：截至 2026-11-14 提交 `1afa014`，Host 仍对 COMMIT/PUSH 返回 `requiresConfirm=false`、UI 仍持第二套 `MATRIX`、`EMPTY.PUSH` 仍启用。**只有代码对齐并复跑 Host 单测 + CDP 后，才允许把 status 改为 aligned**；本文件存在不等于 AC-UI-08 已通过。
+
+### 10.2 结构与字段
+
+```jsonc
+{
+  "schemaVersion": "1.0",
+  "id": "m2-matrix",
+  "buildVariant": "M2a",                 // 本夹具为 M2a 构建口径
+  "requiresConfirmRule": "cell == 'C' || action in {COMMIT, PUSH}",
+  "actionOrder": ["PULL", "FETCH", "CHKOUT", "COMMIT", "PUSH"],
+  "reasonCodeValues": ["AVAILABLE", "CONFIRM_REQUIRED", "STATE_BLOCKED"],
+  "states": [
+    {
+      "state": "SYNCED",
+      "actions": {
+        "PULL":   { "enabled": true,  "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "FETCH":  { "enabled": true,  "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "CHKOUT": { "enabled": true,  "requiresConfirm": false, "reasonCode": "AVAILABLE" },
+        "COMMIT": { "enabled": true,  "requiresConfirm": true,  "reasonCode": "CONFIRM_REQUIRED" },
+        "PUSH":   { "enabled": true,  "requiresConfirm": true,  "reasonCode": "CONFIRM_REQUIRED" }
+      }
+    }
+  ]
+}
+```
+
+- `enabled`：SRS §7.6 映射（`PULL`=Pull(ff)、`FETCH`=Fetch、`CHKOUT`=Checkout 分支、`COMMIT`=Commit、`PUSH`=Push）；矩阵 `—` 按禁用编码。
+- `requiresConfirm`：**矩阵 C 单元 ∨ 动作 ∈ {COMMIT, PUSH}**；对禁用单元也按规则为 true（语义为“若执行则需确认”，不代表可执行）。
+- `reasonCode`：`AVAILABLE` / `CONFIRM_REQUIRED` / `STATE_BLOCKED`，与 Host `RepoActionAvailabilityDto.ReasonCode` 对齐；tooltip 文案格式见 SRS §13.1.2（`原因 [E_*] → 替代动作`），不在本夹具重复冻结。
+- M2a 构建覆盖：`DIVERGED.PULL=disabled`（D-025 §2.5-①）、`EMPTY.PUSH=disabled`（D-025 §2.5-④，首推归 M2b）。M2b 构建恢复矩阵时须另出 M2b 夹具/覆盖，**不得直接改写本 M2a 基线**。
+
+### 10.3 当前一致性自检（本地）
+
+对全部 14 态 × 5 动作做规则自检：`states=14`；`enabled=true` 共 28 格；`requiresConfirm=true` 共 35 格（COMMIT/PUSH 各 14 + C 单元 7）；`reasonCode` 与 `enabled/requiresConfirm` 对应关系 0 违规。该自检只验证**夹具内部规则**，不代表代码已对齐。

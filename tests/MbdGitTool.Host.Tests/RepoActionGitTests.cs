@@ -82,6 +82,27 @@ public sealed class RepoActionGitTests
     }
 
     [Fact]
+    public async Task Pull_ExplicitBranchDifferentFromCurrent_IsRejectedWithoutChanges()
+    {
+        using var fixture = GitRemoteFixture.Create();
+        var service = new RepoActionService();
+        var index = IndexFor(fixture.CloneB);
+        var headBefore = GitRemoteFixture.Head(fixture.CloneB);
+        var branchBefore = GitRemoteFixture.Branch(fixture.CloneB);
+
+        // AC-SAFE-17：PULL 只允许当前分支，显式 branch 不同必须拒绝且零改动。
+        var result = await service.RunAsync(
+            Params("PULL", new { branch = "feature" }),
+            index,
+            CancellationToken.None);
+
+        Assert.False(result.Ok);
+        Assert.Equal(BridgeErrorCodes.InvalidArgument, result.Error!.Code);
+        Assert.Equal(headBefore, GitRemoteFixture.Head(fixture.CloneB));
+        Assert.Equal(branchBefore, GitRemoteFixture.Branch(fixture.CloneB));
+    }
+
+    [Fact]
     public async Task Commit_WithMessage_SucceedsAndRenamesHead()
     {
         using var fixture = GitRemoteFixture.Create();
@@ -93,7 +114,7 @@ public sealed class RepoActionGitTests
         var headBefore = GitRemoteFixture.Head(fixture.CloneB);
 
         var result = await service.RunAsync(
-            Params("COMMIT", new { message = "feat: m2 commit" }),
+            Params("COMMIT", new { message = "feat: m2 commit", confirm = true }),
             index,
             CancellationToken.None);
 
@@ -114,7 +135,7 @@ public sealed class RepoActionGitTests
         var headBefore = GitRemoteFixture.Head(fixture.CloneB);
 
         var result = await service.RunAsync(
-            Params("COMMIT", new { message = "should not commit" }),
+            Params("COMMIT", new { message = "should not commit", confirm = true }),
             index,
             CancellationToken.None);
 
@@ -131,7 +152,7 @@ public sealed class RepoActionGitTests
         var index = IndexFor(fixture.CloneB);
 
         var result = await service.RunAsync(
-            Params("COMMIT", new { message = "noop" }),
+            Params("COMMIT", new { message = "noop", confirm = true }),
             index,
             CancellationToken.None);
 
@@ -151,7 +172,7 @@ public sealed class RepoActionGitTests
         Assert.Equal("message", missing.Error.Details!["field"]);
 
         var blank = await service.RunAsync(
-            Params("COMMIT", new { message = "   " }), index, CancellationToken.None);
+            Params("COMMIT", new { message = "   ", confirm = true }), index, CancellationToken.None);
         Assert.Equal(BridgeErrorCodes.InvalidArgument, blank.Error!.Code);
 
         var tooLong = await service.RunAsync(
@@ -243,7 +264,7 @@ public sealed class RepoActionGitTests
         var service = new RepoActionService();
         var index = IndexFor(fixture.CloneB);
         var commit = await service.RunAsync(
-            Params("COMMIT", new { message = "commit for push" }),
+            Params("COMMIT", new { message = "commit for push", confirm = true }),
             index,
             CancellationToken.None);
         Assert.True(commit.Ok, Describe(commit));
@@ -251,7 +272,7 @@ public sealed class RepoActionGitTests
 
         // P1-2 CAS：COMMIT 后快照过期，PUSH 前必须用新 HEAD 重建索引（等价 UI 动作后 refresh）。
         index = IndexFor(fixture.CloneB);
-        var result = await service.RunAsync(Params("PUSH"), index, CancellationToken.None);
+        var result = await service.RunAsync(Params("PUSH", new { confirm = true }), index, CancellationToken.None);
 
         Assert.True(result.Ok, Describe(result));
         Assert.Equal(head, GitRemoteFixture.Head(fixture.BarePath));
@@ -268,7 +289,7 @@ public sealed class RepoActionGitTests
         var service = new RepoActionService();
         var index = IndexFor(fixture.CloneB);
 
-        var result = await service.RunAsync(Params("PUSH"), index, CancellationToken.None);
+        var result = await service.RunAsync(Params("PUSH", new { confirm = true }), index, CancellationToken.None);
 
         Assert.False(result.Ok);
         Assert.Equal(BridgeErrorCodes.PushRejected, result.Error!.Code);
@@ -390,9 +411,9 @@ public sealed class RepoActionGitTests
         File.WriteAllText(Path.Combine(fixture.CloneB, "race-b.txt"), "b");
         TestGit.Run(fixture.CloneB, "add", "race-a.txt", "race-b.txt");
         var first = serviceA.RunAsync(
-            Params("COMMIT", new { message = "race a" }), index, CancellationToken.None);
+            Params("COMMIT", new { message = "race a", confirm = true }), index, CancellationToken.None);
         var second = serviceB.RunAsync(
-            Params("COMMIT", new { message = "race b" }), index, CancellationToken.None);
+            Params("COMMIT", new { message = "race b", confirm = true }), index, CancellationToken.None);
         var results = await Task.WhenAll(first, second);
 
         // 至少成功一次；不得抛异常、不得出现 E_GIT_FAILED 竞态。

@@ -11,6 +11,24 @@
  * DTO 字段以 camelCase 为准，解析时兼容 PascalCase（Host 序列化差异）。
  */
 
+/**
+ * 单仓动作可用性（M2a 单源矩阵：Host getComponentDetail.repos[].actions）。
+ * UI 只消费该结构，不再本地维护任何状态×动作矩阵（AC-UI-08）。
+ */
+export interface RepoActionAvailabilityDto {
+  action: string
+  enabled: boolean
+  matrixAllowed?: boolean | null
+  /** Host 原因码（STATE_BLOCKED / CONFIRM_REQUIRED / AVAILABLE / E_*）。 */
+  reasonCode?: string | null
+  /** Host 给出的原因文案（禁用时用于 tooltip「原因：…」）。 */
+  reason?: string | null
+  /** Host 是否要求该动作二次确认（确认条/confirm 标志的唯一来源）。 */
+  requiresConfirm?: boolean | null
+  /** Host 阶段（M1/M2a/M2b）。 */
+  stage?: string | null
+}
+
 export interface RepoDto {
   repoType: string
   repoName?: string
@@ -34,6 +52,8 @@ export interface RepoDto {
   dataSource?: string | null
   errorCode?: string | null
   flags: string[]
+  /** getComponentDetail.repos[].actions（Host 单源矩阵）；快照仓无该字段。 */
+  actions?: RepoActionAvailabilityDto[] | null
   ci?: CiLatestDto | null
 }
 
@@ -754,6 +774,28 @@ export function normalizeRepo(value: unknown): RepoDto | null {
     dataSource: readNullableString(record, 'dataSource'),
     errorCode: readNullableString(record, 'errorCode'),
     flags: readStringArray(record, 'flags'),
+    actions: (readArray(record, 'actions') ?? [])
+      .map(normalizeRepoActionAvailability)
+      .filter((item): item is RepoActionAvailabilityDto => item !== null),
+  }
+}
+
+/** normalize getComponentDetail.repos[].actions（Host 单源矩阵，PascalCase 兼容）。 */
+export function normalizeRepoActionAvailability(value: unknown): RepoActionAvailabilityDto | null {
+  const record = asRecord(value)
+  if (!record) return null
+  const action = readString(record, 'action')
+  if (!action) return null
+  return {
+    action: action.toUpperCase(),
+    enabled: readBoolean(record, 'enabled'),
+    matrixAllowed:
+      prop(record, 'matrixAllowed') === undefined ? undefined : readBoolean(record, 'matrixAllowed'),
+    reasonCode: readNullableString(record, 'reasonCode'),
+    reason: readNullableString(record, 'reason'),
+    requiresConfirm:
+      prop(record, 'requiresConfirm') === undefined ? undefined : readBoolean(record, 'requiresConfirm'),
+    stage: readNullableString(record, 'stage'),
   }
 }
 

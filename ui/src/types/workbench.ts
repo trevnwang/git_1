@@ -183,8 +183,30 @@ export interface ActionAvailability {
   alt?: string
 }
 
+/** Host getComponentDetail.repos[].actions 的单键可用性（M2a 单源矩阵）。 */
+export interface HostActionAvailability {
+  action: RepoAction
+  enabled: boolean
+  /** Host 原因码（STATE_BLOCKED / CONFIRM_REQUIRED / AVAILABLE / E_*）。 */
+  reasonCode: string
+  /** Host 原因文案（禁用时作为 tooltip「原因：…」）。 */
+  reason: string
+  /** 是否需二次确认（仅由 Host 输出，UI 不自行判定）。 */
+  requiresConfirm: boolean
+}
+
+/** Host actions 读取状态：未就绪时五键禁用并提示「正在读取 Host 能力」。 */
+export type HostActionsStatus = 'idle' | 'loading' | 'ready' | 'error'
+
+/** Host actions 数据来源（Host getComponentDetail / Mock 测试矩阵）。 */
+export type HostActionsSource = 'host' | 'mock'
+
 export interface OperationVm {
   action: RepoAction | string
+  /** 操作所属组件（FR-OPS-05：状态栏模板 `<componentId>/<RepoType>`）。 */
+  componentId?: string
+  /** 操作所属仓类型（状态栏模板 `<componentId>/<RepoType>` 的 RepoType 段）。 */
+  repoType?: string
   scope: string
   state: OperationState
   at: string
@@ -227,7 +249,7 @@ export interface ConfirmVm {
  */
 export interface ConfirmBarVm {
   action: 'COMMIT' | 'PUSH'
-  /** 主文案：COMMIT「将提交 N 个已暂存文件」；PUSH「将推送 N 个提交（分支 → upstream）」。 */
+  /** 主文案：COMMIT「将提交 N 个文件（已暂存 M）」；PUSH「将推送 N 个提交（分支 → upstream）」。 */
   text: string
   /** 次要说明：NO_UPSTREAM 的发布分支、stageAll 影响等。 */
   detail?: string

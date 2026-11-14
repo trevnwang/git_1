@@ -159,7 +159,7 @@ public sealed class HostCommandRouterTests
                 componentId = "CF100A_Demo",
                 repoType = "IMPL",
                 action = "COMMIT",
-                args = new { message = "router e2e commit" }
+                args = new { message = "router e2e commit", confirm = true }
             });
 
         Assert.True(result.Ok);

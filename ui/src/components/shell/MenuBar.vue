@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useWorkbench } from '../../stores/workbench'
+import { M2B_BOUNDARY_TEXT } from '../../viewmodel'
 import type { MenuItemVm } from '../../types/workbench'
 
 const w = useWorkbench()
@@ -55,10 +56,10 @@ const MENUS: MenuDef[] = [
       { key: 'actions.COMMIT', label: '单仓 COMMIT', shortcut: 'Alt+4' },
       { key: 'actions.PUSH', label: '单仓 PUSH', shortcut: 'Alt+5' },
       { key: 'sep3', label: '', separator: true },
-      { key: 'component.SYNC', label: '组件 SYNC…（M2）' },
-      { key: 'component.CREATE', label: '组件 CREATE…（M2）' },
-      { key: 'component.CLONE', label: '批量 Clone…（M2）' },
-      { key: 'component.DELETE', label: '批量 Delete…（M2）', danger: true },
+      { key: 'component.SYNC', label: `组件 SYNC… — ${M2B_BOUNDARY_TEXT}` },
+      { key: 'component.CREATE', label: `组件 CREATE… — ${M2B_BOUNDARY_TEXT}` },
+      { key: 'component.CLONE', label: `批量 Clone… — ${M2B_BOUNDARY_TEXT}` },
+      { key: 'component.DELETE', label: `批量 Delete… — ${M2B_BOUNDARY_TEXT}`, danger: true },
       { key: 'tools.tasks', label: '任务中心' },
     ],
   },
@@ -135,6 +136,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocumentPointe
               role="menuitem"
               :class="{ danger: item.danger }"
               :disabled="item.disabled"
+              :data-testid="`menu-item-${item.key}`"
               @click="run(item)"
             >
               <span class="label">{{ item.label }}</span>

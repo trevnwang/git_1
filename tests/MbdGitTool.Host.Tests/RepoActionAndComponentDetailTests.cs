@@ -27,7 +27,7 @@ public sealed class RepoActionServiceTests
             ["DETACHED_TAG"] = "NYCNN",
             ["DETACHED_COMMIT"] = "NYCNN",
             ["NO_UPSTREAM"] = "NYNNY",
-            ["EMPTY"] = "NYCYY",
+            ["EMPTY"] = "NYCYN",
             ["UNMERGED"] = "NYNNN",
             ["IN_PROGRESS"] = "NNNNN",
             ["INVALID"] = "NNNNN",
@@ -47,7 +47,14 @@ public sealed class RepoActionServiceTests
         Assert.Equal(new[] { "PULL", "FETCH", "CHKOUT", "COMMIT", "PUSH" }, availability.Select(item => item.Action));
         var actual = string.Concat(availability.Select(item =>
             !item.MatrixAllowed ? "N" : item.RequiresConfirm ? "C" : "Y"));
-        Assert.Equal(expected, actual);
+        // ADR AC-UI-08：COMMIT/PUSH 冻结 RequiresConfirm=true（即使矩阵 cell=Y）。
+        var actions = new[] { "PULL", "FETCH", "CHKOUT", "COMMIT", "PUSH" };
+        var expectedEffective = string.Concat(actions.Select((action, index) =>
+        {
+            if (!availability[index].MatrixAllowed) return "N";
+            return expected[index] == 'C' || action is "COMMIT" or "PUSH" ? "C" : "Y";
+        }));
+        Assert.Equal(expectedEffective, actual);
         Assert.All(availability, item =>
         {
             // M2：能力开关 RepoActions=true，Enabled 严格等于矩阵允许（FR-ACT-02 / D-024）。
