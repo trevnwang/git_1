@@ -1,7 +1,7 @@
 # M2b-1 阶段报告：作业内核 + 批量操作 + 任务中心（2026-11-14）
 
 > M2b 第一批：**作业内核（job/job_item/JOB_UPDATED/取消/仅重试失败/持久化）** + **批量 PULL/FETCH/SYNC/CLONE/DELETE/RESTORE/CREATE/TAG** + **任务中心 UI**。
-> 状态：**M2b-1 候选，待对抗评审；不宣称 M2b 完成**。完整 M2b 仍缺审计完整表/查询导出/90 天、备份 ref 恢复入口、EMPTY 首推、离线降级、journal/reconcile。
+> 状态：**M2b-1 Gate 通过（代码 P0/P1=0；UX P0/P1=0；298/298 测试）**，tag `m2b-1`；**不代表完整 M2b/M2 完成**。完整 M2b 仍缺 M2b-2：审计完整表/查询导出/90 天、备份 ref 恢复入口、EMPTY 首推、离线降级、journal/reconcile。
 
 ## 1. 已交付
 
@@ -30,13 +30,13 @@
 | JOB_UPDATED | ✅ 任务中心历史计数 6→7 自动更新（未手动刷新） |
 | 审计 | ✅ 每 item 1 行，含 jobId/jobItemId/backupRef/actor/requestId；无 token |
 
-## 3. 验证
+## 3. 对抗评审与 Gate 结果\n\n| 评审 | 结果 |\n|---|---|\n| M2b-1 代码/安全评审 | P0=1/P1=7（发现 SYNC/DELETE 预检、取消语义、审计、事件契约等） |\n| M2b-1 UX 评审 | P0=2/P1=4（任务中心分段劫持、取消误报 E_TIMEOUT 等） |\n| 修复后代码 Gate | **P0=0/P1=0**，298/298 测试、Release 0 warning、M2a 不退化 |\n| 修复后 UX Gate | **P0=0/P1=0**，M2a selfcheck 11/11、任务中心/批量确认/事件实测通过 |\n\n## 4. 验证
 
 - 构建 0 warning / 0 error；vstest **289/289**（Core 71 + Host 218）。
 - 前端 `npm run build` 通过；CDP 自测任务中心/批量/确认/取消/重试。
 - 截图：`docs/images/m2b/task-history.png`、`clone-dialog.png`、`clone-job.png`。
 
-## 4. 未完成（M2b-2）
+## 5. 未完成（M2b-2）
 
 1. **审计完整表**：SQLite `operation_log` 全字段、查询/导出、≥90 天保留（当前 JSONL audit-lite + job 关联）。
 2. **备份 ref 恢复**：按 `refs/backup/sync/*` 选择恢复（当前仅展示 backupRef；无 ref 恢复参数）。
