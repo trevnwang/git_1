@@ -328,7 +328,7 @@ internal static class TestAudit
     public static string NewJobsRoot() =>
         Path.Combine(Path.GetTempPath(), "MbdGitToolTests", "jobs", Guid.NewGuid().ToString("N"));
 
-    /// <summary>带临时 <see cref="AppConfig.AuditRoot"/> / <see cref="AppConfig.JobsRoot"/> 的配置。</summary>
+    /// <summary>带临时 <see cref="AppConfig.AuditRoot"/> / <see cref="AppConfig.JobsRoot"/> / journal 的配置。</summary>
     public static AppConfig NewConfig(string? workspaceRoot = null, string? giteaToken = null) => new()
     {
         WorkspaceRoot = workspaceRoot,
@@ -336,8 +336,13 @@ internal static class TestAudit
         AuditRoot = NewRoot(),
         JobsRoot = NewJobsRoot(),
         DatabasePath = NewDatabasePath(),
-        ExportsRoot = NewExportsRoot()
+        ExportsRoot = NewExportsRoot(),
+        JournalRoot = NewJournalRoot()
     };
+
+    /// <summary>隔离的写前 journal 目录（M2b-2b；避免单测写真实 <c>%LOCALAPPDATA%\MbdGitTool\journal</c>）。</summary>
+    public static string NewJournalRoot() =>
+        Path.Combine(Path.GetTempPath(), "MbdGitToolTests", "journal", Guid.NewGuid().ToString("N"));
 
     /// <summary>隔离的 SQLite 审计库路径（M2b-2；避免单测写真实 <c>%LOCALAPPDATA%\MbdGitTool\db</c>）。</summary>
     public static string NewDatabasePath() =>

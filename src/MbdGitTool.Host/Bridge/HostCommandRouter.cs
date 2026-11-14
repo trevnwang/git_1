@@ -106,7 +106,7 @@ public sealed class HostCommandRouter : IDisposable
         _audit = new OperationAuditService(_snapshots.Config);
 
         // M2b-2：备份 ref 列表/恢复（refs/backup/sync/*；恢复前写 refs/backup/restore/* 安全备份）。
-        _backup = new BackupRefService(_snapshots.Config);
+        _backup = new BackupRefService(_snapshots.Config, journal: _journal);
 
         // M2b-2：本地保留清理（.trash 30 天 / 备份 ref backup.retentionDays / 审计 auditRetentionDays）。
         _retention = new RetentionService(_snapshots.Config, _audit, _backup);

@@ -253,6 +253,7 @@ function trapTab(event: KeyboardEvent): void {
                 :data-repo-type="item.repoType"
               >
                 <span class="mono truncate backup-ref-name" :title="item.ref">{{ item.ref }}</span>
+                <span v-if="item.kind === 'SAFETY'" class="backup-branch safety" title="恢复前自动安全备份，可恢复到此处">安全备份</span>
                 <span v-if="item.branch" class="backup-branch" :title="`来源分支：${item.branch}（${item.format}）`">@{{ item.branch }}</span>
                 <span v-else class="backup-branch legacy" title="旧备份无分支身份；恢复前请确认当前分支">旧格式</span>
                 <span class="mono backup-sha" :title="item.sha">{{ shortSha(item.sha) }}</span>

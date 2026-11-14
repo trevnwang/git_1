@@ -963,9 +963,9 @@ public sealed class OperationAuditService
         var filter = BuildFilter(
             parameters?.From,
             parameters?.To,
-            action: null,
-            componentId: null,
-            result: null,
+            action: parameters?.Action,
+            componentId: parameters?.ComponentId,
+            result: parameters?.Result,
             limit: 1,
             offset: 0,
             out var error);

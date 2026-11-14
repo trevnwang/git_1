@@ -14,11 +14,11 @@
 | 崩溃 reconcile | 启动扫描 STARTED：HEAD==preHead → `NOT_APPLIED`；HEAD 变化 → `UNKNOWN_APPLIED`（不猜成功）；写 `action=RECONCILE` 审计并回写任务中心 item；只读、不修改仓库 |
 | EMPTY 首推 | 有 HEAD 的 EMPTY 首推 `push -u origin HEAD` 建 upstream；unborn UI 禁用并给 `E_REF_NOT_FOUND`（矩阵/单测覆盖） |
 | 离线 | 仅显式远程错误/离线标记判离线并禁用 FETCH；健康 `local+gitea` 不误报（realhost 19/19） |
-| 保留清理 | `.trash` 30 天 / backup refs 30 天 / 审计 ≥90 天；命令+启动清理；不误删保留期内数据 |
+| 保留清理 | `.trash` 30 天 / backup refs 30 天 / 审计 ≥90 天；命令+启动清理；不误删保留期内数据 |\n| 安全 ref 可见/可恢复 | `getBackupRefs` 同时列出 `refs/backup/restore/*`（Kind=SAFETY、branch=null）；restore 允许从安全 ref 恢复；cleanup 按时间戳清理安全 ref；UI 显示“安全备份” |\n| restore journal | `restoreBackupRef` reset 前写 STARTED，成功 DONE(postHead)，失败/安全 ref 失败 FAILED；测试覆盖 |\n| 导出过滤 | `exportOperationLog` 接受 action/componentId/result，UI 按当前审计过滤导出；不再“过滤 15 行导出 369 行” |
 
 ## 2. 验证
 
-- `vstest` **369/369**（Core 71 + Host 298）；构建 0 warning。
+- `vstest` **385/385**（新增安全 ref/journal/回填/导出过滤用例）；构建 0 warning。
 - M2b-2 Mock/CDP 自检 **53/53**；M2a 11/11；M2b-1 68/68。
 - realhost 只读自检 **19/19**（真实审计查询/导出、备份 ref 分支/旧格式、无 console error）。
 - 真实 SYNC 新 ref：`refs/backup/sync/20261114123736/main/DESIGN` 等 4 条；旧 ref 列表为 LEGACY。

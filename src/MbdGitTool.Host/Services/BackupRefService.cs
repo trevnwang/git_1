@@ -44,11 +44,13 @@ public sealed class BackupRefService
 
     private readonly GitCli _git;
     private readonly string? _workspaceRoot;
+    private readonly OperationJournal? _journal;
 
-    public BackupRefService(AppConfig? config = null, GitCli? git = null)
+    public BackupRefService(AppConfig? config = null, GitCli? git = null, OperationJournal? journal = null)
     {
         _git = git ?? new GitCli();
         _workspaceRoot = config?.WorkspaceRoot;
+        _journal = journal;
     }
 
     /// <summary>工作区根目录（保留清理用；空 = 未配置）。</summary>
@@ -103,7 +105,8 @@ public sealed class BackupRefService
                 entry.CreatedAt,
                 entry.RepoType,
                 entry.Branch,
-                entry.Format))
+                entry.Format,
+                entry.Kind))
             .ToList();
         return CommandResult.Success(new BackupRefsDto(refs));
     }
@@ -142,7 +145,23 @@ public sealed class BackupRefService
                 new Dictionary<string, object?> { ["field"] = "ref" }));
         }
 
-        if (!TryParseBackupRef(requestedRef, out var refText, out _, out var refBranch, out var refType, out var refFormat))
+        string refText;
+        string? refBranch;
+        string refType;
+        string refFormat;
+        if (requestedRef.StartsWith(RestoreRefPrefix, StringComparison.Ordinal))
+        {
+            if (!TryParseSafetyRef(requestedRef, out refText, out refType))
+            {
+                return (null, new BridgeError(
+                    BridgeErrorCodes.InvalidArgument,
+                    "参数 ref 必须属于 refs/backup/restore/<stamp>/<DESIGN|IMPL|MIL|SIL>，或 refs/backup/sync/...",
+                    new Dictionary<string, object?> { ["field"] = "ref", ["ref"] = requestedRef }));
+            }
+            refBranch = null;
+            refFormat = BackupRefFormats.Legacy;
+        }
+        else if (!TryParseBackupRef(requestedRef, out refText, out _, out refBranch, out refType, out refFormat))
         {
             return (null, new BridgeError(
                 BridgeErrorCodes.InvalidArgument,
@@ -254,6 +273,8 @@ public sealed class BackupRefService
             .RunAsync(path, new[] { "rev-parse", "--verify", "--quiet", "HEAD" }, cancellationToken)
             .ConfigureAwait(false);
         var preHead = preHeadResult.Success ? preHeadResult.TrimmedStdout : null;
+        // M2b-2b FR-SAFE-04：restore 的 reset 也是写操作，写前 journal STARTED。
+        var journalEntry = _journal?.Begin("RESTORE_BACKUP", null, normalizedType, preHead, path);
         string? safetyRef = null;
         if (preHead is not null)
         {
@@ -264,6 +285,7 @@ public sealed class BackupRefService
                 .ConfigureAwait(false);
             if (!updateSafety.Success)
             {
+                _journal?.Fail(journalEntry, BridgeErrorCodes.GitFailed);
                 return (null, GitFailure(
                     "创建恢复前安全备份 ref 失败；已拒绝 reset，工作区未改动",
                     updateSafety));
@@ -276,6 +298,7 @@ public sealed class BackupRefService
             .ConfigureAwait(false);
         if (!reset.Success)
         {
+            _journal?.Fail(journalEntry, BridgeErrorCodes.GitFailed);
             return (null, GitFailure(
                 "reset --hard 失败；未改动远端，恢复前安全备份已保留，可重试",
                 reset));
@@ -285,6 +308,7 @@ public sealed class BackupRefService
             .RunAsync(path, new[] { "rev-parse", "--verify", "--quiet", "HEAD" }, cancellationToken)
             .ConfigureAwait(false);
         var postHead = postHeadResult.Success ? postHeadResult.TrimmedStdout : null;
+        _journal?.Complete(journalEntry, postHead);
 
         HostLog.Info(
             $"restoreBackupRef 完成：ref={refText} {normalizedType} format={refFormat}"
@@ -349,6 +373,34 @@ public sealed class BackupRefService
     /// <c>branch=Uri.UnescapeDataString(段)</c>（必须为合法分支名且可规范回编码）+ <c>BRANCH</c>；
     /// <c>DETACHED</c> 占位段解析为 <c>branch="DETACHED"</c>（恢复时与任何真实分支不一致 → 安全阻断）。</para>
     /// </summary>
+    /// <summary>解析恢复前安全备份 ref：<c>refs/backup/restore/&lt;stamp&gt;/&lt;TYPE&gt;</c>。</summary>
+    public static bool TryParseSafetyRef(string? value, out string refText, out string repoType)
+    {
+        refText = string.Empty;
+        repoType = string.Empty;
+        if (string.IsNullOrWhiteSpace(value)
+            || !value.StartsWith(RestoreRefPrefix, StringComparison.Ordinal)
+            || value.Length > MaxRefNameChars)
+        {
+            return false;
+        }
+
+        var segments = value[RestoreRefPrefix.Length..].Split('/');
+        if (segments.Length != 2)
+        {
+            return false;
+        }
+
+        var type = segments[^1].ToUpperInvariant();
+        if (type is not ("DESIGN" or "IMPL" or "MIL" or "SIL"))
+        {
+            return false;
+        }
+
+        refText = value;
+        repoType = type;
+        return true;
+    }
     public static bool TryParseBackupRef(
         string? value,
         out string refText,
@@ -527,7 +579,8 @@ public sealed class BackupRefService
         string CreatedAt,
         string RepoType,
         string? Branch,
-        string Format);
+        string Format,
+        string Kind);
 
     private async Task<IReadOnlyList<BackupRefEntry>?> ListRefsAsync(
         string localPath,
@@ -540,7 +593,8 @@ public sealed class BackupRefService
                 {
                     "for-each-ref",
                     "--format=%(refname)%09%(objectname)%09%(committerdate:iso-strict)",
-                    SyncRefPrefix
+                    SyncRefPrefix,
+                    RestoreRefPrefix
                 },
                 cancellationToken)
             .ConfigureAwait(false);
@@ -559,19 +613,27 @@ public sealed class BackupRefService
                 continue;
             }
 
-            if (!TryParseBackupRef(
-                    fields[0],
-                    out var refText,
-                    out _,
-                    out var branch,
-                    out var repoType,
-                    out var format))
+            var refName = fields[0].Trim();
+            string refText;
+            string? branch;
+            string repoType;
+            string format;
+            string kind;
+            if (refName.StartsWith(RestoreRefPrefix, StringComparison.Ordinal))
             {
-                continue;
+                if (!TryParseSafetyRef(refName, out refText, out repoType)) continue;
+                branch = null;
+                format = BackupRefFormats.Legacy;
+                kind = BackupRefKinds.Safety;
+            }
+            else
+            {
+                if (!TryParseBackupRef(refName, out refText, out _, out branch, out repoType, out format)) continue;
+                kind = BackupRefKinds.Sync;
             }
 
             var createdAt = NormalizeCommitterDate(fields[2]);
-            entries.Add(new BackupRefEntry(refText, fields[1].Trim(), createdAt, repoType, branch, format));
+            entries.Add(new BackupRefEntry(refText, fields[1].Trim(), createdAt, repoType, branch, format, kind));
         }
 
         return entries;
@@ -597,7 +659,7 @@ public sealed class BackupRefService
         CancellationToken cancellationToken)
     {
         var result = await _git
-            .RunAsync(localPath, new[] { "for-each-ref", "--format=%(refname)", SyncRefPrefix }, cancellationToken)
+            .RunAsync(localPath, new[] { "for-each-ref", "--format=%(refname)", SyncRefPrefix, RestoreRefPrefix }, cancellationToken)
             .ConfigureAwait(false);
         if (!result.Success)
         {
@@ -609,7 +671,17 @@ public sealed class BackupRefService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var refName = raw.Trim();
-            if (!TryParseBackupRef(refName, out var refText, out var stamp, out _))
+            string refText;
+            string stamp;
+            if (refName.StartsWith(RestoreRefPrefix, StringComparison.Ordinal))
+            {
+                if (!TryParseSafetyRef(refName, out refText, out _)) continue;
+                var safetyMiddle = refName[RestoreRefPrefix.Length..];
+                var slash = safetyMiddle.IndexOf('/');
+                stamp = slash > 0 ? safetyMiddle[..slash] : safetyMiddle;
+                if (stamp.Length > 14) stamp = stamp[..14];
+            }
+            else if (!TryParseBackupRef(refName, out refText, out stamp, out _))
             {
                 continue;
             }

@@ -6,6 +6,12 @@ namespace MbdGitTool.Core.Contracts;
 /// <para><see cref="Branch"/>：M2b-2b 的 <c>refs/backup/sync/&lt;ts&gt;/&lt;branch&gt;/&lt;TYPE&gt;</c>
 /// （<c>branch</c> 为安全编码后的分支名；无分支身份时用 <c>DETACHED</c> 占位）。</para>
 /// </summary>
+public static class BackupRefKinds
+{
+    public const string Sync = "SYNC";
+    public const string Safety = "SAFETY";
+}
+
 public static class BackupRefFormats
 {
     /// <summary>旧格式（无分支身份，解析出的 <see cref="BackupRefDto.Branch"/> = null）。</summary>
@@ -28,7 +34,8 @@ public sealed record BackupRefDto(
     string CreatedAt,
     string RepoType,
     string? Branch = null,
-    string Format = BackupRefFormats.Legacy);
+    string Format = BackupRefFormats.Legacy,
+    string Kind = "SYNC");
 
 /// <summary><c>getBackupRefs</c> 响应：<c>{ refs: BackupRefDto[] }</c>（按创建时间/ref 倒序，新备份在前）。</summary>
 public sealed record BackupRefsDto(IReadOnlyList<BackupRefDto> Refs);

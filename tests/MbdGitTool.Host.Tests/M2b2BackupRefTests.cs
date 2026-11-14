@@ -254,6 +254,50 @@ public sealed class M2b2BackupRefTests : IDisposable
     }
 
     [Fact]
+    public async Task SafetyRef_IsListedAsSafety_AndRestorable()
+    {
+        var repo = CreateRepoWithCommits(out var first, out var second);
+        var safety = $"refs/backup/restore/20260101000000-abcdef12/IMPL";
+        TestGit.Run(repo, "update-ref", safety, first);
+
+        var list = await new BackupRefService().GetBackupRefsAsync(repo, "IMPL", CancellationToken.None);
+        Assert.True(list.Ok, list.Error?.Code);
+        var refs = Assert.IsType<BackupRefsDto>(list.Data).Refs;
+        var safetyRef = Assert.Single(refs, item => item.Ref == safety);
+        Assert.Equal(BackupRefKinds.Safety, safetyRef.Kind);
+        Assert.Null(safetyRef.Branch);
+
+        var (result, error) = await new BackupRefService().RestoreAsync(
+            repo, "IMPL", safety, CancellationToken.None);
+        Assert.Null(error);
+        Assert.True(result!.Restored);
+        Assert.Equal(first, TestGit.Capture(repo, "rev-parse", "HEAD"));
+        Assert.NotEqual(second, result.PostHead);
+    }
+
+    [Fact]
+    public async Task Restore_WritesJournalStartedAndDone()
+    {
+        var repo = CreateRepoWithCommits(out var first, out var second);
+        var config = TestAudit.NewConfig(_workspace.Root);
+        var journal = new OperationJournal(config);
+        var stamp = DaysAgo(1);
+        CreateBackupRef(repo, stamp, "IMPL", first);
+
+        var (result, error) = await new BackupRefService(config, journal: journal).RestoreAsync(
+            repo, "IMPL", $"refs/backup/sync/{stamp}/IMPL", CancellationToken.None);
+
+        Assert.Null(error);
+        Assert.True(result!.Restored);
+        var lines = File.ReadAllLines(journal.FilePath);
+        Assert.Contains(lines, line => line.Contains("\"action\":\"RESTORE_BACKUP\"", StringComparison.Ordinal)
+            && line.Contains("\"status\":\"STARTED\"", StringComparison.Ordinal));
+        Assert.Contains(lines, line => line.Contains("\"action\":\"RESTORE_BACKUP\"", StringComparison.Ordinal)
+            && line.Contains("\"status\":\"DONE\"", StringComparison.Ordinal));
+        Assert.Equal(second, TestGit.Capture(repo, "rev-parse", result.SafetyRef!));
+    }
+
+    [Fact]
     public async Task Restore_UntrackedFile_IsBlockedAndPreserved()
     {
         var repo = CreateRepoWithCommits(out var first, out _);

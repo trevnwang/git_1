@@ -451,6 +451,8 @@ export interface BackupRefDto {
   branch?: string | null
   /** M2b-2b：LEGACY | BRANCH。 */
   format?: string
+  /** M2b-2b：SYNC | SAFETY。 */
+  kind?: string
 }
 
 /** `getBackupRefs` 参数（契约：{componentId,repoType?}）。 */
@@ -1561,6 +1563,7 @@ export function normalizeBackupRefs(value: unknown): BackupRefsDto {
       repoType: (readString(refRecord, 'repoType') ?? '').toUpperCase(),
       branch: readNullableString(refRecord, 'branch'),
       format: readString(refRecord, 'format') ?? (readString(refRecord, 'branch') ? 'BRANCH' : 'LEGACY'),
+      kind: readString(refRecord, 'kind') ?? 'SYNC',
     })
   }
   return { refs }
@@ -1853,8 +1856,12 @@ export const api = {
     return normalizeOperationLogPage(await request<unknown>('getOperationLog', payload))
   },
   /** 导出操作审计（契约 `{format:'csv'|'json'}` → `{path,count}`；path 必填，否则视为失败）。 */
-  async exportOperationLog(format: 'csv' | 'json'): Promise<ExportOperationLogResultDto> {
-    return normalizeExportOperationLogResult(await request<unknown>('exportOperationLog', { format }))
+  async exportOperationLog(format: 'csv' | 'json', filters: { action?: string; result?: string; componentId?: string } = {}): Promise<ExportOperationLogResultDto> {
+    const payload: Record<string, unknown> = { format }
+    if (filters.action) payload.action = filters.action
+    if (filters.result) payload.result = filters.result
+    if (filters.componentId) payload.componentId = filters.componentId
+    return normalizeExportOperationLogResult(await request<unknown>('exportOperationLog', payload))
   },
   // ── M2b-2 备份 ref 恢复（按组件/仓列出 SYNC 备份 ref，确认后恢复） ──
   /** 按组件（可选仓类型）读取可恢复的备份 ref（契约 `{componentId,repoType?}` → `{refs}`）。 */

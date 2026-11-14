@@ -511,6 +511,7 @@ export interface BackupRefVm {
   repoType: string
   branch: string | null
   format: string
+  kind: string
 }
 
 /** 离线判定结果（source=local 且存在远程错误/离线标记时 offline=true）。 */

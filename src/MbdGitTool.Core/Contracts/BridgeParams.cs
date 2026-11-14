@@ -103,7 +103,10 @@ public sealed record GetOperationLogParams(
 public sealed record ExportOperationLogParams(
     string? Format = null,
     string? From = null,
-    string? To = null);
+    string? To = null,
+    string? Action = null,
+    string? ComponentId = null,
+    string? Result = null);
 
 /// <summary>M2b-2 <c>getBackupRefs</c> 参数：按组件 + 可选仓类型列出本地 <c>refs/backup/sync/*</c>。</summary>
 public sealed record GetBackupRefsParams(string? ComponentId = null, string? RepoType = null);
