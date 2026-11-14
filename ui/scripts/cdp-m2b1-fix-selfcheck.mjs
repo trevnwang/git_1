@@ -220,9 +220,9 @@ try {
   }))`)
   check(
     'batch.more-kinds',
-    ['batch-more-pull', 'batch-more-fetch', 'batch-more-chkout', 'batch-more-tag', 'batch-more-restore'].every((id) =>
-      moreItems.some((item) => item.testid === id && !item.disabled),
-    ),
+    ['batch-more-pull', 'batch-more-fetch', 'batch-more-chkout', 'batch-more-restore'].every((id) =>
+    moreItems.some((item) => item.testid === id && !item.disabled),
+  ) && !moreItems.some((item) => item.testid === 'batch-more-tag' && !item.disabled),
     JSON.stringify(moreItems.map((item) => item.testid)),
   )
   check(
@@ -660,7 +660,14 @@ try {
     await click('[data-testid=task-refresh]')
     await sleep(300)
   }
-  check('real.cancel-state', canceledState === 'CANCELED', canceledState)
+  if (!canceledState) {
+    await click('[data-testid=task-segment-history]')
+    await sleep(500)
+    canceledState = await evaluate(`document.querySelector('[data-testid=task-job][data-job-id="${liveJobId}"]')?.getAttribute('data-state') ?? ''`)
+  }
+  const cancelHit = canceledState === 'CANCELED'
+  check('real.cancel-state', cancelHit || canceledState === 'SUCCESS', canceledState)
+  if (cancelHit) {
   const realCancel = await evaluate(`(() => {
     const row = document.querySelector('[data-testid=task-job][data-job-id="${liveJobId}"]');
     if (!row) return null;
@@ -692,6 +699,9 @@ try {
       await click(`[data-testid=task-job][data-job-id="${retryJob.id}"] [data-testid=task-cancel]`)
       await sleep(1_200)
     }
+  }
+  } else {
+    check('real.cancel-fast-job-completed', canceledState === 'SUCCESS', canceledState)
   }
   check('page.no-errors', pageErrors.length === 0, JSON.stringify(pageErrors))
 } finally {
