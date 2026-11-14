@@ -1761,6 +1761,109 @@ public sealed class JobEngineTests
         }
     }
     [Fact]
+    public async Task Repair_NonGitDirectory_BacksUpAndInitsFromRemote()
+    {
+        using var remotes = new TempWorkspace();
+        var remoteRoot = Path.Combine(remotes.Root, "remote");
+        var orgRoot = Path.Combine(remoteRoot, "RTCRepos");
+        Directory.CreateDirectory(orgRoot);
+        CreateSeedBareRemote(remotes.Root, orgRoot, "CF214A_Repair_IMPL");
+        using var workspace = new TempWorkspace();
+        var dir = Path.Combine(workspace.Root, "CF214A_Repair_IMPL");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "local-note.txt"), "keep me");
+        var config = new AppConfig
+        {
+            WorkspaceRoot = workspace.Root,
+            GiteaBaseUrl = "file:///" + remoteRoot.Replace('\\', '/').TrimStart('/'),
+            GiteaOrg = "RTCRepos",
+            AuditRoot = TestAudit.NewRoot(),
+            JobsRoot = TestAudit.NewJobsRoot(),
+            DatabasePath = TestAudit.NewDatabasePath(),
+            ExportsRoot = TestAudit.NewExportsRoot(),
+        };
+        var repoRef = MakeRepoRef("CF214A_Repair", "IMPL", dir, "INVALID", null);
+        var batch = new BatchOperationService(config, new RepoActionService(config: config), paths: new PathPolicy(workspace.Root));
+        var args = new StoredJobArguments(null, null, null, true, false, false, false, false, false, null, "CF214A_Repair");
+        var result = await batch.RepairAsync(repoRef, "CF214A_Repair", "IMPL", args, CancellationToken.None);
+        Assert.True(result.State == JobItemStates.Ok, result.ErrorCode + ":" + result.Message);
+        Assert.True(Directory.Exists(Path.Combine(dir, ".git")));
+        var backups = Directory.GetFiles(Path.Combine(workspace.Root, ".trash"), "local-note.txt", SearchOption.AllDirectories);
+        Assert.Single(backups);
+    }
+
+    [Fact]
+    public async Task Reclone_CleanRepo_MovesToTrashAndClonesFresh()
+    {
+        using var remotes = new TempWorkspace();
+        var remoteRoot = Path.Combine(remotes.Root, "remote");
+        var orgRoot = Path.Combine(remoteRoot, "RTCRepos");
+        Directory.CreateDirectory(orgRoot);
+        CreateSeedBareRemote(remotes.Root, orgRoot, "CF215A_Reclone_IMPL");
+        using var workspace = new TempWorkspace();
+        var dir = Path.Combine(workspace.Root, "CF215A_Reclone_IMPL");
+        TestGit.Run(workspace.Root, "clone", "-q", Path.Combine(orgRoot, "CF215A_Reclone_IMPL.git"), dir);
+        TestGit.ConfigureIdentity(dir);
+        var config = new AppConfig
+        {
+            WorkspaceRoot = workspace.Root,
+            GiteaBaseUrl = "file:///" + remoteRoot.Replace('\\', '/').TrimStart('/'),
+            GiteaOrg = "RTCRepos",
+            AuditRoot = TestAudit.NewRoot(),
+            JobsRoot = TestAudit.NewJobsRoot(),
+            DatabasePath = TestAudit.NewDatabasePath(),
+            ExportsRoot = TestAudit.NewExportsRoot(),
+        };
+        var repoRef = MakeRepoRef("CF215A_Reclone", "IMPL", dir, "INVALID", TestGit.Capture(dir, "rev-parse", "HEAD"));
+        var batch = new BatchOperationService(config, new RepoActionService(config: config), paths: new PathPolicy(workspace.Root));
+        var args = new StoredJobArguments(null, null, null, true, false, false, false, false, false, null, "CF215A_Reclone");
+        var result = await batch.RecloneAsync(repoRef, "CF215A_Reclone", "IMPL", args, CancellationToken.None);
+        Assert.True(result.State == JobItemStates.Ok, result.ErrorCode + ":" + result.Message);
+        Assert.True(Directory.Exists(Path.Combine(dir, ".git")));
+        Assert.NotEmpty(Directory.GetFiles(Path.Combine(workspace.Root, ".trash"), "README.md", SearchOption.AllDirectories));
+    }
+    [Fact]
+    public async Task RunBatch_Tag_FourRepos_MixedWritesFourBaselineRows()
+    {
+        using var fixture = BatchWorkspace.Create("CF213A_Tag4_DESIGN", "CF213A_Tag4_IMPL", "CF213A_Tag4_MIL", "CF213A_Tag4_SIL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        foreach (var (name, clone) in fixture.Clones)
+        {
+            if (name.EndsWith("_SIL", StringComparison.Ordinal)) continue;
+            TestGit.Run(clone, "tag", "-a", "v3.0.0", "-m", "annotated");
+            TestGit.Run(clone, "push", "-q", "origin", "v3.0.0");
+        }
+
+        var result = await DispatchAsync(router, "runBatch", new
+        {
+            kind = "TAG",
+            componentIds = new[] { "CF213A_Tag4" },
+            repoTypes = new[] { "DESIGN", "IMPL", "MIL", "SIL" },
+            args = new { tag = "v3.0.0", confirm = true }
+        });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(result).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+        Assert.Equal(3, job.Items.Count(item => item.State == "OK"));
+        Assert.Equal(1, job.Items.Count(item => item.State == "SKIPPED"));
+
+        var rows = new BaselineSnapshotService(config).List("CF213A_Tag4");
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(3, rows.Count(row => row.TagPresent));
+        var missing = Assert.Single(rows, row => !row.TagPresent);
+        Assert.Equal("SIL", missing.RepoType);
+        Assert.Null(missing.CommitSha);
+        Assert.All(rows.Where(row => row.TagPresent), row =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(row.CommitSha));
+            Assert.False(string.IsNullOrWhiteSpace(row.TagObjectSha));
+            Assert.NotEqual(row.CommitSha, row.TagObjectSha); // annotated tag object != commit
+        });
+    }
+    [Fact]
     public async Task RunBatch_Tag_MissingRemoteTag_SkipsWithTagDrift_ZeroCheckout()
     {
         using var fixture = BatchWorkspace.Create("CF100A_Demo_Impl");
