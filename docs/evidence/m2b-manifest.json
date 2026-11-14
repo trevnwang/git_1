@@ -1,36 +1,61 @@
 {
-  "commit": "e16043c",
-  "generatedAt": "2026-11-14T19:12:11.021Z",
+  "commit": "159b393",
+  "generatedAt": "2026-11-14T19:27:36.891Z",
   "suite": [
     {
       "name": "cdp-m2a-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2a-selfcheck.mjs",
-      "startedAt": "2026-11-14T19:11:00.974Z",
-      "finishedAt": "2026-11-14T19:11:04.648Z",
+      "startedAt": "2026-11-14T19:26:28.075Z",
+      "finishedAt": "2026-11-14T19:26:31.799Z",
       "result": "PASS"
     },
     {
       "name": "cdp-m2b1-fix-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2b1-fix-selfcheck.mjs",
-      "startedAt": "2026-11-14T19:11:04.648Z",
-      "finishedAt": "2026-11-14T19:11:27.163Z",
+      "startedAt": "2026-11-14T19:26:31.799Z",
+      "finishedAt": "2026-11-14T19:26:54.469Z",
       "result": "PASS"
     },
     {
       "name": "cdp-m2b2-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2b2-selfcheck.mjs",
-      "startedAt": "2026-11-14T19:11:27.163Z",
-      "finishedAt": "2026-11-14T19:11:58.047Z",
+      "startedAt": "2026-11-14T19:26:54.469Z",
+      "finishedAt": "2026-11-14T19:27:24.101Z",
       "result": "PASS"
     },
     {
       "name": "cdp-m2b2-realhost-check.mjs",
       "command": "node ui/scripts/cdp-m2b2-realhost-check.mjs",
-      "startedAt": "2026-11-14T19:11:58.099Z",
-      "finishedAt": "2026-11-14T19:12:10.925Z",
+      "startedAt": "2026-11-14T19:27:24.150Z",
+      "finishedAt": "2026-11-14T19:27:36.816Z",
       "result": "PASS"
     }
   ],
-  "checks": [],
+  "checks": [
+    {
+      "ac": "cdp-m2a-selfcheck.mjs",
+      "status": "PASS",
+      "evidence": "artifacts/cdp-m2a-selfcheck/result.json",
+      "detail": null
+    },
+    {
+      "ac": "cdp-m2b1-fix-selfcheck.mjs",
+      "status": "PASS",
+      "evidence": "artifacts/cdp-m2b1-fix-selfcheck/result.json",
+      "detail": null
+    },
+    {
+      "ac": "cdp-m2b2-selfcheck.mjs",
+      "status": "PASS",
+      "evidence": "artifacts/cdp-m2b2-selfcheck/result.json",
+      "detail": null
+    },
+    {
+      "ac": "cdp-m2b2-realhost-check.mjs",
+      "status": "PASS",
+      "evidence": "artifacts/cdp-m2b2-realhost-check/result.json",
+      "detail": null
+    }
+  ],
   "note": "SKIP 不计入 COVERED；AC 逐条证据见 docs/m2b-ac-op-gap.md"
 }
