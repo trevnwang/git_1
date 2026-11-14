@@ -1427,6 +1427,30 @@ public sealed class JobEngineTests
         Assert.Empty(Directory.GetFiles(pending, "*-CF207A_Pending_IMPL.json"));
     }
     [Fact]
+    public async Task ComponentManagement_StopManage_FiltersSnapshotAndListsState()
+    {
+        using var fixture = BatchWorkspace.Create("CF208A_Mgmt_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        var before = Assert.IsType<SnapshotDto>(Assert.IsType<CommandResult>(
+            await DispatchAsync(router, "getSnapshot", null)).Data);
+        Assert.Contains(before.Components, component => component.ComponentId == "CF208A_Mgmt");
+
+        var stop = await DispatchAsync(router, "unbindComponent", new { componentId = "CF208A_Mgmt", mode = "STOP_MANAGE" });
+        Assert.True(stop.Ok, stop.Error?.Code);
+        var after = Assert.IsType<SnapshotDto>(Assert.IsType<CommandResult>(
+            await DispatchAsync(router, "getSnapshot", null)).Data);
+        Assert.DoesNotContain(after.Components, component => component.ComponentId == "CF208A_Mgmt");
+        Assert.DoesNotContain(after.Components.SelectMany(component => component.Repos), repo => repo.RepoType == "IMPL" && repo.LocalPath?.Contains("CF208A_Mgmt") == true);
+
+        var list = await DispatchAsync(router, "getComponentManagement", null);
+        Assert.True(list.Ok, list.Error?.Code);
+        var json = System.Text.Json.JsonSerializer.Serialize(list.Data, WebJson);
+        Assert.Contains("CF208A_Mgmt", json, StringComparison.Ordinal);
+        Assert.Contains("\"isManaged\":false", json.Replace(" ", string.Empty), StringComparison.OrdinalIgnoreCase);
+    }
+    [Fact]
     public async Task RunBatch_ExternalIndexLock_ReturnsBusyWithoutWriteOrDeletingLock()
     {
         using var fixture = BatchWorkspace.Create("CF204A_Lock_IMPL");

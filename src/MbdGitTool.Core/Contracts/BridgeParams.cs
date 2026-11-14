@@ -9,6 +9,12 @@ public sealed record BridgeRequest(string? Id, string? Method, JsonElement? Para
 
 public sealed record GetComponentDetailParams(string? ComponentId = null);
 
+/// <summary>M2b 组件纳入参数（AC-OP-31）。</summary>
+public sealed record BindComponentParams(string? ComponentId = null, string? DisplayName = null);
+
+/// <summary>M2b 组件移出参数（AC-OP-32）。</summary>
+public sealed record UnbindComponentParams(string? ComponentId = null, string? Mode = null);
+
 public sealed record GetRepoDetailParams(string? ComponentId = null, string? RepoType = null);
 
 public sealed record GetCommitsParams(

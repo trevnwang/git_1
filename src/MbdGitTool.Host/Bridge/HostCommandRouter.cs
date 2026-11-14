@@ -31,6 +31,9 @@ public sealed class HostCommandRouter : IDisposable
         new Dictionary<string, TimeSpan>(StringComparer.Ordinal)
         {
             ["getSnapshot"] = TimeSpan.FromSeconds(45),
+    ["bindComponent"] = TimeSpan.FromSeconds(45),
+    ["unbindComponent"] = TimeSpan.FromSeconds(10),
+    ["getComponentManagement"] = TimeSpan.FromSeconds(5),
             ["refresh"] = TimeSpan.FromSeconds(120),
             ["getComponentDetail"] = TimeSpan.FromSeconds(45),
             ["getRepoDetail"] = TimeSpan.FromSeconds(10),
@@ -71,6 +74,7 @@ public sealed class HostCommandRouter : IDisposable
     private readonly JobEngine _jobs;
     private readonly BackupRefService _backup;
     private readonly RetentionService _retention;
+    private readonly ComponentManagementService _management;
     private readonly RemoteRefsService _remoteRefs;
     private readonly ComponentDetailService _componentDetail;
     private readonly RepoDetailService _repoDetail;
@@ -110,6 +114,7 @@ public sealed class HostCommandRouter : IDisposable
 
         // M2b-2：本地保留清理（.trash 30 天 / 备份 ref backup.retentionDays / 审计 auditRetentionDays）。
         _retention = new RetentionService(_snapshots.Config, _audit, _backup);
+        _management = new ComponentManagementService(_snapshots.Config);
 
         // 启动保留清理：后台执行，避免阻塞 Host 首屏（命令 cleanupRetention 可同步触发）。
         StartupRetention = Task.Run(async () =>
@@ -329,7 +334,7 @@ public sealed class HostCommandRouter : IDisposable
         {
             case "getSnapshot":
             {
-                var snapshot = await _snapshots.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+                var snapshot = ApplyManagementFilter(await _snapshots.GetSnapshotAsync(cancellationToken).ConfigureAwait(false));
                 // 记录“用户实际看到的快照”，写操作 CAS 以它为基线（AC-SAFE-15）。
                 _deliveredIndex = _snapshots.Index;
                 return CommandResult.Success(snapshot);
@@ -337,12 +342,49 @@ public sealed class HostCommandRouter : IDisposable
 
             case "refresh":
             {
-                var snapshot = await _snapshots.RefreshAsync(cancellationToken).ConfigureAwait(false);
+                var snapshot = ApplyManagementFilter(await _snapshots.RefreshAsync(cancellationToken).ConfigureAwait(false));
                 _deliveredIndex = _snapshots.Index;
                 InvalidateCaches();
                 return CommandResult.Success(snapshot);
             }
 
+            case "bindComponent":
+            {
+                var parsedBind = ParseParams<BindComponentParams>(parameters);
+                var ids = parsedBind.ComponentId?.Trim();
+                var display = parsedBind.DisplayName;
+                var (ok, error, missing, displayName) = await _management.BindAsync(ids, display, cancellationToken).ConfigureAwait(false);
+                if (!ok) return CommandResult.Failure(error!);
+                return CommandResult.Success(new
+                {
+                    componentId = ids,
+                    displayName = displayName ?? ids,
+                    isManaged = true,
+                    isDeleted = false,
+                    missingRepos = missing
+                });
+            }
+
+            case "unbindComponent":
+            {
+                var parsedUnbind = ParseParams<UnbindComponentParams>(parameters);
+                var componentId = parsedUnbind.ComponentId?.Trim();
+                var mode = parsedUnbind.Mode?.Trim().ToUpperInvariant();
+                if (mode == "LOCAL_DELETE")
+                {
+                    return CommandResult.Failure(
+                        BridgeErrorCodes.NotImplemented,
+                        "LOCAL_DELETE 请通过批量 DELETE job 执行（确认+输入组件 ID+四阻断+.trash）；完成后由扫描/管理状态收口");
+                }
+                if (mode is not (null or "STOP_MANAGE"))
+                    return CommandResult.Failure(BridgeErrorCodes.InvalidArgument, "mode 必须是 STOP_MANAGE 或 LOCAL_DELETE");
+                var (ok, error) = _management.StopManage(componentId);
+                if (!ok) return CommandResult.Failure(error!);
+                return CommandResult.Success(new { componentId, mode = "STOP_MANAGE", isManaged = false, isDeleted = false });
+            }
+
+            case "getComponentManagement":
+                return CommandResult.Success(new { items = _management.List() });
             case "getHostInfo":
                 return CommandResult.Success(_hostInfo.Get());
 
@@ -935,5 +977,19 @@ public sealed class HostCommandRouter : IDisposable
         {
             _ioGate.Release();
         }
+    }
+    /// <summary>AC-OP-31/32：默认视图过滤 is_managed=0/is_deleted=1；无管理记录视为纳管。</summary>
+    private SnapshotDto ApplyManagementFilter(SnapshotDto snapshot)
+    {
+        var hidden = _management.HiddenComponentIds().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (hidden.Count == 0) return snapshot;
+        var components = snapshot.Components.Where(component => !hidden.Contains(component.ComponentId)).ToList();
+        var repos = components.Sum(component => component.Repos.Count);
+        var missing = components.Sum(component => component.Repos.Count(repo => !repo.IsLocal));
+        return snapshot with
+        {
+            Components = components,
+            Counts = new CountsDto(components.Count, repos, missing)
+        };
     }
 }
