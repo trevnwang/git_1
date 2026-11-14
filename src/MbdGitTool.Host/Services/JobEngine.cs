@@ -741,6 +741,16 @@ public sealed class JobEngine : IDisposable
             item.RepoName = BatchOperationService.RepoNameFor(null, item.ComponentId, item.RepoType);
         }
 
+        // AC-OP-29 / FR-OP-10：外部 git 正在操作（index.lock）→ BUSY，不删锁、不执行任何写。
+        if (repo?.Repo.LocalPath is { Length: > 0 } lockPath
+            && File.Exists(Path.Combine(lockPath, ".git", "index.lock")))
+        {
+            return (new BatchItemResult(
+                JobItemStates.Failed,
+                BridgeErrorCodes.RepoBusy,
+                "仓库正被外部 git 操作占用（.git/index.lock 存在）；未执行任何写操作，请等待外部操作结束后重试"), null, repoState);
+        }
+
         if (arguments.DryRun)
         {
             // dryRun：只做逐仓只读预检（状态矩阵/本地/分支/upstream/dirty/untracked/unpushed/stash），

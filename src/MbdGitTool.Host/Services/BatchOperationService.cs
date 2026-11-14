@@ -1088,7 +1088,8 @@ public sealed partial class BatchOperationService
             var s when s.Contains("authentication failed") || s.Contains("401") || s.Contains("403")
                 || s.Contains("permission denied") || s.Contains("access denied") => BridgeErrorCodes.AuthFailed,
             var s when s.Contains("not found") || s.Contains("404") || s.Contains("does not exist")
-                || s.Contains("repository not found") => BridgeErrorCodes.RemoteNotFound,
+                || s.Contains("repository not found") || s.Contains("does not appear to be a git repository")
+                || s.Contains("could not read from remote repository") => BridgeErrorCodes.RemoteNotFound,
             var s when s.Contains("could not resolve host") || s.Contains("connection") || s.Contains("timed out")
                 || s.Contains("timeout") || s.Contains("failed to connect") || s.Contains("network") => BridgeErrorCodes.Network,
             _ => BridgeErrorCodes.GitFailed

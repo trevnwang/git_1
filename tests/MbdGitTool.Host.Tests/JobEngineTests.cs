@@ -1297,6 +1297,232 @@ public sealed class JobEngineTests
     }
 
     [Fact]
+    public async Task RunBatch_ExternalIndexLock_ReturnsBusyWithoutWriteOrDeletingLock()
+    {
+        using var fixture = BatchWorkspace.Create("CF204A_Lock_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var clone = fixture.Clones.Values.First();
+        var lockFile = Path.Combine(clone, ".git", "index.lock");
+        File.WriteAllText(lockFile, "external git holds lock");
+        var head = TestGit.Capture(clone, "rev-parse", "HEAD");
+
+        var batch = await DispatchAsync(router, "runBatch", new
+        {
+            kind = "SYNC",
+            componentIds = new[] { "CF204A_Lock" },
+            repoTypes = new[] { "IMPL" },
+            args = new { confirm = true }
+        });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+        var item = Assert.Single(job.Items);
+        Assert.Equal("FAILED", item.State);
+        Assert.Equal(BridgeErrorCodes.RepoBusy, item.ErrorCode);
+        Assert.True(File.Exists(lockFile));
+        Assert.Equal(head, TestGit.Capture(clone, "rev-parse", "HEAD"));
+    }
+    [Fact]
+    public async Task RunBatch_Clone_FourRepos_AllSucceed_AndRerunIsIdempotent()
+    {
+        using var remotes = new TempWorkspace();
+        var remoteRoot = Path.Combine(remotes.Root, "remote");
+        var orgRoot = Path.Combine(remoteRoot, "RTCRepos");
+        Directory.CreateDirectory(orgRoot);
+        foreach (var type in new[] { "DESIGN", "IMPL", "MIL", "SIL" })
+        {
+            CreateSeedBareRemote(remotes.Root, orgRoot, "CF200A_Demo_" + type);
+        }
+
+        using var workspace = new TempWorkspace();
+        var config = CloneConfig(workspace.Root, remoteRoot, TestAudit.NewRoot(), TestAudit.NewJobsRoot());
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var first = await DispatchAsync(router, "runBatch", new
+        {
+            kind = "CLONE",
+            componentIds = new[] { "CF200A_Demo" },
+            repoTypes = new[] { "DESIGN", "IMPL", "MIL", "SIL" }
+        });
+        Assert.True(first.Ok, Describe(first));
+        var firstAccepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(first).Data);
+        var firstJob = await WaitJobAsync(router, firstAccepted.JobId);
+        Assert.Equal("SUCCESS", firstJob.State);
+        Assert.Equal(4, firstJob.Items.Count);
+        Assert.All(firstJob.Items, item => Assert.Equal("OK", item.State));
+
+        var gitDirs = new[] { "DESIGN", "IMPL", "MIL", "SIL" }
+            .Select(type => Path.Combine(workspace.Root, "CF200A_Demo_" + type, ".git"))
+            .ToList();
+        Assert.All(gitDirs, dir => Assert.True(Directory.Exists(dir), dir));
+        var before = gitDirs.ToDictionary(dir => dir, Directory.GetLastWriteTimeUtc);
+
+        var second = await DispatchAsync(router, "runBatch", new
+        {
+            kind = "CLONE",
+            componentIds = new[] { "CF200A_Demo" },
+            repoTypes = new[] { "DESIGN", "IMPL", "MIL", "SIL" }
+        });
+        var secondAccepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(second).Data);
+        var secondJob = await WaitJobAsync(router, secondAccepted.JobId);
+        Assert.Equal("SUCCESS", secondJob.State);
+        Assert.All(secondJob.Items, item => Assert.Equal("SKIPPED", item.State));
+        Assert.All(gitDirs, dir => Assert.Equal(before[dir], Directory.GetLastWriteTimeUtc(dir)));
+    }
+
+    [Fact]
+    public async Task RunBatch_Clone_PartialFailure_JobPartialAndRetryOnlyFailed()
+    {
+        using var remotes = new TempWorkspace();
+        var remoteRoot = Path.Combine(remotes.Root, "remote");
+        var orgRoot = Path.Combine(remoteRoot, "RTCRepos");
+        Directory.CreateDirectory(orgRoot);
+        CreateSeedBareRemote(remotes.Root, orgRoot, "CF201A_Partial_DESIGN");
+        CreateSeedBareRemote(remotes.Root, orgRoot, "CF201A_Partial_IMPL");
+        // MIL/SIL 故意缺失 → 2 成功 / 2 失败。
+
+        using var workspace = new TempWorkspace();
+        var config = CloneConfig(workspace.Root, remoteRoot, TestAudit.NewRoot(), TestAudit.NewJobsRoot());
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var first = await DispatchAsync(router, "runBatch", new
+        {
+            kind = "CLONE",
+            componentIds = new[] { "CF201A_Partial" },
+            repoTypes = new[] { "DESIGN", "IMPL", "MIL", "SIL" }
+        });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(first).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+        Assert.Equal("PARTIAL", job.State);
+        Assert.Equal(2, job.Items.Count(item => item.State == "OK"));
+        Assert.Equal(2, job.Items.Count(item => item.State == "FAILED"));
+        Assert.All(job.Items.Where(item => item.State == "FAILED"), item =>
+            Assert.Equal(BridgeErrorCodes.RemoteNotFound, item.ErrorCode));
+
+        var retry = await DispatchAsync(router, "retryFailed", new { jobId = accepted.JobId });
+        Assert.True(retry.Ok, retry.Error?.Code);
+        var retryAccepted = Assert.IsType<RetryFailedResultDto>(Assert.IsType<CommandResult>(retry).Data);
+        Assert.Equal(2, retryAccepted.Retried);
+        var retryJob = await WaitJobAsync(router, retryAccepted.JobId!);
+        Assert.Equal(2, retryJob.Items.Count);
+        Assert.Equal(2, retryJob.Items.Count(item => item.State == "FAILED"));
+    }
+    [Fact]
+    public async Task RunBatch_Pull_FastForward_NoMergeCommit()
+    {
+        using var fixture = BatchWorkspace.Create("CF202A_Pull_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        // 在远端 main 追加一个提交（通过临时 clone），让两个工作区处于 BEHIND。
+        var seedRoot = Path.Combine(Path.GetTempPath(), "MbdGitToolTests", "pull-seed-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(seedRoot);
+        try
+        {
+            var seed = Path.Combine(seedRoot, "seed");
+            TestGit.Run(seedRoot, "clone", "-q", fixture.Bares["CF202A_Pull_IMPL"], seed);
+            TestGit.ConfigureIdentity(seed);
+            File.WriteAllText(Path.Combine(seed, "remote.txt"), "remote");
+            TestGit.CommitAll(seed, "remote commit");
+            TestGit.Run(seed, "push", "-q", "origin", "main");
+            var remoteHead = TestGit.Capture(seed, "rev-parse", "HEAD");
+
+            var batch = await DispatchAsync(router, "runBatch", new
+            {
+                kind = "PULL",
+                componentIds = new[] { "CF202A_Pull" },
+                repoTypes = new[] { "IMPL" }
+            });
+            var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+            var job = await WaitJobAsync(router, accepted.JobId);
+            Assert.Equal("SUCCESS", job.State);
+            Assert.All(job.Items, item => Assert.Equal("OK", item.State));
+            foreach (var clone in fixture.Clones.Values)
+            {
+                Assert.Equal(remoteHead, TestGit.Capture(clone, "rev-parse", "HEAD"));
+                Assert.Empty(TestGit.Capture(clone, "rev-list", "--merges", "HEAD"));
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(seedRoot, recursive: true); } catch { /* ignore */ }
+        }
+    }
+
+    [Fact]
+    public async Task RunBatch_Checkout_Branch_Succeeds_AndDirtyRepoBlocked()
+    {
+        using var fixture = BatchWorkspace.Create("CF203A_Co_IMPL", "CF203A_Co_SIL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var seedRoot = Path.Combine(Path.GetTempPath(), "MbdGitToolTests", "co-seed-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(seedRoot);
+        try
+        {
+            var seed = Path.Combine(seedRoot, "seed");
+            TestGit.Run(seedRoot, "clone", "-q", fixture.Bares["CF203A_Co_IMPL"], seed);
+            TestGit.ConfigureIdentity(seed);
+            TestGit.Run(seed, "checkout", "-q", "-b", "release/1.0");
+            File.WriteAllText(Path.Combine(seed, "release.txt"), "release");
+            TestGit.CommitAll(seed, "release");
+            TestGit.Run(seed, "push", "-q", "origin", "release/1.0");
+            TestGit.Run(seed, "push", "-q", fixture.Bares["CF203A_Co_SIL"], "release/1.0:release/1.0");
+
+            // 工作区先 fetch 出远端分支。
+            foreach (var clone in fixture.Clones.Values)
+            {
+                TestGit.Run(clone, "fetch", "-q", "origin");
+            }
+
+            var batch = await DispatchAsync(router, "runBatch", new
+            {
+                kind = "CHKOUT",
+                componentIds = new[] { "CF203A_Co" },
+                repoTypes = new[] { "IMPL", "SIL" },
+                args = new { branch = "release/1.0" }
+            });
+            var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+            var job = await WaitJobAsync(router, accepted.JobId);
+            Assert.True(job.State == "SUCCESS", string.Join(" | ", job.Items.Select(item => item.State + ":" + item.ErrorCode + ":" + item.Message)));
+            Assert.All(job.Items, item => Assert.Equal("OK", item.State));
+            Assert.All(fixture.Clones.Values, clone =>
+                Assert.Equal("release/1.0", TestGit.Capture(clone, "rev-parse", "--abbrev-ref", "HEAD")));
+
+            // DIRTY 仓切回 main 应被阻断（HEAD 不变）。
+            var dirty = fixture.Clones.Values.First();
+            File.WriteAllText(Path.Combine(dirty, "dirty.txt"), "dirty");
+            var dirtyHead = TestGit.Capture(dirty, "rev-parse", "HEAD");
+            var blocked = await DispatchAsync(router, "runBatch", new
+            {
+                kind = "CHKOUT",
+                componentIds = new[] { "CF203A_Co" },
+                repoTypes = new[] { "IMPL" },
+                args = new { branch = "main" }
+            });
+            var blockedAccepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(blocked).Data);
+            var blockedJob = await WaitJobAsync(router, blockedAccepted.JobId);
+            var item = Assert.Single(blockedJob.Items);
+            Assert.NotEqual("OK", item.State);
+            Assert.Equal(dirtyHead, TestGit.Capture(dirty, "rev-parse", "HEAD"));
+        }
+        finally
+        {
+            try { Directory.Delete(seedRoot, recursive: true); } catch { /* ignore */ }
+        }
+    }
+    [Fact]
     public async Task RunBatch_Tag_MissingRemoteTag_SkipsWithTagDrift_ZeroCheckout()
     {
         using var fixture = BatchWorkspace.Create("CF100A_Demo_Impl");

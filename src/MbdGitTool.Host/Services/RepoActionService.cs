@@ -749,13 +749,32 @@ public sealed class RepoActionService
                     new[] { "rev-parse", "--verify", "--quiet", "refs/heads/" + branch + "^{commit}" },
                     cancellationToken)
                 .ConfigureAwait(false);
-            if (!verify.Success || verify.TrimmedStdout.Length == 0)
+            if (verify.Success && verify.TrimmedStdout.Length > 0)
             {
-                return new ActionOutcome(RefNotFound("branch", branch), string.Empty, string.Empty);
+                argumentsForGit = new[] { "checkout", "--no-overwrite-ignore", branch };
+                message = $"CHKOUT 完成（分支 {branch}）";
             }
+            else
+            {
+                // AC-OP-09：目标分支只存在于远端时，从 origin/<branch> 建立本地跟踪分支后检出。
+                var remoteVerify = await _git
+                    .RunAsync(
+                        localPath,
+                        new[] { "rev-parse", "--verify", "--quiet", "refs/remotes/origin/" + branch + "^{commit}" },
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (!remoteVerify.Success || remoteVerify.TrimmedStdout.Length == 0)
+                {
+                    return new ActionOutcome(RefNotFound("branch", branch), string.Empty, string.Empty);
+                }
 
-            argumentsForGit = new[] { "checkout", "--no-overwrite-ignore", branch };
-            message = $"CHKOUT 完成（分支 {branch}）";
+                argumentsForGit = new[]
+                {
+                    "checkout", "--no-overwrite-ignore", "-b", branch, "--track",
+                    "origin/" + branch
+                };
+                message = $"CHKOUT 完成（分支 {branch}，从 origin/{branch} 建立跟踪）";
+            }
         }
 
         var result = await _git
