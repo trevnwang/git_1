@@ -981,7 +981,13 @@ public sealed partial class BatchOperationService
             null);
     }
 
-    /// <summary>TAG（FR-OP-04 简化）：四仓给当前 HEAD 打 <c>args.tag</c>（已存在 → SKIPPED；不自动 push）。</summary>
+    /// <summary>
+    /// TAG = 切 Tag（FR-OP-04）：四仓检出同一 Tag 为 detached。
+    /// <para>① <c>fetch --force origin tag &lt;tag&gt;</c>（禁止 <c>--prune-tags</c>）；远端不存在 → SKIPPED 并报 TAG_DRIFT；</para>
+    /// <para>② 用 <c>^{{commit}}</c> 解引用 annotated tag（AC-OP-14）得到基线 SHA；</para>
+    /// <para>③ 本地旧 tag 与 fetch 后 SHA 不同 → 报告 <c>tag_moved</c>（已 fetch --force 更新）；</para>
+    /// <para>④ <c>git checkout --detach &lt;tag&gt;</c>；dirty/不可检出 → FAILED 且不猜测成功。</para>
+    /// </summary>
     public async Task<BatchItemResult> TagAsync(
         RepoRef? repo,
         string repoType,
@@ -995,34 +1001,81 @@ public sealed partial class BatchOperationService
             return local.Result;
         }
 
-        var existing = await _git
-            .RunAsync(local.Path!, new[] { "rev-parse", "--verify", "--quiet", "refs/tags/" + tag }, cancellationToken)
-            .ConfigureAwait(false);
-        if (existing.Success && existing.TrimmedStdout.Length > 0)
-        {
-            return Skip(BridgeErrorCodes.ActionNotAllowed, $"tag 已存在：{tag}，跳过 TAG");
-        }
-
         var preHead = await ReadHeadAsync(local.Path!, cancellationToken).ConfigureAwait(false);
         if (preHead is null)
         {
-            return Failed(BridgeErrorCodes.ActionNotAllowed, "空仓无提交（unborn HEAD），无法打 tag");
+            return Failed(BridgeErrorCodes.ActionNotAllowed, "空仓无提交（unborn HEAD），无法切 Tag");
         }
 
-        var create = await _git
-            .RunAsync(local.Path!, new[] { "tag", tag }, cancellationToken, WriteTimeout)
+        var localBefore = await _git
+            .RunAsync(local.Path!, new[] { "rev-parse", "--verify", "--quiet", "refs/tags/" + tag }, cancellationToken)
             .ConfigureAwait(false);
-        if (!create.Success)
+        var localBeforeSha = localBefore.Success ? localBefore.TrimmedStdout : null;
+
+        // 凭据 fail-closed：配置了 token 但凭据作用域非法时不启动网络 fetch。
+        var credentialFailure = _actions.TryBuildCloneCredentialEnvironment(out var credentialEnvironment);
+        if (credentialFailure is not null && !string.IsNullOrWhiteSpace(_config.GiteaToken))
         {
-            return MapGitFailure("TAG", create, cancellationToken);
+            return Failed(
+                credentialFailure.Error?.Code ?? BridgeErrorCodes.GiteaConfigInvalid,
+                credentialFailure.Error?.Message ?? "TAG 凭据配置校验失败");
         }
 
+        // AC-OP-13：fetch --force 更新被移动的 tag（不用 --prune-tags）。
+        var fetch = await _git
+            .RunAsync(
+                local.Path!,
+                new[] { "fetch", "--force", "origin", "tag", tag },
+                cancellationToken,
+                NetworkTimeout,
+                credentialEnvironment)
+            .ConfigureAwait(false);
+        if (!fetch.Success)
+        {
+            // AC-OP-12：远端缺 Tag → 跳过并报告 HALF/TAG_DRIFT，不猜测成功。
+            return Skip(
+                BridgeErrorCodes.RefNotFound,
+                $"Tag 不存在于远程：{tag}，跳过切 Tag（TAG_DRIFT）");
+        }
+
+        // AC-OP-14：annotated tag 用 ^{commit} 解引用为基线提交。
+        var resolved = await _git
+            .RunAsync(local.Path!, new[] { "rev-parse", "--verify", "--quiet", "refs/tags/" + tag + "^{commit}" }, cancellationToken)
+            .ConfigureAwait(false);
+        if (!resolved.Success || resolved.TrimmedStdout.Length == 0)
+        {
+            return Failed(BridgeErrorCodes.RefNotFound, $"Tag 无法解引用为 commit：{tag}（TAG_DRIFT）");
+        }
+
+        var tagSha = resolved.TrimmedStdout;
+        var moved = localBeforeSha is not null
+            && !string.Equals(localBeforeSha, tagSha, StringComparison.OrdinalIgnoreCase);
+
+        var checkout = await _git
+            .RunAsync(
+                local.Path!,
+                new[] { "checkout", "--detach", tagSha },
+                cancellationToken,
+                WriteTimeout)
+            .ConfigureAwait(false);
+        if (!checkout.Success)
+        {
+            return MapGitFailure("TAG", checkout, cancellationToken);
+        }
+
+        var postHead = await ReadHeadAsync(local.Path!, cancellationToken).ConfigureAwait(false);
+        var oldShort = localBeforeSha is null ? string.Empty : localBeforeSha[..Math.Min(12, localBeforeSha.Length)];
+        var newShort = tagSha[..Math.Min(12, tagSha.Length)];
+        var movedNote = moved
+            ? $"；tag_moved：本地旧 tag {oldShort} → fetch 后 {newShort}"
+            : string.Empty;
         return new BatchItemResult(
             JobItemStates.Ok,
             null,
-            $"已在当前 HEAD 打 tag {tag}（未 push）",
+            $"已检出 Tag {tag}（detached HEAD {tagSha[..Math.Min(12, tagSha.Length)]}，基线 {tagSha}）"
+            + movedNote,
             preHead,
-            preHead,
+            postHead,
             null);
     }
 

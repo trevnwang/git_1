@@ -1267,6 +1267,13 @@ public sealed class JobEngineTests
         Assert.Equal("SUCCESS", againJob.State);
         Assert.All(againJob.Items, item => Assert.Equal("SKIPPED", item.State));
 
+        // FR-OP-04 / AC-OP-11：TAG = 切 Tag（检出 detached），不是在当前 HEAD 打 tag。
+        foreach (var clone in fixture.Clones.Values)
+        {
+            TestGit.Run(clone, "tag", "v1.0.0");
+            TestGit.Run(clone, "push", "-q", "origin", "v1.0.0");
+        }
+
         var tag = await DispatchAsync(
             router,
             "runBatch",
@@ -1283,10 +1290,65 @@ public sealed class JobEngineTests
         Assert.All(tagJob.Items, item => Assert.Equal("OK", item.State));
         foreach (var clone in fixture.Clones.Values)
         {
-            Assert.NotEmpty(TestGit.Capture(clone, "rev-parse", "refs/tags/v1.0.0"));
+            var tagSha = TestGit.Capture(clone, "rev-parse", "refs/tags/v1.0.0");
+            Assert.Equal(tagSha, TestGit.Capture(clone, "rev-parse", "HEAD"));
+            Assert.Equal("HEAD", TestGit.Capture(clone, "rev-parse", "--abbrev-ref", "HEAD"));
         }
     }
 
+    [Fact]
+    public async Task RunBatch_Tag_MissingRemoteTag_SkipsWithTagDrift_ZeroCheckout()
+    {
+        using var fixture = BatchWorkspace.Create("CF100A_Demo_Impl");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+        var before = fixture.Clones.Values.ToDictionary(path => path, path => TestGit.Capture(path, "rev-parse", "HEAD"));
+
+        var result = await DispatchAsync(router, "runBatch", new
+        {
+            kind = "TAG",
+            componentIds = new[] { "CF100A_Demo" },
+            repoTypes = new[] { "IMPL" },
+            args = new { tag = "missing-v9.9.9", confirm = true }
+        });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(result).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+        Assert.All(job.Items, item => Assert.Equal("SKIPPED", item.State));
+        Assert.All(job.Items, item => Assert.Equal(BridgeErrorCodes.RefNotFound, item.ErrorCode));
+        Assert.Contains("TAG_DRIFT", job.Items[0].Message ?? string.Empty, StringComparison.Ordinal);
+        Assert.Equal(before[fixture.Clones.Values.First()], TestGit.Capture(fixture.Clones.Values.First(), "rev-parse", "HEAD"));
+    }
+
+    [Fact]
+    public async Task RunBatch_Tag_AnnotatedTag_DereferencesToCommitAndDetaches()
+    {
+        using var fixture = BatchWorkspace.Create("CF100A_Demo_Impl");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+        foreach (var clonePath in fixture.Clones.Values)
+        {
+            TestGit.Run(clonePath, "tag", "-a", "v2.0.0", "-m", "annotated");
+            TestGit.Run(clonePath, "push", "-q", "origin", "v2.0.0");
+        }
+
+        var result = await DispatchAsync(router, "runBatch", new
+        {
+            kind = "TAG",
+            componentIds = new[] { "CF100A_Demo" },
+            repoTypes = new[] { "IMPL" },
+            args = new { tag = "v2.0.0", confirm = true }
+        });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(result).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+        Assert.Equal("SUCCESS", job.State);
+        var annotatedClone = fixture.Clones.Values.First();
+        var commit = TestGit.Capture(annotatedClone, "rev-parse", "refs/tags/v2.0.0^{commit}");
+        Assert.Equal(commit, TestGit.Capture(annotatedClone, "rev-parse", "HEAD"));
+    }
     // ------------------------------------------------------------------ 参数/路径/令牌安全
 
     [Fact]
