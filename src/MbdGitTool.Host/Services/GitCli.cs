@@ -61,6 +61,29 @@ public class GitCli
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentNullException.ThrowIfNull(arguments);
 
+#if DEBUG
+        // 故障注入（冻结规格 §16.6）：仅 Debug/Test 构建；Release 忽略。
+        var fault = Environment.GetEnvironmentVariable("MBD_FAULT_INJECT");
+        if (!string.IsNullOrWhiteSpace(fault))
+        {
+            var isNetwork = arguments.Any(arg => arg is "fetch" or "push" or "clone" or "ls-remote" or "pull");
+            if (isNetwork && fault is "GIT_NET_AUTH_401" or "GIT_NET_404" or "GIT_NET_TIMEOUT")
+            {
+                var text = fault switch
+                {
+                    "GIT_NET_AUTH_401" => "fatal: Authentication failed for 'injected' (401)",
+                    "GIT_NET_404" => "fatal: repository 'injected' not found (404)",
+                    _ => "fatal: unable to access 'injected': Connection timed out"
+                };
+                return new GitResult(128, string.Empty, text);
+            }
+
+            if (fault == "GIT_SLOW" && isNetwork)
+            {
+                await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
+            }
+        }
+#endif
         var startInfo = new ProcessStartInfo
         {
             FileName = GitExecutable,

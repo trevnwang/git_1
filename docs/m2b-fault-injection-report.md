@@ -13,11 +13,11 @@
 | `CRASH_AT_ITEM_2` | 单测模拟 journal STARTED 无 DONE + 重启 reconcile | `M2b2bAuditJournalTests`（NOT_APPLIED/UNKNOWN_APPLIED，仓库零改动） | PARTIAL（未做真实杀进程） |
 | 真机 reconcile（NOT_APPLIED） | 追加 STARTED 无 DONE → 重启 Host | 审计 `RECONCILE result=NOT_APPLIED`（历史 id=452，actor=journal-reconciler） | PASS（历史演练） |
 | 真机 reconcile（AFTER_WRITE/UNKNOWN_APPLIED） | 未演练 | — | GAP |
-| `GIT_NET_AUTH_401` | 未实现注入（仅 Gitea 真实 401 场景） | — | GAP |
-| `GIT_NET_404` | 未实现注入 | — | GAP |
-| `GIT_NET_TIMEOUT` | 未实现注入 | — | GAP |
-| `DISK_SPACE_LOW` | 未实现（AC-OP-02 依赖） | — | GAP |
-| `GIT_SLOW`（取消确定性） | 未实现（AC-OP-27 依赖） | 取消测试仍为通用用例 | GAP |
+| `GIT_NET_AUTH_401` | Debug 注入 GitCli 网络命令 | `Clone_NetAuth401Injection_ReturnsAuthFailed`：E_AUTH_FAILED | PASS |
+| `GIT_NET_404` | 已实现 GitCli 注入 | 无专项用例 | PARTIAL |
+| `GIT_NET_TIMEOUT` | 已实现 GitCli 注入 | 无专项用例 | PARTIAL |
+| `DISK_SPACE_LOW` | Debug 注入 Clone 预检 | `Clone_DiskSpaceLowInjection_ReturnsDiskFull`：E_DISK_FULL、零目录 | PASS |
+| `GIT_SLOW`（取消确定性） | 已实现 2s delay（Debug） | 取消测试仍为通用用例 | PARTIAL |
 | `DISK_WRITE_FAIL` | 未实现 | — | GAP |
 | `CRASH_BEFORE_WRITE` / `CRASH_AFTER_WRITE` | 未实现真实注入 | — | GAP |
 | `G-WIRE-REST` | 未实现 WireMock 桩 | — | GAP |
@@ -37,7 +37,7 @@
 
 **故障注入报告尚未通过 M2b final DoD**。剩余阻断：
 
-1. 实现并落盘 `GIT_NET_*`、`GIT_SLOW`、`DISK_SPACE_LOW`、`CRASH_AFTER_WRITE` 注入点；
+1. 补 `GIT_NET_404/TIMEOUT`、`GIT_SLOW` 专项用例，实现 `CRASH_AFTER_WRITE` 注入；
 2. 实现 `G-WIRE-REST`/`G-WIRE-GIT` 并生成安全证据三件套；
 3. 真机演练 `CRASH_AFTER_WRITE` → `UNKNOWN_APPLIED`（只读、不猜成功）；
 4. 按 AC-SAFE-01…13 逐条补期望/实测/证据，更新本报告为 PASS 后才可作为 Gate 材料。

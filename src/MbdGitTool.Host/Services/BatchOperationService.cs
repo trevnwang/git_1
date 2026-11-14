@@ -372,6 +372,12 @@ public sealed partial class BatchOperationService
                 $"CLONE 目标路径过长（{targetPath.Length} 字符，Windows 安全阈值 230）：{repoName}");
         }
 
+#if DEBUG
+        if (string.Equals(Environment.GetEnvironmentVariable("MBD_FAULT_INJECT"), "DISK_SPACE_LOW", StringComparison.OrdinalIgnoreCase))
+        {
+            return Failed(BridgeErrorCodes.DiskFull, $"CLONE 磁盘空间不足 256MB（注入 DISK_SPACE_LOW）：{repoName}");
+        }
+#endif
         try
         {
             var root = Path.GetPathRoot(Path.GetFullPath(targetPath));
