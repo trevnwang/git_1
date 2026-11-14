@@ -338,6 +338,92 @@ export interface FilterState {
   unpushedOnly: boolean
 }
 
+// ───────────────────────────── M2b 任务中心 / 批量入口 ─────────────────────────────
+
+export type JobKind = 'SYNC' | 'CREATE' | 'CLONE' | 'DELETE' | 'RESTORE' | 'TAG' | 'PULL' | 'FETCH'
+
+export type JobState =
+  | 'PENDING'
+  | 'RUNNING'
+  | 'PARTIAL'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'CANCELED'
+  | 'INTERRUPTED'
+
+export type JobItemState =
+  | 'PENDING'
+  | 'RUNNING'
+  /** Host 契约用 OK 表示单仓成功（兼容历史 SUCCESS）。 */
+  | 'OK'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'SKIPPED'
+  | 'CANCELED'
+  | 'INTERRUPTED'
+
+export interface JobItemVm {
+  componentId: string
+  repoType: string
+  repoName: string
+  state: JobItemState
+  startedAt: string | null
+  finishedAt: string | null
+  errorCode: string | null
+  message: string | null
+  preHead: string | null
+  postHead: string | null
+  backupRef: string | null
+}
+
+export interface JobVm {
+  id: string
+  kind: JobKind
+  state: JobState
+  total: number
+  ok: number
+  failed: number
+  skipped: number
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  cancellable: boolean
+  items: JobItemVm[]
+  /** 进行中（PENDING/RUNNING）：任务中心按此分段，数量同步到状态栏队列。 */
+  active: boolean
+}
+
+/** 任务中心分段：进行中 / 历史。 */
+export type TasksSegment = 'active' | 'history'
+
+/** 批量入口动作（runBatch.kind 的 UI 子集）。 */
+export type BatchKind = 'SYNC' | 'CREATE' | 'CLONE' | 'DELETE' | 'TAG' | 'RESTORE'
+
+/** 批量参数对话框（CREATE/TAG 输入 branch/tag；CLONE 预览缺失仓；可选 dryRun）。 */
+export interface BatchDialogVm {
+  kind: 'branch' | 'tag' | 'clone'
+  action: BatchKind
+  title: string
+  body: string
+  detail?: string
+  confirmLabel: string
+  danger: boolean
+  inputLabel?: string
+  inputPlaceholder?: string
+  initialValue?: string
+  /** 允许「仅预览（dryRun）」勾选（Host 不支持时忽略）。 */
+  showDryRun?: boolean
+  dryRunHint?: string
+  /** CLONE 预览：缺失仓列表（componentId + repoType）。 */
+  preview?: { componentId: string; repoType: string; label: string }[]
+  submit: (payload: { value?: string; dryRun?: boolean }) => void
+}
+
+export interface BatchTargetsVm {
+  componentIds: string[]
+  repoTypes?: string[]
+}
+
 export interface HostStatusVm {
   linked: boolean
   scanning: boolean

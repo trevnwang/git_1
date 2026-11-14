@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ComponentVm } from '../../types/workbench'
-import { M2B_BOUNDARY_TEXT, REPO_LABEL } from '../../viewmodel'
+import { REPO_LABEL } from '../../viewmodel'
 import ChangeBadge from '../common/ChangeBadge.vue'
 import CiBadge from '../common/CiBadge.vue'
 import StateChip from '../common/StateChip.vue'
@@ -118,8 +118,8 @@ function onContextMenu(event: MouseEvent): void {
       <span v-if="component.tag" class="card-tag truncate" :title="`Tag：${component.tag}`">⚑ {{ component.tag }}</span>
       <span class="spacer" />
       <span class="quick" aria-hidden="true">
-        <button type="button" tabindex="-1" :title="`SYNC：${M2B_BOUNDARY_TEXT}`" @click="onQuick($event, 'SYNC')">SYNC</button>
-        <button type="button" tabindex="-1" :title="`CREATE：${M2B_BOUNDARY_TEXT}`" @click="onQuick($event, 'CREATE')">CREATE</button>
+        <button type="button" tabindex="-1" title="SYNC：远程覆盖本地（先预检 + 备份 ref，需确认）→ 任务中心" @click="onQuick($event, 'SYNC')">SYNC</button>
+        <button type="button" tabindex="-1" title="CREATE：四仓创建同名分支（需输入分支名）→ 任务中心" @click="onQuick($event, 'CREATE')">CREATE</button>
       </span>
       <ChangeBadge :dirty="component.dirtyTotal" :untracked="component.untrackedTotal" />
       <span v-if="dirtyRepoCount > 0" class="dirty-repos" :title="`${dirtyRepoCount} 个仓有未提交改动`" />

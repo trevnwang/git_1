@@ -4,15 +4,19 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace MbdGitTool.Host.Services;
 
 /// <summary>
-/// 审计-lite（M2a G-P0-2 / AC-OP-33）：每次 <c>runRepoAction</c>（成功/失败）追加 1 行 JSONL。
+/// 审计（M2a G-P0-2 / AC-OP-33；M2b 扩展 job 关联）：每次 <c>runRepoAction</c> 或作业 item（成功/失败/跳过）
+/// 追加 1 行 JSONL。
 /// <para>落点：<c>%LOCALAPPDATA%\MbdGitTool\audit\operations.jsonl</c>（<see cref="AppConfig.AuditRoot"/> 可注入；
 /// 测试注入临时目录）。目录不存在时自动创建。</para>
 /// <para><b>字段</b>：<c>ts</c>(UTC ISO-8601) / <c>action</c> / <c>componentId</c> / <c>repoType</c> / <c>state</c> /
-/// <c>preHead</c> / <c>postHead</c> / <c>ok</c> / <c>errorCode</c> / <c>durationMs</c>。</para>
+/// <c>preHead</c> / <c>postHead</c> / <c>ok</c> / <c>errorCode</c> / <c>durationMs</c> / <c>actor</c> / <c>requestId</c>；
+/// M2b 作业行追加 <c>result</c>（OK/FAILED/SKIPPED/CANCELED/INTERRUPTED）与可选
+/// <c>jobId</c>/<c>jobItemId</c>/<c>backupRef</c>（M2a 单仓行不出现这几个可选键，行形状保持兼容）。</para>
 /// <para><b>安全</b>：只写上述元数据，绝不写 PAT/token/命令 output/stderr（FR-SAFE-03）；写入失败仅告警，
 /// 绝不影响动作本身。并发追加由进程内按文件互斥锁 + <see cref="FileShare.ReadWrite"/> 单次写入保证不交错。</para>
 /// </summary>
@@ -74,10 +78,14 @@ public sealed class OperationAuditService
             execution.ErrorCode,
             execution.DurationMs,
             actor: execution.Actor,
-            requestId: execution.RequestId);
+            requestId: execution.RequestId,
+            jobId: execution.JobId,
+            jobItemId: execution.JobItemId,
+            result: execution.Result,
+            backupRef: execution.BackupRef);
     }
 
-    /// <summary>追加一条执行审计（字段级重载，便于独立测试/诊断）。</summary>
+    /// <summary>追加一条执行审计（字段级重载，便于独立测试/诊断；M2b 追加 job 关联可选字段）。</summary>
     public void Record(
         string? action,
         string? componentId,
@@ -89,25 +97,33 @@ public sealed class OperationAuditService
         string? errorCode,
         long durationMs,
         string? actor = null,
-        string? requestId = null)
+        string? requestId = null,
+        string? jobId = null,
+        string? jobItemId = null,
+        string? result = null,
+        string? backupRef = null)
     {
         try
         {
             var line = JsonSerializer.Serialize(
-                new
+                new AuditLine
                 {
-                    ts = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
-                    action = Sanitize(action),
-                    componentId = Sanitize(componentId),
-                    repoType = Sanitize(repoType),
-                    state = Sanitize(state) ?? "UNKNOWN",
-                    preHead = Sanitize(preHead),
-                    postHead = Sanitize(postHead),
-                    ok,
-                    errorCode = Sanitize(errorCode),
-                    durationMs = Math.Max(0, durationMs),
-                    actor = Sanitize(actor),
-                    requestId = Sanitize(requestId)
+                    Ts = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                    Action = Sanitize(action),
+                    ComponentId = Sanitize(componentId),
+                    RepoType = Sanitize(repoType),
+                    State = Sanitize(state) ?? "UNKNOWN",
+                    PreHead = Sanitize(preHead),
+                    PostHead = Sanitize(postHead),
+                    Ok = ok,
+                    ErrorCode = Sanitize(errorCode),
+                    DurationMs = Math.Max(0, durationMs),
+                    Actor = Sanitize(actor),
+                    RequestId = Sanitize(requestId),
+                    Result = Sanitize(result) ?? (ok ? "OK" : "FAILED"),
+                    JobId = Sanitize(jobId),
+                    JobItemId = Sanitize(jobItemId),
+                    BackupRef = Sanitize(backupRef)
                 },
                 JsonOptions);
 
@@ -149,5 +165,64 @@ public sealed class OperationAuditService
 
         var trimmed = value.Trim();
         return trimmed.Length <= 256 ? trimmed : trimmed[..256];
+    }
+
+    /// <summary>
+    /// 审计行序列化形状：M2a 字段名/顺序保持（ts/action/componentId/repoType/state/preHead/postHead/ok/errorCode/
+    /// durationMs/actor/requestId），M2b 追加 result/jobId/jobItemId/backupRef；后三者仅在非 null 时输出，
+    /// 确保 M2a 单仓行不被新键污染。
+    /// </summary>
+    private sealed class AuditLine
+    {
+        [JsonPropertyName("ts")]
+        public required string Ts { get; init; }
+
+        [JsonPropertyName("action")]
+        public string? Action { get; init; }
+
+        [JsonPropertyName("componentId")]
+        public string? ComponentId { get; init; }
+
+        [JsonPropertyName("repoType")]
+        public string? RepoType { get; init; }
+
+        [JsonPropertyName("state")]
+        public required string State { get; init; }
+
+        [JsonPropertyName("preHead")]
+        public string? PreHead { get; init; }
+
+        [JsonPropertyName("postHead")]
+        public string? PostHead { get; init; }
+
+        [JsonPropertyName("ok")]
+        public bool Ok { get; init; }
+
+        [JsonPropertyName("errorCode")]
+        public string? ErrorCode { get; init; }
+
+        [JsonPropertyName("durationMs")]
+        public long DurationMs { get; init; }
+
+        [JsonPropertyName("actor")]
+        public string? Actor { get; init; }
+
+        [JsonPropertyName("requestId")]
+        public string? RequestId { get; init; }
+
+        [JsonPropertyName("result")]
+        public required string Result { get; init; }
+
+        [JsonPropertyName("jobId")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? JobId { get; init; }
+
+        [JsonPropertyName("jobItemId")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? JobItemId { get; init; }
+
+        [JsonPropertyName("backupRef")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? BackupRef { get; init; }
     }
 }

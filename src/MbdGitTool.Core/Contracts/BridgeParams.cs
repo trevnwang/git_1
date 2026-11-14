@@ -60,3 +60,25 @@ public sealed record GetCiStatusParams(string? ComponentId = null);
 
 /// <summary>getRemoteRefs 参数：按组件 + 仓类型解析本地仓（供 CHKOUT 选择器使用）。</summary>
 public sealed record GetRemoteRefsParams(string? ComponentId = null, string? RepoType = null);
+
+/// <summary>
+/// runBatch 参数（M2b）：<c>{ kind, componentIds?, repoTypes?, args? }</c>。
+/// <para><c>kind</c> ∈ FETCH/PULL/CHKOUT/COMMIT/PUSH/SYNC/CLONE/DELETE/RESTORE/CREATE/TAG；</para>
+/// <para><c>repoTypes</c> 缺省 = DESIGN/IMPL/MIL/SIL 四仓；<c>componentIds</c> 必填（禁止隐式“全组织批量”）；</para>
+/// <para><c>args</c>：branch/tag/message/confirm/dryRun/backup（另兼容 setUpstream/stash/stageAll/trashStamp）。</para>
+/// </summary>
+public sealed record RunBatchParams(
+    string? Kind = null,
+    IReadOnlyList<string>? ComponentIds = null,
+    IReadOnlyList<string>? RepoTypes = null,
+    IReadOnlyDictionary<string, JsonElement>? Args = null);
+
+/// <summary>getJobs 参数：<c>{ limit? }</c>（默认 50，上限 200，创建时间倒序）。</summary>
+public sealed record GetJobsParams(int? Limit = null);
+
+/// <summary>getJob / cancelJob / retryFailed 参数：<c>{ jobId }</c>。</summary>
+public sealed record GetJobParams(string? JobId = null);
+
+public sealed record CancelJobParams(string? JobId = null);
+
+public sealed record RetryFailedParams(string? JobId = null);

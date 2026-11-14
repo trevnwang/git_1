@@ -36,6 +36,12 @@ public sealed record AppConfig
     /// </summary>
     public string? AuditRoot { get; init; }
 
+    /// <summary>
+    /// M2b 作业持久化目录；为空时使用默认 <c>%LOCALAPPDATA%\MbdGitTool\jobs</c>（文件 <c>jobs.json</c>）。
+    /// <para>仅供测试注入临时目录（避免单测污染真实用户数据）。</para>
+    /// </summary>
+    public string? JobsRoot { get; init; }
+
     /// <summary>配置加载问题（文件缺失/JSON 非法等）；不影响环境变量覆盖后的可用配置。</summary>
     public string? LoadError { get; init; }
 

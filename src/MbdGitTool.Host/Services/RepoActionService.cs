@@ -793,7 +793,11 @@ public sealed class RepoActionService
     }
 
     /// <summary>M2 P0-1：凭据注入前的 fail-closed 作用域校验（锁内执行，只读、不注凭据）。</summary>
-    private async Task<(CommandResult? Failure, IReadOnlyDictionary<string, string>? Environment)>
+    /// <remarks>
+    /// M2b：网络类批量作业（SYNC 等）复用同一套校验（origin fetch/pushurl 与 Gitea base 作用域一致），
+    /// 因此由 <c>private</c> 提升为 <c>public</c>；调用方不得记录返回的环境变量值（含 token）。
+    /// </remarks>
+    public async Task<(CommandResult? Failure, IReadOnlyDictionary<string, string>? Environment)>
         PrepareCredentialEnvironmentAsync(
             string localPath,
             string action,
@@ -805,6 +809,100 @@ public sealed class RepoActionService
             // 无 token：公开仓/系统凭据助手路径，不注入、不校验（无凭据可外发）。
             return (null, null);
         }
+
+        var configurationFailure = ValidateCredentialConfiguration(action, out var baseUri);
+        if (configurationFailure is not null)
+        {
+            return (configurationFailure, null);
+        }
+
+        // 2) 读取 fetch URL 与 pushurl（只读，不注凭据）。
+        var fetchUrl = await _git
+            .RunAsync(localPath, new[] { "remote", "get-url", "origin" }, cancellationToken)
+            .ConfigureAwait(false);
+        var pushUrl = await _git
+            .RunAsync(localPath, new[] { "remote", "get-url", "--push", "origin" }, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!fetchUrl.Success || fetchUrl.TrimmedStdout.Length == 0)
+        {
+            return (CredentialScopeFailure(
+                action,
+                baseUri!,
+                _giteaOrg!.Trim(),
+                fetchUrl: null,
+                pushUrl: pushUrl.Success ? pushUrl.TrimmedStdout : null,
+                failedFields: new[] { "fetchUrl" },
+                reason: "无法读取 origin fetch URL"), null);
+        }
+
+        if (!pushUrl.Success || pushUrl.TrimmedStdout.Length == 0)
+        {
+            return (CredentialScopeFailure(
+                action,
+                baseUri!,
+                _giteaOrg!.Trim(),
+                fetchUrl: fetchUrl.TrimmedStdout,
+                pushUrl: null,
+                failedFields: new[] { "pushUrl" },
+                reason: "无法读取 origin push URL"), null);
+        }
+
+        var org = _giteaOrg!.Trim();
+        var fetchCheck = CheckUrlScope(fetchUrl.TrimmedStdout, baseUri!, org);
+        var pushCheck = CheckUrlScope(pushUrl.TrimmedStdout, baseUri!, org);
+        if (!fetchCheck.Matches || !pushCheck.Matches)
+        {
+            var failed = new List<string>();
+            failed.AddRange(fetchCheck.FailedFields.Select(field => "fetch." + field));
+            failed.AddRange(pushCheck.FailedFields.Select(field => "push." + field));
+
+            return (CredentialScopeFailure(
+                action,
+                baseUri!,
+                org,
+                fetchUrl: fetchUrl.TrimmedStdout,
+                pushUrl: pushUrl.TrimmedStdout,
+                failedFields: failed,
+                reason: "origin fetch URL / pushurl 与 Gitea baseUrl（scheme+host+port）或 /<org>/ 路径不一致"), null);
+        }
+
+        return (null, BuildCredentialEnvironment(baseUri!, token));
+    }
+
+    /// <summary>
+    /// M2b：CLONE 前构造 PAT 注入环境（无本地仓、无 origin 可比对，只做配置完整性/作用域 base 校验）。
+    /// <para>返回非 null 表示 fail-closed（<c>E_GITEA_CONFIG_INVALID</c> / <c>E_GITEA_INSECURE_HTTP</c>），
+    /// 调用方不得启动网络 git；返回 null 时 <paramref name="environment"/> 可能为 null（无 token）或仅含
+    /// URL 作用域的 <c>http.&lt;base&gt;.extraHeader</c>（绝不进入 argv/日志/响应）。</para>
+    /// </summary>
+    public CommandResult? TryBuildCloneCredentialEnvironment(
+        out IReadOnlyDictionary<string, string>? environment)
+    {
+        environment = null;
+        var token = _giteaToken;
+        if (token is null)
+        {
+            return null;
+        }
+
+        var configurationFailure = ValidateCredentialConfiguration("CLONE", out var baseUri);
+        if (configurationFailure is not null)
+        {
+            return configurationFailure;
+        }
+
+        environment = BuildCredentialEnvironment(baseUri!, token);
+        return null;
+    }
+
+    /// <summary>
+    /// 凭据配置完整性/作用域校验（fail-closed）：token 非空时必须配置合法的 Gitea baseUrl（http/https，无 userinfo）
+    /// 与 org；明文 http 需显式 allowInsecureHttp。
+    /// </summary>
+    private CommandResult? ValidateCredentialConfiguration(string action, out Uri? baseUri)
+    {
+        baseUri = null;
 
         // 1) 配置完整性：token 非空但 Gitea base/org 缺失或非法 → fail closed（绝不退化为“公开仓继续注入”）。
         var invalidFields = new List<string>();
@@ -820,25 +918,25 @@ public sealed class RepoActionService
 
         if (invalidFields.Count > 0)
         {
-            return (GiteaConfigInvalid(action, invalidFields, "未配置 Gitea baseUrl/org，禁止携带 PAT 执行网络 git 操作"), null);
+            return GiteaConfigInvalid(action, invalidFields, "未配置 Gitea baseUrl/org，禁止携带 PAT 执行网络 git 操作");
         }
 
-        if (!Uri.TryCreate(_giteaBaseUrl!.Trim(), UriKind.Absolute, out var baseUri)
-            || (baseUri.Scheme != Uri.UriSchemeHttp && baseUri.Scheme != Uri.UriSchemeHttps)
-            || string.IsNullOrEmpty(baseUri.Host))
+        if (!Uri.TryCreate(_giteaBaseUrl!.Trim(), UriKind.Absolute, out var parsedBaseUri)
+            || (parsedBaseUri.Scheme != Uri.UriSchemeHttp && parsedBaseUri.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrEmpty(parsedBaseUri.Host))
         {
-            return (GiteaConfigInvalid(
+            return GiteaConfigInvalid(
                 action,
                 new[] { "giteaBaseUrl" },
-                "Gitea baseUrl 非法（需 http(s)://host[:port]），禁止携带 PAT 执行网络 git 操作"), null);
+                "Gitea baseUrl 非法（需 http(s)://host[:port]），禁止携带 PAT 执行网络 git 操作");
         }
 
-        if (!string.IsNullOrEmpty(baseUri.UserInfo))
+        if (!string.IsNullOrEmpty(parsedBaseUri.UserInfo))
         {
-            return (GiteaConfigInvalid(
+            return GiteaConfigInvalid(
                 action,
                 new[] { "giteaBaseUrl" },
-                "Gitea baseUrl 不允许包含 userinfo（凭据），禁止携带 PAT 执行网络 git 操作"), null);
+                "Gitea baseUrl 不允许包含 userinfo（凭据），禁止携带 PAT 执行网络 git 操作");
         }
 
         var org = _giteaOrg!.Trim();
@@ -849,90 +947,47 @@ public sealed class RepoActionService
             || org.Any(char.IsWhiteSpace)
             || org.Any(char.IsControl))
         {
-            return (GiteaConfigInvalid(
+            return GiteaConfigInvalid(
                 action,
                 new[] { "giteaOrg" },
-                "Gitea org 非法，禁止携带 PAT 执行网络 git 操作"), null);
+                "Gitea org 非法，禁止携带 PAT 执行网络 git 操作");
         }
 
-        if (baseUri.Scheme == Uri.UriSchemeHttp && !_allowInsecureHttp)
+        if (parsedBaseUri.Scheme == Uri.UriSchemeHttp && !_allowInsecureHttp)
         {
-            return (CommandResult.Failure(
+            return CommandResult.Failure(
                 BridgeErrorCodes.GiteaInsecureHttp,
                 "Gitea baseUrl 为明文 http，默认禁止注入 PAT（Authorization: Basic 可被同网段读取/重放）；"
                 + "确需内网 http 请显式设置 config.json gitea.allowInsecureHttp=true 或环境变量 MBD_GITEA_ALLOW_INSECURE_HTTP=true",
                 new Dictionary<string, object?>
                 {
                     ["action"] = action,
-                    ["scheme"] = baseUri.Scheme,
-                    ["host"] = baseUri.Host,
-                    ["port"] = baseUri.Port,
+                    ["scheme"] = parsedBaseUri.Scheme,
+                    ["host"] = parsedBaseUri.Host,
+                    ["port"] = parsedBaseUri.Port,
                     ["sdkCode"] = "GITEA_INSECURE_HTTP"
-                }), null);
+                });
         }
 
-        // 2) 读取 fetch URL 与 pushurl（只读，不注凭据）。
-        var fetchUrl = await _git
-            .RunAsync(localPath, new[] { "remote", "get-url", "origin" }, cancellationToken)
-            .ConfigureAwait(false);
-        var pushUrl = await _git
-            .RunAsync(localPath, new[] { "remote", "get-url", "--push", "origin" }, cancellationToken)
-            .ConfigureAwait(false);
+        baseUri = parsedBaseUri;
+        return null;
+    }
 
-        if (!fetchUrl.Success || fetchUrl.TrimmedStdout.Length == 0)
-        {
-            return (CredentialScopeFailure(
-                action,
-                baseUri,
-                org,
-                fetchUrl: null,
-                pushUrl: pushUrl.Success ? pushUrl.TrimmedStdout : null,
-                failedFields: new[] { "fetchUrl" },
-                reason: "无法读取 origin fetch URL"), null);
-        }
-
-        if (!pushUrl.Success || pushUrl.TrimmedStdout.Length == 0)
-        {
-            return (CredentialScopeFailure(
-                action,
-                baseUri,
-                org,
-                fetchUrl: fetchUrl.TrimmedStdout,
-                pushUrl: null,
-                failedFields: new[] { "pushUrl" },
-                reason: "无法读取 origin push URL"), null);
-        }
-
-        var fetchCheck = CheckUrlScope(fetchUrl.TrimmedStdout, baseUri, org);
-        var pushCheck = CheckUrlScope(pushUrl.TrimmedStdout, baseUri, org);
-        if (!fetchCheck.Matches || !pushCheck.Matches)
-        {
-            var failed = new List<string>();
-            failed.AddRange(fetchCheck.FailedFields.Select(field => "fetch." + field));
-            failed.AddRange(pushCheck.FailedFields.Select(field => "push." + field));
-
-            return (CredentialScopeFailure(
-                action,
-                baseUri,
-                org,
-                fetchUrl: fetchUrl.TrimmedStdout,
-                pushUrl: pushUrl.TrimmedStdout,
-                failedFields: failed,
-                reason: "origin fetch URL / pushurl 与 Gitea baseUrl（scheme+host+port）或 /<org>/ 路径不一致"), null);
-        }
-
-        // 3) URL 作用域 header：只有发往 canonical base 的请求才携带 Authorization（即使 origin 被改也不外发）。
+    /// <summary>URL 作用域 header（仅发往 canonical base 的请求携带 Authorization；值不进日志/响应）。</summary>
+    private static IReadOnlyDictionary<string, string> BuildCredentialEnvironment(Uri baseUri, string token)
+    {
         var canonicalBase = baseUri.GetLeftPart(UriPartial.Path).TrimEnd('/');
         var basic = Convert.ToBase64String(Encoding.UTF8.GetBytes(token + ":"));
-        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        return new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["GIT_CONFIG_COUNT"] = "1",
             ["GIT_CONFIG_KEY_0"] = "http." + canonicalBase + "/.extraHeader",
             ["GIT_CONFIG_VALUE_0"] = "Authorization: Basic " + basic
         };
-
-        return (null, environment);
     }
+
+    /// <summary>M2b：批量 CREATE/TAG 的 ref 名校验（与单仓 CHKOUT 同一套规则，返回 null 表示合法）。</summary>
+    public static CommandResult? ValidateRefArgument(string value, string field) => ValidateRefName(value, field);
 
     private static UrlScopeCheck CheckUrlScope(string rawUrl, Uri baseUri, string org)
     {
@@ -1620,4 +1675,16 @@ public sealed class RepoActionExecution
 
     /// <summary>请求关联 ID（审计 operation_log.request_id）。</summary>
     public string? RequestId { get; set; }
+
+    /// <summary>M2b：作业 ID（批量作业内单仓动作的审计关联；单仓动作/路径为 null）。</summary>
+    public string? JobId { get; set; }
+
+    /// <summary>M2b：作业 item ID（审计 job_item 关联；单仓动作/路径为 null）。</summary>
+    public string? JobItemId { get; set; }
+
+    /// <summary>M2b：审计结果名（OK/FAILED/SKIPPED/CANCELED/INTERRUPTED）；null 时由 ok 推导。</summary>
+    public string? Result { get; set; }
+
+    /// <summary>M2b：SYNC 等操作的备份 ref（审计可追溯；无则为 null）。</summary>
+    public string? BackupRef { get; set; }
 }

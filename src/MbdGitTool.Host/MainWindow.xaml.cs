@@ -69,6 +69,26 @@ public partial class MainWindow : Window
             _bridge = new WebViewBridge(Web.CoreWebView2, _router);
             _bridge.Attach();
 
+            // M2b：作业进度事件（JOB_UPDATED）由后台 worker 产生 → Dispatcher 回 UI 线程 → 桥推送。
+            var bridge = _bridge;
+            _router.EventSink = payload =>
+            {
+                if (Dispatcher.HasShutdownStarted)
+                {
+                    return;
+                }
+
+                _ = Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (Dispatcher.HasShutdownStarted)
+                    {
+                        return;
+                    }
+
+                    bridge.PostEvent(payload);
+                }));
+            };
+
             Web.Source = new Uri($"https://{VirtualHost}/index.html");
             HostLog.Info($"navigate: https://{VirtualHost}/index.html (uiRoot={uiRoot})");
 

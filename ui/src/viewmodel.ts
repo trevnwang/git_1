@@ -5,6 +5,7 @@
 import type {
   ComponentDto,
   CommitDto,
+  JobDto,
   RepoActionAvailabilityDto,
   RepoDto,
   TreeNodeDto,
@@ -17,6 +18,10 @@ import type {
   ComponentVm,
   GitStatus,
   HostActionAvailability,
+  JobItemState,
+  JobKind,
+  JobState,
+  JobVm,
   RepoAction,
   RepoDetailVm,
   RepoType,
@@ -528,9 +533,9 @@ function reasonHint(
   reasonCode: string | undefined,
   action: RepoAction,
 ): { code: string; alt: string } {
-  // M2a 冻结覆盖：EMPTY.PUSH 禁用，tooltip 指向 M2b 首推（FR-REPO-05 归 M2b）。
+  // M2a 冻结覆盖：EMPTY.PUSH 禁用，首推需先有提交（按后端能力开放）。
   if (action === 'PUSH' && /EMPTY|无首个提交|空仓/.test(reason)) {
-    return { code: 'E_ACTION_NOT_ALLOWED', alt: `空仓无首个提交，首推归 ${M2B_BOUNDARY_TEXT}` }
+    return { code: 'E_ACTION_NOT_ALLOWED', alt: '空仓无首个提交：请先创建首个提交后再推送' }
   }
   for (const hint of REASON_HINTS) {
     if (hint.match.test(reason)) return { code: hint.code, alt: hint.alt }
@@ -742,10 +747,7 @@ export function actionDisabledTitle(reason: string, code: string | undefined, al
   return `${reasonText} [${codeText}] → ${altText}`
 }
 
-/** M2b 边界统一文案（AC-UI-15）：批量/任务中心入口点击只提示、不产生任何 Host 写调用。 */
-export const M2B_BOUNDARY_TEXT = 'M2b 未接入（批量/作业/审计）'
-
-/** 组件级批量操作（M2b 未接入：M2a 构建只保留统一提示，不提交任何 Host 写调用）。 */
+/** 组件级批量操作（M2b：经任务中心 runBatch 提交；单独入口在 store）。 */
 export const BATCH_COMMANDS = [
   'SYNC',
   'CREATE',
@@ -833,4 +835,119 @@ export function mapCommit(dto: CommitDto): CommitVm {
     at: dto.at,
     refs: dto.refs ?? [],
   }
+}
+
+// ───────────────────────────── M2b 任务中心（Job DTO → VM） ─────────────────────────────
+
+interface JobStateMeta {
+  tone: Tone
+  icon: string
+  label: string
+}
+
+const JOB_STATE_META: Record<JobState, JobStateMeta> = {
+  PENDING: { tone: 'neutral', icon: '◷', label: '排队' },
+  RUNNING: { tone: 'info', icon: '◷', label: '进行中' },
+  PARTIAL: { tone: 'warning', icon: '!', label: '部分失败' },
+  SUCCESS: { tone: 'success', icon: '✓', label: '成功' },
+  FAILED: { tone: 'danger', icon: '✕', label: '失败' },
+  CANCELED: { tone: 'neutral', icon: '⊘', label: '已取消' },
+  INTERRUPTED: { tone: 'danger', icon: '⚠', label: '已中断' },
+}
+
+const JOB_ITEM_META: Record<JobItemState, JobStateMeta> = {
+  PENDING: { tone: 'neutral', icon: '◷', label: '待执行' },
+  RUNNING: { tone: 'info', icon: '◷', label: '进行中' },
+  OK: { tone: 'success', icon: '✓', label: '成功' },
+  SUCCESS: { tone: 'success', icon: '✓', label: '成功' },
+  FAILED: { tone: 'danger', icon: '✕', label: '失败' },
+  SKIPPED: { tone: 'warning', icon: '↷', label: '跳过' },
+  CANCELED: { tone: 'neutral', icon: '⊘', label: '已取消' },
+  INTERRUPTED: { tone: 'danger', icon: '⚠', label: '已中断' },
+}
+
+export function jobStateMeta(state: string): JobStateMeta {
+  return JOB_STATE_META[(state || '').toUpperCase() as JobState] ?? { tone: 'neutral', icon: '•', label: state || '未知' }
+}
+
+export function jobItemStateMeta(state: string): JobStateMeta {
+  return (
+    JOB_ITEM_META[(state || '').toUpperCase() as JobItemState] ?? { tone: 'neutral', icon: '•', label: state || '未知' }
+  )
+}
+
+/** 批量作业类型中文标签（任务中心行首）。 */
+export const JOB_KIND_LABEL: Record<string, string> = {
+  SYNC: '批量 SYNC',
+  CREATE: '批量 CREATE',
+  CLONE: '批量 Clone',
+  DELETE: '批量删除',
+  TAG: '批量 Tag',
+  RESTORE: '恢复备份',
+  PULL: '批量 PULL',
+  FETCH: '批量 FETCH',
+}
+
+export function jobKindLabel(kind: string): string {
+  return JOB_KIND_LABEL[(kind || '').toUpperCase()] ?? (kind || '作业')
+}
+
+export function mapJobItem(dto: JobDto['items'][number]): JobVm['items'][number] {
+  return {
+    componentId: dto.componentId,
+    repoType: (dto.repoType || '').toUpperCase(),
+    repoName: dto.repoName ?? '',
+    state: (dto.state || 'PENDING').toUpperCase() as JobItemState,
+    startedAt: dto.startedAt ?? null,
+    finishedAt: dto.finishedAt ?? null,
+    errorCode: dto.errorCode ?? null,
+    message: dto.message ?? null,
+    preHead: dto.preHead ?? null,
+    postHead: dto.postHead ?? null,
+    backupRef: dto.backupRef ?? null,
+  }
+}
+
+export function mapJob(dto: JobDto): JobVm {
+  const items = (dto.items ?? []).map(mapJobItem)
+  const state = (dto.state || 'PENDING').toUpperCase() as JobState
+  return {
+    id: dto.id,
+    kind: (dto.kind || '').toUpperCase() as JobKind,
+    state,
+    total: dto.total ?? items.length,
+    ok: dto.ok ?? 0,
+    failed: dto.failed ?? 0,
+    skipped: dto.skipped ?? 0,
+    createdAt: dto.createdAt ?? '',
+    startedAt: dto.startedAt ?? null,
+    finishedAt: dto.finishedAt ?? null,
+    cancellable: Boolean(dto.cancellable),
+    items,
+    active: state === 'PENDING' || state === 'RUNNING',
+  }
+}
+
+/** 进度百分比（ok+failed+skipped 已完成项；0 total 时为 0）。 */
+export function jobProgressPercent(job: JobVm): number {
+  if (job.total <= 0) return 0
+  const done = job.ok + job.failed + job.skipped
+  return Math.max(0, Math.min(100, Math.round((done / job.total) * 100)))
+}
+
+/** 「仅重试失败项」可见条件：终态且存在失败/取消/中断的逐仓项。 */
+export function jobRetryableCount(job: JobVm): number {
+  return job.items.filter((item) => item.state === 'FAILED' || item.state === 'CANCELED' || item.state === 'INTERRUPTED')
+    .length
+}
+
+export function formatDurationMs(startAt: string | null, endAt: string | null): string {
+  if (!startAt) return '—'
+  const start = new Date(startAt).getTime()
+  const end = endAt ? new Date(endAt).getTime() : Date.now()
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return '—'
+  const delta = end - start
+  if (delta < 1000) return `${delta}ms`
+  if (delta < 60_000) return `${(delta / 1000).toFixed(1)}s`
+  return `${Math.floor(delta / 60_000)}m${Math.round((delta % 60_000) / 1000)}s`
 }

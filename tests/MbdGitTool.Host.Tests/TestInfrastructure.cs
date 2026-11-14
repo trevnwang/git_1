@@ -316,19 +316,24 @@ internal sealed class RecordingLauncher : IProcessLauncher
 }
 
 /// <summary>
-/// 隔离的审计-lite 目录（<c>%TEMP%\MbdGitToolTests\audit\&lt;guid&gt;</c>）：
-/// 避免 Host 单测把 JSONL 写进真实 <c>%LOCALAPPDATA%\MbdGitTool\audit</c>。
+/// 隔离的审计/作业历史目录（<c>%TEMP%\MbdGitToolTests\{audit,jobs}\&lt;guid&gt;</c>）：
+/// 避免 Host 单测把 JSONL/jobs.json 写进真实 <c>%LOCALAPPDATA%\MbdGitTool</c>。
 /// </summary>
 internal static class TestAudit
 {
     public static string NewRoot() =>
         Path.Combine(Path.GetTempPath(), "MbdGitToolTests", "audit", Guid.NewGuid().ToString("N"));
 
-    /// <summary>带临时 <see cref="AppConfig.AuditRoot"/> 的配置（供 HostCommandRouter/SnapshotService 共用）。</summary>
+    /// <summary>隔离的作业持久化目录（M2b JobEngine，避免单测写真实 %LOCALAPPDATA%\MbdGitTool\jobs）。</summary>
+    public static string NewJobsRoot() =>
+        Path.Combine(Path.GetTempPath(), "MbdGitToolTests", "jobs", Guid.NewGuid().ToString("N"));
+
+    /// <summary>带临时 <see cref="AppConfig.AuditRoot"/> / <see cref="AppConfig.JobsRoot"/> 的配置。</summary>
     public static AppConfig NewConfig(string? workspaceRoot = null, string? giteaToken = null) => new()
     {
         WorkspaceRoot = workspaceRoot,
         GiteaToken = giteaToken,
-        AuditRoot = NewRoot()
+        AuditRoot = NewRoot(),
+        JobsRoot = NewJobsRoot()
     };
 }

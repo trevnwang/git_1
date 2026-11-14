@@ -92,13 +92,22 @@ check('ui-10b.no-write-before-accept', statusBefore === statusAfter, `${statusBe
 const statusRegex = /^最近一次操作：/;
 check('ui-10.status-template', statusRegex.test(statusAfter), statusAfter);
 
-// 5) M2b 边界文案：进入批量模式后点击 SYNC，Toast 必须明确 M2b 未接入且 0 写
+// 5) M2b 批量入口：点击 SYNC 必须有可感知结果（确认对话框 / 任务接口未就绪提示），未确认 0 写
 await evaluate(`document.querySelector('[data-testid=batch-select-toggle]')?.click()`);
 await sleep(300);
 await click('[data-testid=batch-sync]');
-await sleep(500);
-const toastText = await evaluate(`document.querySelector('[data-testid=toast]')?.textContent?.trim() || ''`);
-check('ui-15.m2b-copy', toastText.includes('M2b 未接入（批量/作业/审计）'), toastText);
+await sleep(700);
+const batchConfirmText = await evaluate(`document.querySelector('[data-testid=confirm-dialog]')?.innerText?.replace(/\\s+/g, ' ').trim() || ''`);
+const batchToastText = await evaluate(`[...document.querySelectorAll('[data-testid=toast]')].map((n) => n.textContent).join(' | ')`);
+const batchFeedback = batchConfirmText || batchToastText;
+check(
+  'ui-15.batch-entry-feedback',
+  /SYNC|任务接口|Host 任务/.test(batchFeedback),
+  batchFeedback.slice(0, 140),
+);
+check('ui-15.no-old-boundary-copy', !batchFeedback.includes('M2b 未接入'), batchFeedback.slice(0, 140));
+if (batchConfirmText) await click('[data-testid=confirm-dialog] .confirm-actions .btn:first-child');
+await sleep(200);
 await evaluate(`document.querySelector('.batch-bar .close-btn')?.click()`);
 
 // 6) 审计 JSONL：actor/requestId

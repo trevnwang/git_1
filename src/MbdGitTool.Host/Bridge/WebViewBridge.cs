@@ -66,6 +66,40 @@ public sealed class WebViewBridge : IDisposable
         }
     }
 
+    /// <summary>
+    /// M2b：把作业事件（固定形状 <c>{event:"JOB_UPDATED", data:JobDto}</c>）推给 UI。
+    /// <para>必须在 UI 线程调用（WebView2 <c>PostWebMessageAsJson</c> 要求）；由
+    /// <c>MainWindow</c> 在 <see cref="HostCommandRouter.EventSink"/> 中用 Dispatcher 调度。</para>
+    /// <para>序列化失败/超长/桥已销毁均只告警丢弃，不影响后台作业。</para>
+    /// </summary>
+    public void PostEvent(object payload)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        if (_disposed)
+        {
+            return;
+        }
+
+        string json;
+        try
+        {
+            json = JsonSerializer.Serialize(payload, JsonOptions);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException or InvalidOperationException)
+        {
+            HostLog.Warn($"作业事件序列化失败：{ex.GetType().Name}");
+            return;
+        }
+
+        if (json.Length > MaxResponseBytes)
+        {
+            HostLog.Warn($"作业事件超过上限（{json.Length} 字节），已丢弃");
+            return;
+        }
+
+        _ = PostJsonAsync(json);
+    }
+
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
         // WebView2 事件在 UI 线程；异步处理失败必须自吞并回错误应答，避免 async void 崩溃宿主。

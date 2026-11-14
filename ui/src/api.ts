@@ -261,6 +261,96 @@ export interface RepoActionResultDto {
   stashRef?: string
 }
 
+// ───────────────────────────── M2b 作业（Job）DTO ─────────────────────────────
+
+/** 批量作业类型（runBatch.kind；Host 以自身能力为准，未知 kind 由 Host 返回错误码）。 */
+export type JobKind = 'SYNC' | 'CREATE' | 'CLONE' | 'DELETE' | 'RESTORE' | 'TAG' | 'PULL' | 'FETCH'
+
+/** job.state 合法值（契约 7 态，SRS §8.1）。 */
+export type JobState =
+  | 'PENDING'
+  | 'RUNNING'
+  | 'PARTIAL'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'CANCELED'
+  | 'INTERRUPTED'
+
+/** job_item.state（Host 契约：PENDING/RUNNING/OK/FAILED/SKIPPED/CANCELED/INTERRUPTED；兼容 SUCCESS）。 */
+export type JobItemState =
+  | 'PENDING'
+  | 'RUNNING'
+  | 'OK'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'SKIPPED'
+  | 'CANCELED'
+  | 'INTERRUPTED'
+
+export interface JobItemDto {
+  componentId: string
+  repoType: string
+  repoName?: string | null
+  state: JobItemState
+  startedAt?: string | null
+  finishedAt?: string | null
+  errorCode?: string | null
+  message?: string | null
+  preHead?: string | null
+  postHead?: string | null
+  /** SYNC 等备份类作业的恢复引用（refs/backup/sync/...）。 */
+  backupRef?: string | null
+}
+
+export interface JobDto {
+  id: string
+  kind: JobKind
+  state: JobState
+  total: number
+  ok: number
+  failed: number
+  skipped: number
+  createdAt: string
+  startedAt?: string | null
+  finishedAt?: string | null
+  cancellable: boolean
+  items: JobItemDto[]
+}
+
+/** runBatch 参数（契约：{kind,componentIds?,repoTypes?,args?}）。 */
+export interface RunBatchParams {
+  kind: JobKind | string
+  componentIds?: string[]
+  repoTypes?: string[]
+  args?: BatchArgs
+}
+
+/** 批量参数：branch/tag/confirm 与可选的 dryRun 预览。 */
+export interface BatchArgs {
+  branch?: string
+  tag?: string
+  message?: string
+  backupRef?: string
+  /** 仅预览，不写入（可选能力；Host 不支持时忽略）。 */
+  dryRun?: boolean
+  /** 二次确认后重试时置 true。 */
+  confirm?: boolean
+  [key: string]: unknown
+}
+
+/** runBatch 响应（契约：{jobId,accepted,total,skipped}）。 */
+export interface RunBatchResultDto {
+  jobId: string
+  accepted: boolean
+  total: number
+  skipped: number
+}
+
+/** getJobs 响应（契约：{jobs}）。 */
+export interface JobsDto {
+  jobs: JobDto[]
+}
+
 /** ref 种类（getRemoteRefs，M2 P0-7）。 */
 export type RemoteRefKind = 'LOCAL_BRANCH' | 'REMOTE_BRANCH' | 'TAG'
 
@@ -310,6 +400,11 @@ export type RequestMethod =
   | 'getRemoteRefs'
   | 'getCiStatus'
   | 'getHostInfo'
+  | 'runBatch'
+  | 'getJobs'
+  | 'getJob'
+  | 'cancelJob'
+  | 'retryFailed'
 
 export const TIMEOUTS: Record<RequestMethod, number> = {
   getSnapshot: 45_000,
@@ -324,6 +419,12 @@ export const TIMEOUTS: Record<RequestMethod, number> = {
   getRemoteRefs: 20_000,
   getCiStatus: 2_000,
   getHostInfo: 2_000,
+  // 批量提交只返回 jobId（异步执行），取消/重试为短 RPC；列表读取供任务中心轮询兜底。
+  runBatch: 30_000,
+  getJobs: 5_000,
+  getJob: 5_000,
+  cancelJob: 10_000,
+  retryFailed: 15_000,
 }
 
 /** 旧入口默认超时（与 M1 保持一致）。 */
@@ -361,11 +462,15 @@ declare global {
   interface Window {
     chrome?: { webview?: WebView2Bridge }
     __DSH_TEST_BRIDGE__?: TestBridge | { handle: TestBridge; hasMethod?: (m: string) => boolean }
+    /** CDP 自测/演示用：置 true 时强制走内置 Mock（不触碰真实 Host 写接口）。 */
+    __DSH_FORCE_MOCK__?: boolean
   }
 }
 
 function getBridge(): WebView2Bridge | null {
   if (typeof window === 'undefined') return null
+  // 测试/演示钩子：仅 CDP 脚本会在页面脚本前注入，正常宿主内不存在。
+  if (window.__DSH_FORCE_MOCK__ === true) return null
   const bridge = window.chrome?.webview
   if (!bridge || typeof bridge.postMessage !== 'function' || typeof bridge.addEventListener !== 'function') {
     return null
@@ -419,6 +524,13 @@ const pending = new Map<string, PendingCall>()
 let listening = false
 let listenerBridge: WebView2Bridge | null = null
 
+/** JOB_UPDATED 事件订阅者（Host → UI 推送；Mock 模式由 store 轮询兜底）。 */
+const jobListeners = new Set<(job: JobDto) => void>()
+
+function hasListeners(): boolean {
+  return pending.size > 0 || jobListeners.size > 0
+}
+
 function attachListener(bridge: WebView2Bridge) {
   if (listening) return
   bridge.addEventListener('message', onBridgeMessage)
@@ -433,9 +545,23 @@ function detachListener() {
   listening = false
 }
 
+/** 无 pending 请求且无事件订阅者时才摘除单一 listener（事件订阅可长期持有）。 */
+function detachIfIdle() {
+  if (!hasListeners()) detachListener()
+}
+
 function onBridgeMessage(event: MessageEvent<unknown>) {
   const reply = asRecord(parseMaybeJson(event.data))
   if (!reply) return
+
+  // Host 推送：{ event: 'JOB_UPDATED', data: Job }（无 id，不是请求响应）。
+  const eventName = (readString(reply, 'event') ?? readString(reply, 'type') ?? '').toUpperCase()
+  if (eventName === 'JOB_UPDATED' || eventName === 'JOB.UPDATED') {
+    const payload = asRecord(parseMaybeJson(reply['data'] ?? reply['job'] ?? reply['payload']))
+    const job = payload ? normalizeJob(payload) : null
+    if (job) dispatchJobUpdate(job)
+    return
+  }
 
   const replyId = reply['id']
   if (replyId !== undefined && replyId !== null && pending.has(String(replyId))) {
@@ -456,12 +582,42 @@ function onBridgeMessage(event: MessageEvent<unknown>) {
   }
 }
 
+function dispatchJobUpdate(job: JobDto): void {
+  for (const listener of [...jobListeners]) {
+    try {
+      listener(job)
+    } catch {
+      // 订阅者异常不得影响桥接消息通道（其他请求/订阅仍需要继续工作）。
+    }
+  }
+}
+
+/**
+ * 订阅 Host `JOB_UPDATED` 事件（M2b 作业中心）。
+ * 无 WebView2 宿主（浏览器 dev / CDP Mock）时返回空取消函数，由 store 轮询 Mock 兜底。
+ */
+export function onJobUpdated(listener: (job: JobDto) => void): () => void {
+  const bridge = getBridge()
+  if (!bridge) return () => undefined
+  jobListeners.add(listener)
+  attachListener(bridge)
+  return () => {
+    jobListeners.delete(listener)
+    detachIfIdle()
+  }
+}
+
+/** 是否具备 Host 作业事件通道（供 store 决定是否需要轮询兜底）。 */
+export function hasJobEventBridge(): boolean {
+  return getBridge() !== null
+}
+
 function settleCall(id: string, reply: Record<string, unknown>) {
   const call = pending.get(id)
   if (!call) return
   pending.delete(id)
   clearTimeout(call.timer)
-  if (pending.size === 0) detachListener()
+  detachIfIdle()
 
   const ok = reply['ok']
   if (ok === false) {
@@ -542,7 +698,7 @@ export function request<T, P = unknown>(
     const timer = setTimeout(() => {
       if (!pending.has(id)) return
       pending.delete(id)
-      if (pending.size === 0) detachListener()
+      detachIfIdle()
       reject(
         new HostError(
           'E_TIMEOUT',
@@ -989,6 +1145,123 @@ export function normalizeRepoActionResult(value: unknown): RepoActionResultDto {
   }
 }
 
+// ── M2b 作业 DTO 规范化（容忍 PascalCase、字段缺失与计数漂移） ──
+
+const JOB_STATES: readonly JobState[] = [
+  'PENDING',
+  'RUNNING',
+  'PARTIAL',
+  'SUCCESS',
+  'FAILED',
+  'CANCELED',
+  'INTERRUPTED',
+]
+const JOB_ITEM_STATES: readonly JobItemState[] = [
+  'PENDING',
+  'RUNNING',
+  'OK',
+  'SUCCESS',
+  'FAILED',
+  'SKIPPED',
+  'CANCELED',
+  'INTERRUPTED',
+]
+
+function normalizeJobState(value: unknown): JobState {
+  const upper = typeof value === 'string' ? value.toUpperCase() : ''
+  return (JOB_STATES as readonly string[]).includes(upper) ? (upper as JobState) : 'PENDING'
+}
+
+function normalizeJobItemState(value: unknown): JobItemState {
+  const upper = typeof value === 'string' ? value.toUpperCase() : ''
+  return (JOB_ITEM_STATES as readonly string[]).includes(upper) ? (upper as JobItemState) : 'PENDING'
+}
+
+function normalizeJobItem(value: unknown): JobItemDto | null {
+  const record = asRecord(parseMaybeJson(value))
+  if (!record) return null
+  const componentId = readString(record, 'componentId') ?? ''
+  const repoType = (readString(record, 'repoType') ?? '').toUpperCase()
+  if (!componentId && !repoType) return null
+  return {
+    componentId,
+    repoType,
+    repoName: readNullableString(record, 'repoName'),
+    state: normalizeJobItemState(prop(record, 'state')),
+    startedAt: readNullableString(record, 'startedAt'),
+    finishedAt: readNullableString(record, 'finishedAt'),
+    errorCode: readNullableString(record, 'errorCode'),
+    message: readNullableString(record, 'message'),
+    preHead: readNullableString(record, 'preHead'),
+    postHead: readNullableString(record, 'postHead'),
+    backupRef: readNullableString(record, 'backupRef'),
+  }
+}
+
+/** normalize Job：兼容直接 job、`{job:{…}}` 与 `{data:{…}}` 包装；计数缺失时按 items 兜底。 */
+export function normalizeJob(value: unknown): JobDto | null {
+  let record = asRecord(parseMaybeJson(value))
+  if (!record) return null
+  if (!record['id'] && !record['jobId']) {
+    const nested = asRecord(parseMaybeJson(record['job'] ?? record['data']))
+    if (nested && nested !== record) record = nested
+  }
+  const id = readString(record, 'id') ?? readString(record, 'jobId')
+  if (!id) return null
+  const items = (readArray(record, 'items') ?? [])
+    .map(normalizeJobItem)
+    .filter((item): item is JobItemDto => item !== null)
+  const state = normalizeJobState(prop(record, 'state'))
+  const okFallback = items.filter((item) => item.state === 'OK' || item.state === 'SUCCESS').length
+  const failedFallback = items.filter((item) => item.state === 'FAILED').length
+  const skippedFallback = items.filter((item) => item.state === 'SKIPPED').length
+  const cancellableRaw = prop(record, 'cancellable')
+  const cancellable =
+    cancellableRaw === undefined
+      ? state === 'PENDING' || state === 'RUNNING'
+      : readBoolean(record, 'cancellable')
+  return {
+    id,
+    kind: ((readString(record, 'kind') ?? '').toUpperCase() || 'SYNC') as JobKind,
+    state,
+    total: Math.max(0, readNumber(record, 'total', items.length)),
+    ok: Math.max(0, readNumber(record, 'ok', okFallback)),
+    failed: Math.max(0, readNumber(record, 'failed', failedFallback)),
+    skipped: Math.max(0, readNumber(record, 'skipped', skippedFallback)),
+    createdAt: readString(record, 'createdAt') ?? '',
+    startedAt: readNullableString(record, 'startedAt'),
+    finishedAt: readNullableString(record, 'finishedAt'),
+    cancellable,
+    items,
+  }
+}
+
+/** normalize getJobs：契约 `{jobs}`，兼容裸数组与 `{items}`。 */
+export function normalizeJobs(value: unknown): JobsDto {
+  const record = asRecord(parseMaybeJson(value))
+  const raw = Array.isArray(record)
+    ? record
+    : (readArray(record ?? {}, 'jobs') ?? readArray(record ?? {}, 'items') ?? [])
+  const jobs: JobDto[] = []
+  for (const item of raw) {
+    const job = normalizeJob(item)
+    if (job) jobs.push(job)
+  }
+  return { jobs }
+}
+
+/** normalize runBatch / retryFailed 响应（契约 `{jobId,accepted,total,skipped}`）。 */
+export function normalizeRunBatchResult(value: unknown): RunBatchResultDto {
+  const record = asRecord(parseMaybeJson(value)) ?? {}
+  const jobId = readString(record, 'jobId') ?? readString(record, 'id') ?? ''
+  return {
+    jobId,
+    accepted: prop(record, 'accepted') === undefined ? Boolean(jobId) : readBoolean(record, 'accepted'),
+    total: Math.max(0, readNumber(record, 'total', readNumber(record, 'retried'))),
+    skipped: Math.max(0, readNumber(record, 'skipped')),
+  }
+}
+
 const REMOTE_REF_KINDS: readonly RemoteRefKind[] = ['LOCAL_BRANCH', 'REMOTE_BRANCH', 'TAG']
 
 /** 由 refName 前缀推断 kind（Host 字段缺失/大小写漂移时兜底）。 */
@@ -1196,6 +1469,37 @@ export const api = {
   },
   async getHostInfo(): Promise<HostInfoDto> {
     return normalizeHostInfo(await request<unknown>('getHostInfo'))
+  },
+  // ── M2b 批量作业（Host 并行实现；UI 只读消费，Mock 模式由 store 走内置演示作业） ──
+  /** 提交批量作业；Host 只回 jobId + 计数，逐仓进度通过 JOB_UPDATED / getJob(s) 获取。 */
+  async runBatch(params: RunBatchParams): Promise<RunBatchResultDto> {
+    const payload: Record<string, unknown> = { kind: params.kind, args: params.args ?? {} }
+    if (params.componentIds && params.componentIds.length > 0) payload.componentIds = params.componentIds
+    if (params.repoTypes && params.repoTypes.length > 0) payload.repoTypes = params.repoTypes
+    return normalizeRunBatchResult(await request<unknown>('runBatch', payload))
+  },
+  /** 最近作业列表（进行中 + 历史；limit 默认 50）。 */
+  async getJobs(limit = 50): Promise<JobDto[]> {
+    return normalizeJobs(await request<unknown>('getJobs', { limit })).jobs
+  },
+  async getJob(jobId: string): Promise<JobDto> {
+    const job = normalizeJob(await request<unknown>('getJob', { jobId }))
+    if (!job) throw new HostError('E_INVALID_RESPONSE', 'getJob 响应无法识别（缺少 jobId/state）')
+    return job
+  },
+  /** 合作式取消；Host 可回最新 job（也允许只回 ack，此时返回 null 由调用方刷新列表）。 */
+  async cancelJob(jobId: string): Promise<JobDto | null> {
+    const raw = await request<unknown>('cancelJob', { jobId })
+    const record = asRecord(parseMaybeJson(raw))
+    if (!record) return null
+    // 只回 { jobId, accepted } 的 ack 不是 job 快照：不得当作 Job 合并（避免把状态覆盖回 PENDING）。
+    const hasJobShape = prop(record, 'state') !== undefined || Array.isArray(prop(record, 'items'))
+    if (!hasJobShape) return null
+    return normalizeJob(record)
+  },
+  /** 仅重试失败/取消项；返回新 jobId 与计数。 */
+  async retryFailed(jobId: string): Promise<RunBatchResultDto> {
+    return normalizeRunBatchResult(await request<unknown>('retryFailed', { jobId }))
   },
 }
 

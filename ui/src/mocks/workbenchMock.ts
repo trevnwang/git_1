@@ -6,10 +6,13 @@
  */
 import { HostError } from '../api'
 import type {
+  BatchArgs,
   CiStatusDto,
   CommitDto,
   ComponentDto,
   HostInfoDto,
+  JobDto,
+  JobItemDto,
   OpenPathResultDto,
   RepoDetailDto,
   RepoDto,
@@ -753,4 +756,340 @@ export function mockRunRepoAction(action: string): never {
     `M1 为只读模式：${action} 将在 M2 启用（需预检、dry-run/备份、逐仓结果与任务中心）`,
     { action, writeStage: 'M2' },
   )
+}
+
+// ───────────────────────────── M2b Mock 任务中心 / 批量作业 ─────────────────────────────
+
+/**
+ * 内置 2 个演示作业（进行中 CLONE / 部分失败 SYNC），并按轮询推进进度。
+ * 仅在 Mock 模式（无 Host / CDP 强制 Mock）使用；真实 Host 下 store 走 Host 作业 API。
+ */
+let mockJobSeq = 0
+let mockJobsCache: JobDto[] | null = null
+/** 演示用「停在进行中」预算：种子作业完成指定项数后保留 1 个 RUNNING 项，便于演示取消。 */
+const mockStallBudget = new Map<string, number>()
+
+function isoAgo(ms: number): string {
+  return new Date(Date.now() - ms).toISOString()
+}
+
+function cloneJobs(): JobDto[] {
+  return JSON.parse(JSON.stringify(mockJobsCache ?? [])) as JobDto[]
+}
+
+function findMockJob(jobId: string): JobDto | undefined {
+  return ensureMockJobs().find((job) => job.id === jobId)
+}
+
+function seedMockJobs(): JobDto[] {
+  const runningId = 'job-mock-9001'
+  const runningStarted = isoAgo(14_000)
+  const running: JobDto = {
+    id: runningId,
+    kind: 'CLONE',
+    state: 'RUNNING',
+    total: 4,
+    ok: 2,
+    failed: 0,
+    skipped: 0,
+    createdAt: runningStarted,
+    startedAt: runningStarted,
+    finishedAt: null,
+    cancellable: true,
+    items: [
+      {
+        componentId: 'CF111D_BrakeCtrl',
+        repoType: 'DESIGN',
+        repoName: repoName('CF111D_BrakeCtrl', 'DESIGN'),
+        state: 'OK',
+        startedAt: isoAgo(13_000),
+        finishedAt: isoAgo(9_000),
+        preHead: null,
+        postHead: HEAD_A,
+        errorCode: null,
+        message: 'Clone 完成（Mock）',
+        backupRef: null,
+      },
+      {
+        componentId: 'CF111D_BrakeCtrl',
+        repoType: 'IMPL',
+        repoName: repoName('CF111D_BrakeCtrl', 'IMPL'),
+        state: 'OK',
+        startedAt: isoAgo(9_000),
+        finishedAt: isoAgo(5_000),
+        preHead: null,
+        postHead: HEAD_B,
+        errorCode: null,
+        message: 'Clone 完成（Mock）',
+        backupRef: null,
+      },
+      {
+        componentId: 'CF111D_BrakeCtrl',
+        repoType: 'MIL',
+        repoName: repoName('CF111D_BrakeCtrl', 'MIL'),
+        state: 'RUNNING',
+        startedAt: isoAgo(2_000),
+        finishedAt: null,
+        preHead: null,
+        postHead: null,
+        errorCode: null,
+        message: '正在 Clone（Mock）',
+        backupRef: null,
+      },
+      {
+        componentId: 'CF111D_BrakeCtrl',
+        repoType: 'SIL',
+        repoName: repoName('CF111D_BrakeCtrl', 'SIL'),
+        state: 'PENDING',
+        startedAt: null,
+        finishedAt: null,
+        preHead: null,
+        postHead: null,
+        errorCode: null,
+        message: null,
+        backupRef: null,
+      },
+    ],
+  }
+  mockStallBudget.set(runningId, 1)
+
+  const syncStarted = isoAgo(8 * 60_000)
+  const syncFinished = isoAgo(7.5 * 60_000)
+  const backupAt = new Date(Date.now() - 8 * 60_000).toISOString().replace(/[:.]/g, '').slice(0, 15)
+  const partial: JobDto = {
+    id: 'job-mock-9002',
+    kind: 'SYNC',
+    state: 'PARTIAL',
+    total: 4,
+    ok: 2,
+    failed: 2,
+    skipped: 0,
+    createdAt: syncStarted,
+    startedAt: syncStarted,
+    finishedAt: syncFinished,
+    cancellable: false,
+    items: [
+      {
+        componentId: 'CF123A_ShortName',
+        repoType: 'DESIGN',
+        repoName: repoName('CF123A_ShortName', 'DESIGN'),
+        state: 'OK',
+        startedAt: syncStarted,
+        finishedAt: isoAgo(7 * 60_000),
+        preHead: HEAD_B,
+        postHead: HEAD_A,
+        errorCode: null,
+        message: 'SYNC 完成：已备份并硬重置到远程（Mock）',
+        backupRef: `refs/backup/sync/${backupAt}/DESIGN/main`,
+      },
+      {
+        componentId: 'CF123A_ShortName',
+        repoType: 'IMPL',
+        repoName: repoName('CF123A_ShortName', 'IMPL'),
+        state: 'OK',
+        startedAt: syncStarted,
+        finishedAt: isoAgo(6.8 * 60_000),
+        preHead: HEAD_C,
+        postHead: HEAD_B,
+        errorCode: null,
+        message: 'SYNC 完成：已备份并硬重置到远程（Mock）',
+        backupRef: `refs/backup/sync/${backupAt}/IMPL/main`,
+      },
+      {
+        componentId: 'CF123A_ShortName',
+        repoType: 'MIL',
+        repoName: repoName('CF123A_ShortName', 'MIL'),
+        state: 'FAILED',
+        startedAt: isoAgo(6.8 * 60_000),
+        finishedAt: isoAgo(6.6 * 60_000),
+        preHead: null,
+        postHead: null,
+        errorCode: 'E_DIRTY_WORKTREE',
+        message: '工作区存在未提交改动，已跳过（未做破坏性改动）',
+        backupRef: null,
+      },
+      {
+        componentId: 'CF123A_ShortName',
+        repoType: 'SIL',
+        repoName: repoName('CF123A_ShortName', 'SIL'),
+        state: 'FAILED',
+        startedAt: isoAgo(6.6 * 60_000),
+        finishedAt: isoAgo(6.4 * 60_000),
+        preHead: null,
+        postHead: null,
+        errorCode: 'E_OFFLINE',
+        message: '网络不可达，fetch 超时（attempt=2）',
+        backupRef: null,
+      },
+    ],
+  }
+  return [running, partial]
+}
+
+function ensureMockJobs(): JobDto[] {
+  if (!mockJobsCache) mockJobsCache = seedMockJobs()
+  return mockJobsCache
+}
+
+/** 读取全部 Mock 作业（深拷贝，避免组件直接改缓存）。 */
+export function mockJobs(): JobDto[] {
+  ensureMockJobs()
+  return cloneJobs()
+}
+
+function nextHead(): string {
+  return `${Math.random().toString(16).slice(2, 10)}${Date.now().toString(16)}`.padEnd(40, '0').slice(0, 40)
+}
+
+/** 每个轮询 tick 推进一次 Mock 作业进度（单调不减；演示作业到达预定点后停在 RUNNING）。 */
+export function tickMockJobs(): void {
+  for (const job of ensureMockJobs()) {
+    if (job.state === 'PENDING') {
+      job.state = 'RUNNING'
+      job.startedAt = job.startedAt ?? new Date().toISOString()
+    }
+    if (job.state !== 'RUNNING') continue
+    const budget = mockStallBudget.get(job.id)
+    if (budget !== undefined && budget <= 0) continue
+    const running = job.items.find((item) => item.state === 'RUNNING')
+    if (running) {
+      running.state = 'OK'
+      running.finishedAt = new Date().toISOString()
+      running.postHead = running.postHead ?? nextHead()
+      running.message = running.message ?? '完成（Mock）'
+      job.ok += 1
+      if (budget !== undefined) mockStallBudget.set(job.id, budget - 1)
+    }
+    const next = job.items.find((item) => item.state === 'PENDING')
+    if (next) {
+      next.state = 'RUNNING'
+      next.startedAt = new Date().toISOString()
+      continue
+    }
+    if (!job.items.some((item) => item.state === 'RUNNING')) {
+      job.state = job.failed > 0 ? 'PARTIAL' : 'SUCCESS'
+      job.finishedAt = new Date().toISOString()
+      job.cancellable = false
+    }
+  }
+}
+
+export interface MockBatchResult {
+  jobId: string
+  accepted: boolean
+  total: number
+  skipped: number
+}
+
+/** runBatch 的 Mock 实现：生成一个 RUNNING 作业（dryRun 则为 SUCCESS + 全部 SKIPPED）。 */
+export function mockRunBatch(
+  kind: string,
+  componentIds: string[],
+  repoTypes: string[] | undefined,
+  args: BatchArgs = {},
+): MockBatchResult {
+  const types = (repoTypes && repoTypes.length > 0 ? repoTypes : REPO_TYPES) as readonly string[]
+  const targets: { componentId: string; repoType: string }[] = []
+  for (const componentId of componentIds) {
+    for (const repoType of types) targets.push({ componentId, repoType: repoType.toUpperCase() })
+  }
+  const limited = targets.slice(0, 40)
+  const dryRun = args.dryRun === true
+  const now = new Date().toISOString()
+  const id = `job-mock-${++mockJobSeq + 9100}`
+  const refName = args.branch ?? args.tag ?? ''
+  const items: JobItemDto[] = limited.map((target) => ({
+    componentId: target.componentId,
+    repoType: target.repoType,
+    repoName: repoName(target.componentId, target.repoType as RepoType),
+    state: dryRun ? 'SKIPPED' : 'PENDING',
+    startedAt: dryRun ? now : null,
+    finishedAt: dryRun ? now : null,
+    preHead: null,
+    postHead: null,
+    errorCode: null,
+    message: dryRun ? 'dryRun：仅预览，未执行任何写操作（Mock）' : `${kind} 已入队（Mock）`,
+    backupRef: null,
+  }))
+  const job: JobDto = {
+    id,
+    kind: kind.toUpperCase() as JobDto['kind'],
+    state: dryRun ? 'SUCCESS' : 'RUNNING',
+    total: items.length,
+    ok: 0,
+    failed: 0,
+    skipped: dryRun ? items.length : 0,
+    createdAt: now,
+    startedAt: dryRun ? now : null,
+    finishedAt: dryRun ? now : null,
+    cancellable: !dryRun,
+    items,
+  }
+  if (!dryRun && refName) {
+    // 分支/Tag 名称仅用于演示提示；不伪造 git 状态。
+    job.items.forEach((item) => {
+      item.message = `${kind} ${refName} 已入队（Mock）`
+    })
+  }
+  if (!dryRun) mockJobsCache = [job, ...ensureMockJobs()]
+  else mockJobsCache = [job, ...ensureMockJobs()]
+  return { jobId: id, accepted: true, total: items.length, skipped: job.skipped }
+}
+
+/** cancelJob 的 Mock 实现：合作式取消（已开始项 CANCELED，未开始项保持 PENDING）。 */
+export function mockCancelJob(jobId: string): JobDto | null {
+  const job = findMockJob(jobId)
+  if (!job) return null
+  if (!job.cancellable || (job.state !== 'RUNNING' && job.state !== 'PENDING')) {
+    return JSON.parse(JSON.stringify(job)) as JobDto
+  }
+  job.state = 'CANCELED'
+  job.cancellable = false
+  job.finishedAt = new Date().toISOString()
+  mockStallBudget.delete(job.id)
+  for (const item of job.items) {
+    if (item.state === 'RUNNING') {
+      item.state = 'CANCELED'
+      item.finishedAt = new Date().toISOString()
+      item.message = '已取消（合作式取消，未整体回滚；Mock）'
+    }
+  }
+  return JSON.parse(JSON.stringify(job)) as JobDto
+}
+
+/** retryFailed 的 Mock 实现：仅把失败/取消/中断项作为新作业重跑。 */
+export function mockRetryFailed(jobId: string): MockBatchResult | null {
+  const source = findMockJob(jobId)
+  if (!source) return null
+  const retryItems = source.items.filter(
+    (item) => item.state === 'FAILED' || item.state === 'CANCELED' || item.state === 'INTERRUPTED',
+  )
+  if (retryItems.length === 0) return null
+  const now = new Date().toISOString()
+  const id = `job-mock-retry-${++mockJobSeq + 9200}`
+  const job: JobDto = {
+    id,
+    kind: source.kind,
+    state: 'PENDING',
+    total: retryItems.length,
+    ok: 0,
+    failed: 0,
+    skipped: 0,
+    createdAt: now,
+    startedAt: null,
+    finishedAt: null,
+    cancellable: true,
+    items: retryItems.map((item) => ({
+      ...item,
+      state: 'PENDING',
+      startedAt: null,
+      finishedAt: null,
+      errorCode: null,
+      preHead: null,
+      postHead: null,
+      message: '仅重试失败项：已重新入队（Mock）',
+    })),
+  }
+  mockJobsCache = [job, ...ensureMockJobs()]
+  return { jobId: id, accepted: true, total: job.total, skipped: 0 }
 }

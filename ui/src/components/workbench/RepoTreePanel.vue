@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useWorkbench } from '../../stores/workbench'
-import { M2B_BOUNDARY_TEXT, REPO_LABEL, repoOf } from '../../viewmodel'
+import { REPO_LABEL, repoOf } from '../../viewmodel'
 import type { RepoType, TreeNodeVm } from '../../types/workbench'
 import EmptyState from '../common/EmptyState.vue'
 import CiBadge from '../common/CiBadge.vue'
@@ -81,14 +81,15 @@ const emptyState = computed(() => {
 function onEmptyAction(): void {
   const key = emptyState.value.primaryKey
   if (key === 'clone') {
-    w.batchCommand('CLONE')
+    w.requestBatch('CLONE')
     return
   }
   if (key === 'retry') {
     void w.loadTree(props.repoType, true)
     return
   }
-  w.notify(`${emptyState.value.primary}：${M2B_BOUNDARY_TEXT}`, 'warning', 3000)
+  // 初始化并首推 / 修复绑定等未开放能力：保留明确的不支持提示（不得静默无响应）。
+  w.notify(`${emptyState.value.primary}：当前 Host 未开放该能力`, 'warning', 3_000)
 }
 
 function onTreeSelect(path: string | null): void {

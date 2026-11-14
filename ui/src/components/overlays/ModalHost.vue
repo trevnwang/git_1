@@ -2,7 +2,6 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useWorkbench } from '../../stores/workbench'
 import { mockHostInfo } from '../../mocks/workbenchMock'
-import { M2B_BOUNDARY_TEXT } from '../../viewmodel'
 
 const w = useWorkbench()
 const state = w.state
@@ -185,7 +184,7 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_U
               <div class="field"><label>删除保留期</label><input disabled value="30 天（.trash 可恢复）" /></div>
               <div class="field"><label>备份 ref 保留</label><input disabled value="30 天（refs/backup/*）" /></div>
               <div class="field"><label>强制覆盖确认</label><input type="checkbox" disabled checked /></div>
-              <p class="hint">dry-run / 备份 / 恢复：{{ M2B_BOUNDARY_TEXT }}。</p>
+              <p class="hint">dry-run / 备份 / 恢复：由 Host 作业与任务中心提供（备份 ref 保留 30 天）。</p>
             </section>
             <section id="settings-ci" class="settings-section" data-testid="ci-settings">
               <h3>CI 集成 <span class="experiment">实验</span></h3>
@@ -227,13 +226,13 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_U
       <div v-else-if="kind === 'unbound'" class="modal-body">
         <div class="ci-empty">
           <div class="big">未绑定仓库（0）</div>
-          <div class="muted">按原因分组：命名不符合 RepoNameParser / 路径不存在 / 未纳入管理。M1 只读展示，重新解析与忽略属 {{ M2B_BOUNDARY_TEXT }}。</div>
+          <div class="muted">按原因分组：命名不符合 RepoNameParser / 路径不存在 / 未纳入管理。M1 只读展示，重新解析与忽略由 Host 后续版本开放。</div>
           <button type="button" class="drawer-btn" @click="w.refresh()">重新对账</button>
         </div>
         <h4 class="section">分组字段（契约占位）</h4>
         <div class="kv"><span>原因</span><span class="muted">—</span></div>
         <div class="kv"><span>路径</span><span class="muted">—</span></div>
-        <div class="kv"><span>重新解析 / 忽略（写理由）</span><span class="muted">{{ M2B_BOUNDARY_TEXT }}</span></div>
+        <div class="kv"><span>重新解析 / 忽略（写理由）</span><span class="muted">—（Host 未开放）</span></div>
       </div>
 
       <!-- 关于 -->

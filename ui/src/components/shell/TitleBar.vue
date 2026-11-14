@@ -119,9 +119,9 @@ function clearSearch(): void {
       type="button"
       class="icon-btn"
       data-testid="title-tasks"
-      :title="`任务中心（${state.taskCount} 个任务）`"
+      :title="`任务中心（进行中 ${state.taskCount} · 历史 ${state.jobs.length - state.taskCount}）`"
       aria-label="任务中心"
-      @click="w.openDrawer('tasks')"
+      @click="w.openTaskCenter()"
     >▤</button>
 
     <button

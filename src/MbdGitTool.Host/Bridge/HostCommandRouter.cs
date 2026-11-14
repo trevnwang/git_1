@@ -41,7 +41,14 @@ public sealed class HostCommandRouter : IDisposable
             ["runRepoAction"] = TimeSpan.FromSeconds(120),
             ["getRemoteRefs"] = TimeSpan.FromSeconds(20),
             ["getCiStatus"] = TimeSpan.FromSeconds(2),
-            ["getHostInfo"] = TimeSpan.FromSeconds(2)
+            ["getHostInfo"] = TimeSpan.FromSeconds(2),
+
+            // M2b 作业/批量：runBatch 仅受理入队（10s），查询/取消/重试均为内存操作（5s）。
+            ["runBatch"] = TimeSpan.FromSeconds(10),
+            ["getJobs"] = TimeSpan.FromSeconds(5),
+            ["getJob"] = TimeSpan.FromSeconds(5),
+            ["cancelJob"] = TimeSpan.FromSeconds(5),
+            ["retryFailed"] = TimeSpan.FromSeconds(5)
         };
 
     private readonly SnapshotService _snapshots;
@@ -52,6 +59,7 @@ public sealed class HostCommandRouter : IDisposable
     private readonly CommitsService _commits;
     private readonly RepoActionService _actions;
     private readonly OperationAuditService _audit;
+    private readonly JobEngine _jobs;
     private readonly RemoteRefsService _remoteRefs;
     private readonly ComponentDetailService _componentDetail;
     private readonly RepoDetailService _repoDetail;
@@ -83,6 +91,19 @@ public sealed class HostCommandRouter : IDisposable
         // G-P0-2 / AC-OP-33：审计-lite（每次 runRepoAction 成功/失败写 1 行 JSONL；不含 token/output）。
         _audit = new OperationAuditService(_snapshots.Config);
         _remoteRefs = new RemoteRefsService();
+
+        // M2b 作业内核：后台单 worker 串行 job；事件经 EventSink（WebViewBridge 设置）推送 JOB_UPDATED。
+        // 作业结束后失效派生缓存与“已交付快照”CAS 基线，避免批量写后紧接着的单仓写被误拒。
+        _jobs = new JobEngine(
+            _snapshots.Config,
+            _snapshots,
+            actions: _actions,
+            audit: _audit,
+            onJobFinished: () =>
+            {
+                _deliveredIndex = null;
+                InvalidateCaches();
+            });
 
         Func<SnapshotIndex> indexProvider = () => _snapshots.Index;
         _componentDetail = new ComponentDetailService(indexProvider, _actions);
@@ -118,6 +139,16 @@ public sealed class HostCommandRouter : IDisposable
 
     /// <summary>是否配置并解析出合法工作区根（openPath/getRepoTree/getWorkspaceTree 前置）。</summary>
     public bool IsWorkspaceAvailable => _paths is not null;
+
+    /// <summary>
+    /// M2b 作业事件出口（由 <c>WebViewBridge</c> 在初始化后设置）：参数固定为
+    /// <c>{event:"JOB_UPDATED", data:JobDto}</c> 的对象，由桥在 UI 线程序列化后 PostWebMessageAsJson。
+    /// </summary>
+    public Action<object>? EventSink
+    {
+        get => _jobs.EventSink;
+        set => _jobs.EventSink = value;
+    }
 
     /// <summary>路由分发（不抛异常：所有失败映射为 <see cref="CommandResult"/>）。</summary>
     public async Task<CommandResult> DispatchAsync(
@@ -210,6 +241,7 @@ public sealed class HostCommandRouter : IDisposable
 
         _disposed = true;
         _lifetime.Cancel();
+        _jobs.Dispose();
         _ioGate.Dispose();
     }
 
@@ -335,6 +367,37 @@ public sealed class HostCommandRouter : IDisposable
                 }
 
                 return result;
+            }
+
+            case "runBatch":
+            {
+                // 仅受理入队（不等待执行；执行在 JobEngine 后台 worker，事件走 JOB_UPDATED）。
+                var parsed = ParseParams<RunBatchParams>(parameters);
+                return _jobs.RunBatch(parsed);
+            }
+
+            case "getJobs":
+            {
+                var parsed = ParseParams<GetJobsParams>(parameters);
+                return _jobs.GetJobs(parsed);
+            }
+
+            case "getJob":
+            {
+                var parsed = ParseParams<GetJobParams>(parameters);
+                return _jobs.GetJob(parsed);
+            }
+
+            case "cancelJob":
+            {
+                var parsed = ParseParams<CancelJobParams>(parameters);
+                return _jobs.CancelJob(parsed);
+            }
+
+            case "retryFailed":
+            {
+                var parsed = ParseParams<RetryFailedParams>(parameters);
+                return _jobs.RetryFailed(parsed);
             }
 
             case "getRemoteRefs":

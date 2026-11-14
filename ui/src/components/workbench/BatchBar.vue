@@ -1,13 +1,21 @@
 <script setup lang="ts">
+/**
+ * 组件级批量操作条（FR-BOARD-04 / M2b）：SYNC / CREATE / Clone / Delete
+ * 点击先走确认/参数对话框（overlays），确认后才 runBatch；提交后打开任务中心。
+ */
 import { computed } from 'vue'
 import { useWorkbench } from '../../stores/workbench'
-import { M2B_BOUNDARY_TEXT } from '../../viewmodel'
+import type { BatchKind } from '../../types/workbench'
 
 const w = useWorkbench()
 const state = w.state
 
 const checkedCount = computed(() => state.checkedIds.length)
 const repoCount = computed(() => state.checkedIds.length * 4)
+
+function run(kind: BatchKind): void {
+  w.requestBatch(kind)
+}
 </script>
 
 <template>
@@ -17,18 +25,46 @@ const repoCount = computed(() => state.checkedIds.length * 4)
         type="button"
         class="batch-btn primary"
         data-testid="batch-select-toggle"
-        title="进入批量选择模式（对选中组件集合执行 SYNC / CREATE / Clone / Delete）"
+        title="进入批量选择模式（对选中组件集合执行 SYNC / CREATE / Clone / Delete，经任务中心执行）"
         @click="w.toggleSelectMode()"
       >☑</button>
       <span class="hint">批量</span>
     </template>
     <template v-else>
-      <span class="count" :title="`已选 ${checkedCount} 组件 / ${repoCount} 仓`">{{ checkedCount }}/{{ state.components.length }}</span>
+      <span class="count" :title="`已选 ${checkedCount} 组件 / ${repoCount} 仓（未勾选时对当前选中组件执行）`">{{ checkedCount }}/{{ state.components.length }}</span>
       <div class="commands">
-        <button type="button" class="batch-btn" data-testid="batch-sync" :title="`SYNC：${M2B_BOUNDARY_TEXT}`" @click="w.batchCommand('SYNC')">⟳</button>
-        <button type="button" class="batch-btn" data-testid="batch-create" :title="`CREATE：${M2B_BOUNDARY_TEXT}`" @click="w.batchCommand('CREATE')">＋</button>
-        <button type="button" class="batch-btn" data-testid="batch-clone" :title="`Clone 缺失仓：${M2B_BOUNDARY_TEXT}`" @click="w.batchCommand('CLONE')">⤓</button>
-        <button type="button" class="batch-btn danger" data-testid="batch-delete" :title="`删除 / 恢复 / 纳入 / 移出：${M2B_BOUNDARY_TEXT}`" @click="w.batchCommand('DELETE')">⋯</button>
+        <button
+          type="button"
+          class="batch-btn"
+          data-testid="batch-sync"
+          :disabled="state.batchPending"
+          title="SYNC：远程覆盖本地（先预检 + 备份 ref，需确认）→ 任务中心"
+          @click="run('SYNC')"
+        >⟳</button>
+        <button
+          type="button"
+          class="batch-btn"
+          data-testid="batch-create"
+          :disabled="state.batchPending"
+          title="CREATE：四仓创建同名分支（需输入分支名）→ 任务中心"
+          @click="run('CREATE')"
+        >＋</button>
+        <button
+          type="button"
+          class="batch-btn"
+          data-testid="batch-clone"
+          :disabled="state.batchPending"
+          title="Clone 缺失仓（预览缺失清单，可选 dryRun）→ 任务中心"
+          @click="run('CLONE')"
+        >⤓</button>
+        <button
+          type="button"
+          class="batch-btn danger"
+          data-testid="batch-delete"
+          :disabled="state.batchPending"
+          title="Delete：仅本地软删到 .trash（保留 30 天，需确认）→ 任务中心"
+          @click="run('DELETE')"
+        >⋯</button>
       </div>
       <button type="button" class="batch-btn" title="全选筛选结果" @click="w.selectAllVisible()">全</button>
       <button type="button" class="close-btn" data-testid="batch-select-toggle" title="退出批量选择" @click="w.clearChecked()">✕</button>
@@ -65,7 +101,8 @@ const repoCount = computed(() => state.checkedIds.length * 4)
   cursor: pointer;
   white-space: nowrap;
 }
-.batch-btn:hover { background: var(--surface-2); color: var(--text); }
+.batch-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.batch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .batch-btn.primary { border-color: var(--st-info-bd); background: var(--st-info-bg); color: var(--st-info-fg); }
 .batch-btn.danger { color: var(--st-danger-fg); border-color: var(--st-danger-bd); }
 .close-btn {

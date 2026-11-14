@@ -1,0 +1,1175 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using MbdGitTool.Core.Contracts;
+using MbdGitTool.Host.Bridge;
+using MbdGitTool.Host.Services;
+
+namespace MbdGitTool.Host.Tests;
+
+/// <summary>
+/// M2b 作业内核 + 批量操作（SRS §9.7 FR-OP / §8.1 job/job_item / §13.1.2 AC-UI-10c）。
+/// <para>全部使用临时 bare remote + 临时工作区（无网络/无真实 Gitea）：job 成功/PARTIAL/失败、取消、
+/// 仅重试失败项、持久化重启 INTERRUPTED、SYNC 备份 ref、DELETE→RESTORE、CLONE（本地 file:// bare remote）、
+/// CREATE/TAG、审计每 item 1 行含 jobId、token 不泄漏、路径逃逸拒绝、事件 JOB_UPDATED。</para>
+/// </summary>
+public sealed class JobEngineTests
+{
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+    private const string TestToken = "ghp_m2b_fake_token_0123456789abcdef";
+
+    // ------------------------------------------------------------------ job 成功 / 查询 / 事件 / 审计
+
+    [Fact]
+    public async Task RunBatch_Fetch_Succeeds_EmitsEventsAndAuditsOneRowPerItem()
+    {
+        using var fixture = BatchWorkspace.Create("CF100A_Demo_Impl", "CF100A_Demo_SIL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var events = new ConcurrentBag<object>();
+        router.EventSink = envelope => events.Add(envelope);
+
+        var batch = await DispatchAsync(
+            router,
+            "runBatch",
+            new { kind = "FETCH", componentIds = new[] { "CF100A_Demo" }, repoTypes = new[] { "IMPL", "SIL" } });
+
+        Assert.True(batch.Ok, Describe(batch));
+        var accepted = Assert.IsType<RunBatchResultDto>(batch.Data);
+        Assert.True(accepted.Accepted);
+        Assert.Equal(2, accepted.Total);
+        Assert.Equal(0, accepted.Skipped);
+        Assert.False(string.IsNullOrWhiteSpace(accepted.JobId));
+
+        var job = await WaitJobAsync(router, accepted.JobId);
+        Assert.Equal("SUCCESS", job.State);
+        Assert.Equal(2, job.Total);
+        Assert.Equal(2, job.Ok);
+        Assert.Equal(0, job.Failed);
+        Assert.Equal(0, job.Skipped);
+        Assert.False(job.Cancellable);
+        Assert.NotNull(job.StartedAt);
+        Assert.NotNull(job.FinishedAt);
+        Assert.All(job.Items, item => Assert.Equal("OK", item.State));
+        Assert.All(job.Items, item => Assert.NotNull(item.PostHead));
+
+        // getJobs / getJob 契约。
+        var jobsResult = await DispatchAsync(router, "getJobs", new { limit = 10 });
+        Assert.True(jobsResult.Ok);
+        var jobs = Assert.IsType<JobsDto>(jobsResult.Data);
+        Assert.Contains(jobs.Jobs, entry => entry.Id == accepted.JobId);
+
+        var single = await DispatchAsync(router, "getJob", new { jobId = accepted.JobId });
+        Assert.True(single.Ok);
+        Assert.Equal(accepted.JobId, Assert.IsType<JobDto>(single.Data).Id);
+
+        // JOB_UPDATED 事件信封：{event:"JOB_UPDATED", data:JobDto}，最终状态为 SUCCESS。
+        var envelopes = events
+            .Select(envelope => JsonSerializer.Serialize(envelope, WebJson))
+            .Select(json => JsonDocument.Parse(json))
+            .ToList();
+        try
+        {
+            Assert.NotEmpty(envelopes);
+            Assert.All(envelopes, document =>
+            {
+                Assert.Equal("JOB_UPDATED", document.RootElement.GetProperty("event").GetString());
+                Assert.Equal(accepted.JobId, document.RootElement.GetProperty("data").GetProperty("id").GetString());
+            });
+            Assert.Contains(envelopes, document =>
+                document.RootElement.GetProperty("data").GetProperty("state").GetString() == "SUCCESS");
+        }
+        finally
+        {
+            envelopes.ForEach(document => document.Dispose());
+        }
+
+        // 审计：每 item 恰 1 行，均含 jobId/jobItemId/result，且无 token/Authorization。
+        var lines = ReadAuditLines(config);
+        Assert.Equal(2, lines.Count);
+        var jobItemIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var line in lines)
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            Assert.Equal("FETCH", root.GetProperty("action").GetString());
+            Assert.Equal(accepted.JobId, root.GetProperty("jobId").GetString());
+            Assert.Equal("OK", root.GetProperty("result").GetString());
+            Assert.True(root.GetProperty("ok").GetBoolean());
+            Assert.True(jobItemIds.Add(root.GetProperty("jobItemId").GetString()!));
+            Assert.DoesNotContain(TestToken, line, StringComparison.Ordinal);
+            Assert.DoesNotContain("Authorization", line, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    // ------------------------------------------------------------------ PARTIAL / 仅重试失败项
+
+    [Fact]
+    public async Task RunBatch_Commit_Partial_Then_RetryFailedOnly()
+    {
+        using var fixture = BatchWorkspace.Create("CF100A_Demo_Impl", "CF100A_Demo_SIL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        // 只给 IMPL 暂存一个文件；SIL 干净 → E_NOTHING_TO_COMMIT → job PARTIAL。
+        File.WriteAllText(Path.Combine(fixture.Clones["CF100A_Demo_Impl"], "impl-staged.txt"), "impl");
+        TestGit.Run(fixture.Clones["CF100A_Demo_Impl"], "add", "impl-staged.txt");
+
+        var batch = await DispatchAsync(
+            router,
+            "runBatch",
+            new
+            {
+                kind = "COMMIT",
+                componentIds = new[] { "CF100A_Demo" },
+                repoTypes = new[] { "IMPL", "SIL" },
+                args = new { message = "m2b partial", confirm = true }
+            });
+        Assert.True(batch.Ok, Describe(batch));
+        var accepted = Assert.IsType<RunBatchResultDto>(batch.Data);
+
+        var job = await WaitJobAsync(router, accepted.JobId);
+        Assert.Equal("PARTIAL", job.State);
+        Assert.Equal(1, job.Ok);
+        Assert.Equal(1, job.Failed);
+        var failedItem = Assert.Single(job.Items, item => item.State == "FAILED");
+        Assert.Equal(BridgeErrorCodes.NothingToCommit, failedItem.ErrorCode);
+        Assert.Equal("SIL", failedItem.RepoType);
+
+        // 修正失败仓后可“仅重试失败项”：新 job 只包含失败的 SIL。
+        File.WriteAllText(Path.Combine(fixture.Clones["CF100A_Demo_SIL"], "sil-staged.txt"), "sil");
+        TestGit.Run(fixture.Clones["CF100A_Demo_SIL"], "add", "sil-staged.txt");
+
+        var retry = await DispatchAsync(router, "retryFailed", new { jobId = accepted.JobId });
+        Assert.True(retry.Ok, Describe(retry));
+        var retryResult = Assert.IsType<RetryFailedResultDto>(retry.Data);
+        Assert.True(retryResult.Accepted);
+        Assert.Equal(1, retryResult.Retried);
+        Assert.NotNull(retryResult.JobId);
+        Assert.NotEqual(accepted.JobId, retryResult.JobId);
+
+        var retryJob = await WaitJobAsync(router, retryResult.JobId!);
+        Assert.Equal("SUCCESS", retryJob.State);
+        var retryItem = Assert.Single(retryJob.Items);
+        Assert.Equal("SIL", retryItem.RepoType);
+        Assert.Equal("OK", retryItem.State);
+
+        // 原 job 的成功仓不被重跑（IMPL HEAD 在重试 job 中不变）。
+        Assert.DoesNotContain(retryJob.Items, item => item.RepoType == "IMPL");
+    }
+
+    [Fact]
+    public async Task RunBatch_Commit_AllClean_IsFailed_And_RetryWithoutItemsRejected()
+    {
+        using var fixture = BatchWorkspace.Create("CF100A_Demo_Impl");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var batch = await DispatchAsync(
+            router,
+            "runBatch",
+            new
+            {
+                kind = "COMMIT",
+                componentIds = new[] { "CF100A_Demo" },
+                args = new { message = "nothing", confirm = true }
+            });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+        Assert.Equal("FAILED", job.State);
+        Assert.Equal(0, job.Ok);
+        Assert.Equal(1, job.Failed);
+
+        // “仅重试失败项”对 FAILED 有效（生成新 job）；作业运行中则拒绝。
+        var retry = await DispatchAsync(router, "retryFailed", new { jobId = accepted.JobId });
+        var retryResult = Assert.IsType<RetryFailedResultDto>(Assert.IsType<CommandResult>(retry).Data);
+        Assert.True(retryResult.Accepted);
+        Assert.Equal(1, retryResult.Retried);
+        var retryJob = await WaitJobAsync(router, retryResult.JobId!);
+        Assert.Equal("FAILED", retryJob.State);
+    }
+
+    // ------------------------------------------------------------------ 矩阵/前置 → SKIPPED（不失败整个 job）
+
+    [Fact]
+    public async Task RunBatch_Pull_MatrixBlocked_IsSkippedNotFailed()
+    {
+        using var fixture = BatchWorkspace.Create("CF100A_Demo_Impl");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        // 修改 tracked 文件 → 扫描态 DIRTY（矩阵 DIRTY.PULL = N）。
+        File.WriteAllText(Path.Combine(fixture.Clones["CF100A_Demo_Impl"], "README.md"), "dirty");
+        var batch = await DispatchAsync(
+            router,
+            "runBatch",
+            new { kind = "PULL", componentIds = new[] { "CF100A_Demo" }, repoTypes = new[] { "IMPL" } });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+
+        var job = await WaitJobAsync(router, accepted.JobId);
+        Assert.Equal("SUCCESS", job.State);
+        var item = Assert.Single(job.Items);
+        Assert.Equal("SKIPPED", item.State);
+        Assert.Equal(BridgeErrorCodes.ActionNotAllowed, item.ErrorCode);
+        Assert.Contains("DIRTY", item.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ------------------------------------------------------------------ 取消（PENDING / RUNNING）
+
+    [Fact]
+    public async Task Cancel_PendingJob_MarksJobAndItemsCanceled_WithoutExecuting()
+    {
+        using var server = new HangingHttpServer();
+        using var slow = CreateSlowRepository(server, "CF100B_Slow");
+        using var fixture = BatchWorkspace.Create("CF100A_Demo_Impl");
+        // 把 slow 仓并入同一工作区（BatchWorkspace.Root 是同一个工作区根）。
+        var slowTarget = Path.Combine(fixture.Root, "CF100B_Slow_Impl");
+        CopyDirectory(slow.RepoPath, slowTarget);
+        MoveOriginTo(slowTarget, $"http://127.0.0.1:{server.Port}/CF100B_Slow_Impl.git");
+
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        // job1 用慢仓占住唯一 worker（fetch 会挂起）。
+        var first = await DispatchAsync(
+            router,
+            "runBatch",
+            new { kind = "FETCH", componentIds = new[] { "CF100B_Slow" }, repoTypes = new[] { "IMPL" } });
+        var firstJob = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(first).Data);
+        await WaitUntilAsync(router, firstJob.JobId, job => job.Items.Any(item => item.State == "RUNNING"));
+
+        // job2 仍在队列 PENDING：取消后立即 CANCELED 且不会执行。
+        var second = await DispatchAsync(
+            router,
+            "runBatch",
+            new { kind = "FETCH", componentIds = new[] { "CF100A_Demo" }, repoTypes = new[] { "IMPL" } });
+        var secondJob = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(second).Data);
+
+        var cancel = await DispatchAsync(router, "cancelJob", new { jobId = secondJob.JobId });
+        Assert.True(cancel.Ok, Describe(cancel));
+        var canceled = Assert.IsType<CancelJobResultDto>(cancel.Data);
+        Assert.Equal("CANCELED", canceled.State);
+
+        var secondState = Assert.IsType<JobDto>(
+            Assert.IsType<CommandResult>(await DispatchAsync(router, "getJob", new { jobId = secondJob.JobId })).Data);
+        Assert.Equal("CANCELED", secondState.State);
+        Assert.False(secondState.Cancellable);
+        Assert.All(secondState.Items, item => Assert.Equal("CANCELED", item.State));
+
+        // 清理：取消慢 job，避免测试结束时遗留挂起 fetch。
+        var cancelFirst = await DispatchAsync(router, "cancelJob", new { jobId = firstJob.JobId });
+        Assert.True(cancelFirst.Ok);
+        await WaitUntilAsync(router, firstJob.JobId, job => job.State == "CANCELED", timeoutMs: 20000);
+    }
+
+    [Fact]
+    public async Task Cancel_RunningJob_CooperativelyCancelsGitProcess()
+    {
+        using var server = new HangingHttpServer();
+        using var slow = CreateSlowRepository(server, "CF100B_Slow");
+        var config = TestAudit.NewConfig(slow.WorkspaceRoot);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var batch = await DispatchAsync(
+            router,
+            "runBatch",
+            new { kind = "FETCH", componentIds = new[] { "CF100B_Slow" }, repoTypes = new[] { "IMPL" } });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+        await WaitUntilAsync(router, accepted.JobId, job => job.Items.Any(item => item.State == "RUNNING"));
+
+        // 确认 git 网络进程确实已连到挂起服务器，再取消（否则可能在进程连网前就被取消）。
+        await WaitConditionAsync(() => server.Connections >= 1, timeoutMs: 15000);
+
+        var stopwatch = Stopwatch.StartNew();
+        var cancel = await DispatchAsync(router, "cancelJob", new { jobId = accepted.JobId });
+        Assert.True(cancel.Ok, Describe(cancel));
+
+        // 合作式取消：git fetch 120s 超时不应发生；取消后应快速进入 CANCELED。
+        var job = await WaitUntilAsync(router, accepted.JobId, entry => entry.State == "CANCELED", timeoutMs: 20000);
+        stopwatch.Stop();
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(15), $"取消耗时 {stopwatch.Elapsed}");
+        Assert.False(job.Cancellable);
+        Assert.All(job.Items, item => Assert.Equal("CANCELED", item.State));
+        Assert.True(server.Connections >= 1, "未捕获到 git 网络请求");
+    }
+
+    // ------------------------------------------------------------------ 持久化：重启 INTERRUPTED / 200 上限
+
+    [Fact]
+    public async Task Restart_LoadsPendingAndRunningAsInterrupted_WithoutReexecuting()
+    {
+        using var workspace = new TempWorkspace();
+        var jobsRoot = TestAudit.NewJobsRoot();
+        var auditRoot = TestAudit.NewRoot();
+        var now = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+
+        var store = new JobStore(jobsRoot);
+        store.Save(new[]
+        {
+            new StoredJob(
+                "job-running",
+                "SYNC",
+                "RUNNING",
+                now,
+                now,
+                null,
+                new[]
+                {
+                    new StoredJobItem("CF100A_Demo", "IMPL", "CF100A_Demo_Impl", "RUNNING", now, null, null, null, null, null, null),
+                    new StoredJobItem("CF100A_Demo", "SIL", "CF100A_Demo_SIL", "PENDING", null, null, null, null, null, null, null)
+                },
+                new StoredJobArguments(null, null, null, true, false, false, false, false, false, null),
+                "tester",
+                "req-running"),
+            new StoredJob(
+                "job-pending",
+                "FETCH",
+                "PENDING",
+                now,
+                null,
+                null,
+                new[]
+                {
+                    new StoredJobItem("CF100A_Demo", "IMPL", null, "PENDING", null, null, null, null, null, null, null)
+                },
+                new StoredJobArguments(null, null, null, false, false, false, false, false, false, null),
+                "tester",
+                "req-pending")
+        });
+
+        var config = new AppConfig
+        {
+            WorkspaceRoot = workspace.Root,
+            JobsRoot = jobsRoot,
+            AuditRoot = auditRoot
+        };
+
+        using var snapshots = new SnapshotService(config);
+        using var engine = new JobEngine(config, snapshots);
+        var jobsResult = engine.GetJobs(new GetJobsParams(10));
+        Assert.True(jobsResult.Ok, jobsResult.Error?.Code);
+        var jobs = Assert.IsType<JobsDto>(jobsResult.Data).Jobs;
+
+        var running = Assert.Single(jobs, job => job.Id == "job-running");
+        Assert.Equal("INTERRUPTED", running.State);
+        Assert.False(running.Cancellable);
+        Assert.All(running.Items, item => Assert.Equal("INTERRUPTED", item.State));
+        Assert.NotNull(running.FinishedAt);
+
+        var pending = Assert.Single(jobs, job => job.Id == "job-pending");
+        Assert.Equal("INTERRUPTED", pending.State);
+        Assert.All(pending.Items, item => Assert.Equal("INTERRUPTED", item.State));
+
+        // 不重复执行：没有任何审计行被写入（引擎不重新入队）。
+        var auditFile = Path.Combine(auditRoot, OperationAuditService.AuditFileName);
+        Assert.False(File.Exists(auditFile), "重启加载不应重新执行作业/写审计");
+
+        // 磁盘上也已回写 INTERRUPTED。
+        var persisted = LoadStoredJobs(jobsRoot);
+        Assert.All(persisted, job => Assert.Equal("INTERRUPTED", job.State));
+    }
+
+    [Fact]
+    public void JobStore_KeepsLatest200Jobs()
+    {
+        using var workspace = new TempWorkspace();
+        var jobsRoot = TestAudit.NewJobsRoot();
+        Directory.CreateDirectory(jobsRoot);
+        var now = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+
+        var storedJobs = Enumerable.Range(0, 205)
+            .Select(index => new StoredJob(
+                "job-" + index.ToString(CultureInfo.InvariantCulture),
+                "FETCH",
+                "SUCCESS",
+                now,
+                now,
+                now,
+                new[]
+                {
+                    new StoredJobItem("CF100A_Demo", "IMPL", null, "OK", now, now, null, null, null, null, null)
+                },
+                new StoredJobArguments(null, null, null, false, false, false, false, false, false, null),
+                "tester",
+                "req-" + index.ToString(CultureInfo.InvariantCulture)))
+            .ToList();
+        var json = JsonSerializer.Serialize(new { version = 1, jobs = storedJobs }, WebJson);
+        File.WriteAllText(Path.Combine(jobsRoot, JobStore.FileName), json);
+
+        var config = new AppConfig { WorkspaceRoot = workspace.Root, JobsRoot = jobsRoot, AuditRoot = TestAudit.NewRoot() };
+        using var snapshots = new SnapshotService(config);
+        using var engine = new JobEngine(config, snapshots);
+
+        var result = engine.GetJobs(new GetJobsParams(500));
+        Assert.Equal(BridgeErrorCodes.InvalidArgument, result.Error?.Code);
+
+        var jobs = Assert.IsType<JobsDto>(Assert.IsType<CommandResult>(
+            engine.GetJobs(new GetJobsParams(200))).Data).Jobs;
+        Assert.Equal(200, jobs.Count);
+        Assert.Equal("job-204", jobs[0].Id);   // 最新在前
+        Assert.Equal("job-5", jobs[^1].Id);    // 最旧 5 条被淘汰
+        Assert.Equal(BridgeErrorCodes.JobNotFound, engine.GetJob(new GetJobParams("job-0")).Error?.Code);
+    }
+
+    // ------------------------------------------------------------------ SYNC 备份 ref / 备份失败不 reset
+
+    [Fact]
+    public async Task RunBatch_Sync_CreatesBackupRefThenResetsToRemote()
+    {
+        using var fixture = GitRemoteFixture.Create();
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        // 本地未推送 commit：SYNC 前必须可回溯。
+        File.WriteAllText(Path.Combine(fixture.CloneB, "local-unpushed.txt"), "local");
+        TestGit.CommitAll(fixture.CloneB, "local unpushed");
+        var preHead = GitRemoteFixture.Head(fixture.CloneB);
+        var remoteHead = GitRemoteFixture.Head(fixture.BarePath);
+
+        var batch = await DispatchAsync(
+            router,
+            "runBatch",
+            new
+            {
+                kind = "SYNC",
+                componentIds = new[] { "CF100A_Demo" },
+                repoTypes = new[] { "IMPL" },
+                args = new { confirm = true }
+            });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+        Assert.Equal("SUCCESS", job.State);
+        var item = Assert.Single(job.Items);
+        Assert.Equal("OK", item.State);
+        Assert.NotNull(item.BackupRef);
+        Assert.True(item.BackupRef!.StartsWith(BatchOperationService.BackupRefPrefix, StringComparison.Ordinal), item.BackupRef);
+        Assert.True(item.BackupRef!.EndsWith("/IMPL", StringComparison.Ordinal), item.BackupRef);
+
+        // 备份 ref 指向 preHead；HEAD 已 reset 到 origin/main。
+        Assert.Equal(preHead, TestGit.Capture(fixture.CloneB, "rev-parse", item.BackupRef!));
+        Assert.Equal(remoteHead, GitRemoteFixture.Head(fixture.CloneB));
+        Assert.Equal(remoteHead, item.PostHead);
+
+        // 审计行含 backupRef/jobId。
+        var auditLine = Assert.Single(ReadAuditLines(config));
+        using var document = JsonDocument.Parse(auditLine);
+        Assert.Equal(item.BackupRef, document.RootElement.GetProperty("backupRef").GetString());
+        Assert.Equal(accepted.JobId, document.RootElement.GetProperty("jobId").GetString());
+    }
+
+    [Fact]
+    public async Task RunBatch_Sync_BackupImpossible_DoesNotReset()
+    {
+        using var fixture = GitRemoteFixture.Create();
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        // cloneA 先推一个 orphan-sync 分支到远端；cloneB 切到同名 unborn 分支（无 HEAD）：
+        // 远端同名分支存在、但本地无 HEAD → 无法创建备份 ref，必须 FAILED 且绝不 reset。
+        TestGit.Run(fixture.CloneA, "checkout", "-q", "-b", "orphan-sync");
+        File.WriteAllText(Path.Combine(fixture.CloneA, "orphan.txt"), "orphan");
+        TestGit.CommitAll(fixture.CloneA, "orphan commit");
+        TestGit.Run(fixture.CloneA, "push", "-q", "-u", "origin", "orphan-sync");
+        TestGit.Run(fixture.CloneB, "checkout", "-q", "--orphan", "orphan-sync");
+
+        var batch = await DispatchAsync(
+            router,
+            "runBatch",
+            new
+            {
+                kind = "SYNC",
+                componentIds = new[] { "CF100A_Demo" },
+                repoTypes = new[] { "IMPL" },
+                args = new { confirm = true }
+            });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+
+        Assert.Equal("FAILED", job.State);
+        var item = Assert.Single(job.Items);
+        Assert.Equal("FAILED", item.State);
+        Assert.Equal(BridgeErrorCodes.GitFailed, item.ErrorCode);
+        Assert.Contains("备份", item.Message, StringComparison.Ordinal);
+        Assert.Null(item.BackupRef);
+
+        // 备份失败 → 绝不 reset：HEAD 仍是 unborn（reset 会把工作区变成远端分支内容）。
+        Assert.Throws<InvalidOperationException>(() =>
+            TestGit.Capture(fixture.CloneB, "rev-parse", "--verify", "--quiet", "HEAD"));
+    }
+
+    // ------------------------------------------------------------------ DELETE → RESTORE
+
+    [Fact]
+    public async Task RunBatch_DeleteMovesToTrash_And_RestoreRoundTrips()
+    {
+        using var fixture = GitRemoteFixture.Create();
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var originalHead = GitRemoteFixture.Head(fixture.CloneB);
+
+        var deleteBatch = await DispatchAsync(
+            router,
+            "runBatch",
+            new
+            {
+                kind = "DELETE",
+                componentIds = new[] { "CF100A_Demo" },
+                repoTypes = new[] { "IMPL" },
+                args = new { confirm = true }
+            });
+        var deleteAccepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(deleteBatch).Data);
+        var deleteJob = await WaitJobAsync(router, deleteAccepted.JobId);
+        Assert.Equal("SUCCESS", deleteJob.State);
+        var deleteItem = Assert.Single(deleteJob.Items);
+        Assert.Equal("OK", deleteItem.State);
+        Assert.False(Directory.Exists(fixture.CloneB), "DELETE 后工作区目录应已移走");
+        Assert.NotNull(deleteItem.BackupRef);
+        Assert.True(deleteItem.BackupRef!.StartsWith(".trash/", StringComparison.Ordinal), deleteItem.BackupRef);
+        Assert.True(Directory.Exists(Path.Combine(fixture.Root, ".trash")));
+
+        // 远端零变更（本地软删，不删远端）。
+        Assert.True(Directory.Exists(fixture.BarePath));
+
+        // RESTORE：目标目录已不存在，从 .trash 最近一份恢复。
+        var restoreBatch = await DispatchAsync(
+            router,
+            "runBatch",
+            new
+            {
+                kind = "RESTORE",
+                componentIds = new[] { "CF100A_Demo" },
+                repoTypes = new[] { "IMPL" },
+                args = new { confirm = true }
+            });
+        var restoreAccepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(restoreBatch).Data);
+        var restoreJob = await WaitJobAsync(router, restoreAccepted.JobId);
+        Assert.Equal("SUCCESS", restoreJob.State);
+        var restoreItem = Assert.Single(restoreJob.Items);
+        Assert.Equal("OK", restoreItem.State);
+        Assert.True(Directory.Exists(fixture.CloneB), "RESTORE 后目录应已回到工作区");
+        Assert.Equal(originalHead, GitRemoteFixture.Head(fixture.CloneB));
+
+        // 再次 RESTORE（目标已存在）→ SKIPPED（不覆盖）。
+        var again = await DispatchAsync(
+            router,
+            "runBatch",
+            new
+            {
+                kind = "RESTORE",
+                componentIds = new[] { "CF100A_Demo" },
+                repoTypes = new[] { "IMPL" },
+                args = new { confirm = true }
+            });
+        var againAccepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(again).Data);
+        var againJob = await WaitJobAsync(router, againAccepted.JobId);
+        Assert.Equal("SKIPPED", Assert.Single(againJob.Items).State);
+    }
+
+    // ------------------------------------------------------------------ CLONE（本地 file:// bare remote）
+
+    [Fact]
+    public async Task RunBatch_Clone_MissingRepo_FromLocalBareRemote()
+    {
+        using var remotes = new TempWorkspace();
+        var remoteRoot = Path.Combine(remotes.Root, "remote");
+        var orgRoot = Path.Combine(remoteRoot, "RTCRepos");
+        Directory.CreateDirectory(orgRoot);
+        CreateSeedBareRemote(remotes.Root, orgRoot, "CF100A_Demo_Impl");
+
+        using var workspace = new TempWorkspace();
+        var config = CloneConfig(workspace.Root, remoteRoot, TestAudit.NewRoot(), TestAudit.NewJobsRoot());
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var batch = await DispatchAsync(
+            router,
+            "runBatch",
+            new { kind = "CLONE", componentIds = new[] { "CF100A_Demo" }, repoTypes = new[] { "IMPL" } });
+        Assert.True(batch.Ok, Describe(batch));
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+        Assert.True(job.State == "SUCCESS", job.Items[0].Message);
+        var item = Assert.Single(job.Items);
+        Assert.Equal("OK", item.State);
+        Assert.NotNull(item.PostHead);
+        Assert.Equal("CF100A_Demo_Impl", item.RepoName);
+
+        var clonedPath = Path.Combine(workspace.Root, "CF100A_Demo_Impl");
+        Assert.True(Directory.Exists(clonedPath));
+        Assert.Equal(item.PostHead, TestGit.Capture(clonedPath, "rev-parse", "HEAD"));
+
+        // 重新扫描后工作台应能看到该组件/仓（CLONE 成功后失效快照）。
+        var refreshed = await DispatchAsync(router, "refresh", null);
+        Assert.True(refreshed.Ok);
+        var snapshot = Assert.IsType<SnapshotDto>(
+            Assert.IsType<CommandResult>(await DispatchAsync(router, "getSnapshot", null)).Data);
+        var component = Assert.Single(snapshot.Components, entry => entry.ComponentId == "CF100A_Demo");
+        var repo = Assert.Single(component.Repos, entry => entry.RepoType == "IMPL");
+        Assert.True(repo.IsLocal);
+    }
+
+    [Fact]
+    public async Task RunBatch_Clone_TokenWithNonHttpBase_FailsClosedWithoutLeak()
+    {
+        using var remotes = new TempWorkspace();
+        var remoteRoot = Path.Combine(remotes.Root, "remote");
+        var orgRoot = Path.Combine(remoteRoot, "RTCRepos");
+        Directory.CreateDirectory(orgRoot);
+        CreateSeedBareRemote(remotes.Root, orgRoot, "CF100A_Demo_Impl");
+
+        using var workspace = new TempWorkspace();
+        var config = CloneConfig(workspace.Root, remoteRoot, TestAudit.NewRoot(), TestAudit.NewJobsRoot())
+            with
+        {
+            GiteaToken = TestToken
+        };
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var batch = await DispatchAsync(
+            router,
+            "runBatch",
+            new { kind = "CLONE", componentIds = new[] { "CF100A_Demo" }, repoTypes = new[] { "IMPL" } });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+
+        Assert.Equal("FAILED", job.State);
+        Assert.Equal(BridgeErrorCodes.GiteaConfigInvalid, Assert.Single(job.Items).ErrorCode);
+        Assert.False(Directory.Exists(Path.Combine(workspace.Root, "CF100A_Demo_Impl")));
+
+        // token/Authorization 不进入 job 响应与审计。
+        var jobJson = JsonSerializer.Serialize(
+            Assert.IsType<JobDto>(Assert.IsType<CommandResult>(
+                await DispatchAsync(router, "getJob", new { jobId = accepted.JobId })).Data),
+            WebJson);
+        Assert.DoesNotContain(TestToken, jobJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(TestToken + ":")),
+            jobJson,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("Authorization", jobJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ------------------------------------------------------------------ CREATE / TAG
+
+    [Fact]
+    public async Task RunBatch_CreateBranchAndTag_PerRepo_ExistingSkipped()
+    {
+        using var fixture = BatchWorkspace.Create("CF100A_Demo_Impl", "CF100A_Demo_SIL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var create = await DispatchAsync(
+            router,
+            "runBatch",
+            new
+            {
+                kind = "CREATE",
+                componentIds = new[] { "CF100A_Demo" },
+                repoTypes = new[] { "IMPL", "SIL" },
+                args = new { branch = "feature/m2b", confirm = true }
+            });
+        var createAccepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(create).Data);
+        var createJob = await WaitJobAsync(router, createAccepted.JobId);
+        Assert.Equal("SUCCESS", createJob.State);
+        Assert.All(createJob.Items, item => Assert.Equal("OK", item.State));
+        foreach (var clone in fixture.Clones.Values)
+        {
+            Assert.Equal(
+                "feature/m2b",
+                TestGit.Capture(clone, "rev-parse", "--abbrev-ref", "refs/heads/feature/m2b"));
+        }
+
+        // 已存在 → SKIPPED（不失败）。
+        var createAgain = await DispatchAsync(
+            router,
+            "runBatch",
+            new
+            {
+                kind = "CREATE",
+                componentIds = new[] { "CF100A_Demo" },
+                repoTypes = new[] { "IMPL", "SIL" },
+                args = new { branch = "feature/m2b", confirm = true }
+            });
+        var againAccepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(createAgain).Data);
+        var againJob = await WaitJobAsync(router, againAccepted.JobId);
+        Assert.Equal("SUCCESS", againJob.State);
+        Assert.All(againJob.Items, item => Assert.Equal("SKIPPED", item.State));
+
+        var tag = await DispatchAsync(
+            router,
+            "runBatch",
+            new
+            {
+                kind = "TAG",
+                componentIds = new[] { "CF100A_Demo" },
+                repoTypes = new[] { "IMPL", "SIL" },
+                args = new { tag = "v1.0.0", confirm = true }
+            });
+        var tagAccepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(tag).Data);
+        var tagJob = await WaitJobAsync(router, tagAccepted.JobId);
+        Assert.Equal("SUCCESS", tagJob.State);
+        Assert.All(tagJob.Items, item => Assert.Equal("OK", item.State));
+        foreach (var clone in fixture.Clones.Values)
+        {
+            Assert.NotEmpty(TestGit.Capture(clone, "rev-parse", "refs/tags/v1.0.0"));
+        }
+    }
+
+    // ------------------------------------------------------------------ 参数/路径/令牌安全
+
+    [Fact]
+    public async Task RunBatch_ValidationErrors()
+    {
+        using var fixture = BatchWorkspace.Create("CF100A_Demo_Impl");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var cases = new (object Params, string ExpectedCode)[]
+        {
+            (new { kind = "RESET", componentIds = new[] { "CF100A_Demo" } }, BridgeErrorCodes.InvalidArgument),
+            (new { kind = "FETCH", componentIds = Array.Empty<string>() }, BridgeErrorCodes.InvalidArgument),
+            (new { kind = "FETCH", componentIds = new[] { "CF100A_Demo" }, repoTypes = new[] { "MAIN" } }, BridgeErrorCodes.InvalidArgument),
+            (new { kind = "SYNC", componentIds = new[] { "CF100A_Demo" } }, BridgeErrorCodes.ConfirmRequired),
+            (new { kind = "DELETE", componentIds = new[] { "CF100A_Demo" } }, BridgeErrorCodes.ConfirmRequired),
+            (new { kind = "CREATE", componentIds = new[] { "CF100A_Demo" }, args = new { confirm = true } }, BridgeErrorCodes.InvalidArgument),
+            (new { kind = "TAG", componentIds = new[] { "CF100A_Demo" }, args = new { confirm = true } }, BridgeErrorCodes.InvalidArgument),
+            (new { kind = "COMMIT", componentIds = new[] { "CF100A_Demo" }, args = new { confirm = true } }, BridgeErrorCodes.InvalidArgument),
+            (new { kind = "CHKOUT", componentIds = new[] { "CF100A_Demo" }, args = new { confirm = true } }, BridgeErrorCodes.InvalidArgument),
+            (new { kind = "COMMIT", componentIds = new[] { "CF100A_Demo" }, args = new { message = "x" } }, BridgeErrorCodes.ConfirmRequired)
+        };
+
+        foreach (var (parameters, expectedCode) in cases)
+        {
+            var result = await DispatchAsync(router, "runBatch", parameters);
+            Assert.False(result.Ok);
+            Assert.Equal(expectedCode, result.Error!.Code);
+        }
+
+        var notFound = await DispatchAsync(router, "getJob", new { jobId = "missing-job" });
+        Assert.Equal(BridgeErrorCodes.JobNotFound, notFound.Error!.Code);
+        var cancelMissing = await DispatchAsync(router, "cancelJob", new { jobId = "missing-job" });
+        Assert.Equal(BridgeErrorCodes.JobNotFound, cancelMissing.Error!.Code);
+        var retryMissing = await DispatchAsync(router, "retryFailed", new { jobId = "missing-job" });
+        Assert.Equal(BridgeErrorCodes.JobNotFound, retryMissing.Error!.Code);
+        var badLimit = await DispatchAsync(router, "getJobs", new { limit = 0 });
+        Assert.Equal(BridgeErrorCodes.InvalidArgument, badLimit.Error!.Code);
+    }
+
+    [Fact]
+    public async Task RunBatch_Clone_PathEscapeComponentId_IsRejected()
+    {
+        using var remotes = new TempWorkspace();
+        var remoteRoot = Path.Combine(remotes.Root, "remote");
+        Directory.CreateDirectory(Path.Combine(remoteRoot, "RTCRepos"));
+        using var workspace = new TempWorkspace();
+        var config = CloneConfig(workspace.Root, remoteRoot, TestAudit.NewRoot(), TestAudit.NewJobsRoot());
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var batch = await DispatchAsync(
+            router,
+            "runBatch",
+            new
+            {
+                kind = "CLONE",
+                componentIds = new[] { "..\\..\\evil" },
+                repoTypes = new[] { "IMPL" }
+            });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+
+        Assert.Equal("FAILED", job.State);
+        var item = Assert.Single(job.Items);
+        Assert.Equal("FAILED", item.State);
+        Assert.Equal(BridgeErrorCodes.PathInvalid, item.ErrorCode);
+        // 工作区内外都不得出现逃逸目录。
+        Assert.False(Directory.Exists(Path.Combine(workspace.Root, "evil_Impl")));
+        Assert.False(Directory.Exists(Path.Combine(Directory.GetParent(workspace.Root)!.FullName, "evil_Impl")));
+    }
+
+    [Fact]
+    public async Task RunBatch_TokenConfiguredWithoutGiteaConfig_FailsClosedAndAuditHasNoSecrets()
+    {
+        using var fixture = BatchWorkspace.Create("CF100A_Demo_Impl");
+        var config = TestAudit.NewConfig(fixture.Root, TestToken);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+
+        var batch = await DispatchAsync(
+            router,
+            "runBatch",
+            new { kind = "FETCH", componentIds = new[] { "CF100A_Demo" }, repoTypes = new[] { "IMPL" } });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+
+        Assert.Equal("FAILED", job.State);
+        Assert.Equal(BridgeErrorCodes.GiteaConfigInvalid, Assert.Single(job.Items).ErrorCode);
+
+        var lines = ReadAuditLines(config);
+        Assert.Single(lines);
+        Assert.DoesNotContain(TestToken, lines[0], StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(TestToken + ":")),
+            lines[0],
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("Authorization", lines[0], StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ------------------------------------------------------------------ helpers
+
+    private static async Task<JobDto> WaitJobAsync(
+        HostCommandRouter router,
+        string jobId,
+        int timeoutMs = 60000) =>
+        await WaitUntilAsync(router, jobId, IsTerminalJob, timeoutMs).ConfigureAwait(false);
+
+    private static async Task<JobDto> WaitUntilAsync(
+        HostCommandRouter router,
+        string jobId,
+        Func<JobDto, bool> predicate,
+        int timeoutMs = 60000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        JobDto? last = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            var result = await DispatchAsync(router, "getJob", new { jobId });
+            if (result.Ok)
+            {
+                last = Assert.IsType<JobDto>(result.Data);
+                if (predicate(last))
+                {
+                    return last;
+                }
+            }
+
+            await Task.Delay(25);
+        }
+
+        throw new TimeoutException(
+            $"等待作业 {jobId} 超时；最后状态 {last?.State ?? "<none>"}，items="
+            + string.Join(',', last?.Items.Select(item => item.State) ?? Array.Empty<string>()));
+    }
+
+    private static bool IsTerminalJob(JobDto job) =>
+        job.State is "PARTIAL" or "SUCCESS" or "FAILED" or "CANCELED" or "INTERRUPTED";
+
+    private static async Task WaitConditionAsync(Func<bool> condition, int timeoutMs = 15000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (condition())
+            {
+                return;
+            }
+
+            await Task.Delay(20);
+        }
+
+        throw new TimeoutException("等待条件超时");
+    }
+
+    private static Task<CommandResult> DispatchAsync(
+        HostCommandRouter router,
+        string method,
+        object? parameters)
+    {
+        JsonElement? element = parameters is null
+            ? null
+            : JsonSerializer.SerializeToElement(parameters, WebJson);
+        return router.DispatchAsync(method, element, CancellationToken.None);
+    }
+
+    private static List<string> ReadAuditLines(AppConfig config)
+    {
+        var path = Path.Combine(config.AuditRoot!, OperationAuditService.AuditFileName);
+        if (!File.Exists(path))
+        {
+            return new List<string>();
+        }
+
+        return File.ReadAllLines(path).Where(line => line.Trim().Length > 0).ToList();
+    }
+
+    private static List<StoredJob> LoadStoredJobs(string jobsRoot) =>
+        new JobStore(jobsRoot).Load().ToList();
+
+    private static string Describe(CommandResult result) =>
+        result.Ok ? "ok" : $"{result.Error?.Code}: {result.Error?.Message}";
+
+    private static AppConfig CloneConfig(string workspaceRoot, string remoteRoot, string auditRoot, string jobsRoot) => new()
+    {
+        WorkspaceRoot = workspaceRoot,
+        GiteaBaseUrl = "file:///" + remoteRoot.Replace('\\', '/').TrimStart('/'),
+        GiteaOrg = "RTCRepos",
+        AuditRoot = auditRoot,
+        JobsRoot = jobsRoot
+    };
+
+    /// <summary>在 <paramref name="orgRoot"/> 下创建 bare remote 并种一个 main 提交。</summary>
+    private static void CreateSeedBareRemote(string tempRoot, string orgRoot, string repoDirectoryName)
+    {
+        var barePath = Path.Combine(orgRoot, repoDirectoryName + ".git");
+        TestGit.Run(orgRoot, "init", "--bare", "-q", "--initial-branch=main", barePath);
+        var seed = Path.Combine(tempRoot, "seed-" + Guid.NewGuid().ToString("N"));
+        TestGit.Run(tempRoot, "clone", "-q", barePath, seed);
+        TestGit.ConfigureIdentity(seed);
+        File.WriteAllText(Path.Combine(seed, "README.md"), "seed");
+        TestGit.CommitAll(seed, "seed");
+        TestGit.Run(seed, "push", "-q", "-u", "origin", "main");
+        try
+        {
+            Directory.Delete(seed, recursive: true);
+        }
+        catch
+        {
+            // 临时目录清理失败不影响测试。
+        }
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: false);
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(source))
+        {
+            CopyDirectory(directory, Path.Combine(destination, Path.GetFileName(directory)));
+        }
+    }
+
+    private static void MoveOriginTo(string repoPath, string url) =>
+        TestGit.Run(repoPath, "remote", "set-url", "origin", url);
+
+    private static SlowRepository CreateSlowRepository(HangingHttpServer server, string componentId)
+    {
+        var workspace = new TempWorkspace();
+        var dirName = componentId + "_Impl";
+        var repoPath = Path.Combine(workspace.Root, dirName);
+        TestGit.InitRepo(repoPath);
+        File.WriteAllText(Path.Combine(repoPath, "README.md"), "slow");
+        TestGit.CommitAll(repoPath, "init");
+        TestGit.Run(repoPath, "remote", "add", "origin", $"http://127.0.0.1:{server.Port}/{dirName}.git");
+        return new SlowRepository(workspace, repoPath);
+    }
+
+    private sealed record SlowRepository(TempWorkspace Workspace, string RepoPath) : IDisposable
+    {
+        public string WorkspaceRoot => Workspace.Root;
+
+        public void Dispose() => Workspace.Dispose();
+    }
+
+    /// <summary>
+    /// 多仓临时工作区：<c>remote/&lt;repoDir&gt;.git</c>（bare）+ 工作区内每个仓的 clone（已配置身份）。
+    /// 全部在 %TEMP% 下，Dispose 递归清理。
+    /// </summary>
+    private sealed class BatchWorkspace : IDisposable
+    {
+        private readonly TempWorkspace _workspace;
+        private readonly TempWorkspace _remotes;
+
+        private BatchWorkspace(
+            TempWorkspace workspace,
+            TempWorkspace remotes,
+            Dictionary<string, string> bares,
+            Dictionary<string, string> clones)
+        {
+            _workspace = workspace;
+            _remotes = remotes;
+            Bares = bares;
+            Clones = clones;
+        }
+
+        public string Root => _workspace.Root;
+
+        public IReadOnlyDictionary<string, string> Bares { get; }
+
+        public IReadOnlyDictionary<string, string> Clones { get; }
+
+        public static BatchWorkspace Create(params string[] repoDirectoryNames)
+        {
+            var remotes = new TempWorkspace();
+            var workspace = new TempWorkspace();
+            var remoteRoot = Path.Combine(remotes.Root, "remote");
+            Directory.CreateDirectory(remoteRoot);
+
+            var bares = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var clones = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var name in repoDirectoryNames)
+            {
+                var bare = Path.Combine(remoteRoot, name + ".git");
+                TestGit.Run(remoteRoot, "init", "--bare", "-q", "--initial-branch=main", bare);
+
+                var seed = Path.Combine(remotes.Root, "seed-" + Guid.NewGuid().ToString("N"));
+                TestGit.Run(remotes.Root, "clone", "-q", bare, seed);
+                TestGit.ConfigureIdentity(seed);
+                File.WriteAllText(Path.Combine(seed, "README.md"), "seed:" + name);
+                TestGit.CommitAll(seed, "seed");
+                TestGit.Run(seed, "push", "-q", "-u", "origin", "main");
+
+                var clone = Path.Combine(workspace.Root, name);
+                TestGit.Run(workspace.Root, "clone", "-q", bare, clone);
+                TestGit.ConfigureIdentity(clone);
+
+                bares[name] = bare;
+                clones[name] = clone;
+            }
+
+            return new BatchWorkspace(workspace, remotes, bares, clones);
+        }
+
+        public void Dispose()
+        {
+            _workspace.Dispose();
+            _remotes.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// 回环 TCP“挂起”服务器：接受连接、读取请求头后不响应（hold 住），用于验证 job 取消能杀掉挂起的 git 进程。
+    /// </summary>
+    private sealed class HangingHttpServer : IDisposable
+    {
+        private readonly TcpListener _listener;
+        private readonly CancellationTokenSource _lifetime = new();
+        private readonly Task _acceptLoop;
+        private int _connections;
+
+        public HangingHttpServer()
+        {
+            _listener = new TcpListener(IPAddress.Loopback, 0);
+            _listener.Start();
+            Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+            _acceptLoop = Task.Run(AcceptLoopAsync);
+        }
+
+        public int Port { get; }
+
+        public int Connections => Volatile.Read(ref _connections);
+
+        private async Task AcceptLoopAsync()
+        {
+            while (!_lifetime.IsCancellationRequested)
+            {
+                TcpClient client;
+                try
+                {
+                    client = await _listener.AcceptTcpClientAsync(_lifetime.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (SocketException)
+                {
+                    return;
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
+
+                Interlocked.Increment(ref _connections);
+                _ = HoldClientAsync(client);
+            }
+        }
+
+        private async Task HoldClientAsync(TcpClient client)
+        {
+            try
+            {
+                using (client)
+                {
+                    var stream = client.GetStream();
+                    var buffer = new byte[16 * 1024];
+                    // 读取请求头（不以 \r\n\r\n 结束也不返回响应，git 会一直等待）。
+                    while (!_lifetime.IsCancellationRequested)
+                    {
+                        var read = await stream.ReadAsync(buffer, _lifetime.Token).ConfigureAwait(false);
+                        if (read <= 0)
+                        {
+                            // 客户端已关闭（git 进程被取消杀掉）。
+                            return;
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 服务器销毁。
+            }
+            catch
+            {
+                // 连接层错误不影响断言（git 进程可能已被取消）。
+            }
+        }
+
+        public void Dispose()
+        {
+            _lifetime.Cancel();
+            try
+            {
+                _listener.Stop();
+            }
+            catch
+            {
+                // 已停止。
+            }
+
+            try
+            {
+                _acceptLoop.Wait(TimeSpan.FromSeconds(2));
+            }
+            catch
+            {
+                // 取消等待超时。
+            }
+
+            _lifetime.Dispose();
+        }
+    }
+}

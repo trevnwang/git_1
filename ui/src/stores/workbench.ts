@@ -9,14 +9,14 @@ import {
   hasHostBridge,
   HostError,
   isMethodUnavailable,
+  onJobUpdated,
   toErrorMessage,
 } from '../api'
-import type { CommitDto, HostInfoDto, RepoActionArgs, RepoTreeDto, SnapshotDto, WorkspaceTreeDto } from '../api'
+import type { BatchArgs, CommitDto, HostInfoDto, JobDto, RepoActionArgs, RepoTreeDto, SnapshotDto, WorkspaceTreeDto } from '../api'
 import * as mock from '../mocks/workbenchMock'
 import { REPO_ACTIONS } from '../types/workbench'
 import {
   HOST_ACTIONS_UNREADY_REASON,
-  M2B_BOUNDARY_TEXT,
   NO_REPO_REASON,
   actionErrorInfo,
   emptyComponentVm,
@@ -26,9 +26,12 @@ import {
   hostAvailability,
   isDangerousFile,
   isSafeFile,
+  jobKindLabel,
+  jobStateMeta,
   mapComponent,
   mapDetail,
   mapHostActions,
+  mapJob,
   mapTreeNodes,
   mapWorkspaceEntries,
   pickDefaultRepo,
@@ -43,6 +46,8 @@ import type {
   ActionDialogRefsStatus,
   ActionDialogRefVm,
   ActionDialogVm,
+  BatchDialogVm,
+  BatchKind,
   CommitVm,
   ComponentDetailState,
   ComponentVm,
@@ -55,6 +60,7 @@ import type {
   HostActionsSource,
   HostActionsStatus,
   InfoTab,
+  JobVm,
   ModalKind,
   OperationVm,
   RepoAction,
@@ -62,6 +68,7 @@ import type {
   RepoTreePanelState,
   RepoType,
   RepoVm,
+  TasksSegment,
   ToastVm,
   TreeNodeVm,
   ViewMode,
@@ -141,6 +148,20 @@ interface WorkbenchState {
   notifications: NotificationVm[]
   ciQueue: number
   taskCount: number
+  // ── M2b 任务中心 ──
+  jobs: JobVm[]
+  jobsStatus: 'idle' | 'loading' | 'ready' | 'error'
+  /** 作业数据来源：Host 作业 API / 内置 Mock 演示。 */
+  jobsSource: 'host' | 'mock'
+  jobsError: string
+  jobsLoading: boolean
+  jobsAt: number
+  /** 任务中心当前高亮作业（提交后自动定位）。 */
+  currentJobId: string
+  tasksSegment: TasksSegment
+  expandedJobIds: string[]
+  /** 批量提交进行中（防重复提交；不锁定单仓五键）。 */
+  batchPending: boolean
   online: boolean
   ignoreIgnored: boolean
   compact: boolean
@@ -156,6 +177,8 @@ interface WorkbenchState {
     confirmBar: ConfirmBarVm | null
     /** M2 五键动作对话框（COMMIT 输入 / CHKOUT 选择 / 通用确认）。 */
     actionDialog: ActionDialogVm | null
+    /** M2b 批量参数对话框（CREATE/TAG 输入 branch/tag；CLONE 预览缺失仓）。 */
+    batchDialog: BatchDialogVm | null
     contextMenu: ContextMenuState | null
   }
   componentDetail: ComponentDetailState
@@ -223,6 +246,12 @@ let snapshotRetryTimer: ReturnType<typeof setTimeout> | undefined
 let checkoutRefsSeq = 0
 /** Host actions 加载序号：组件切换后丢弃过期响应（避免旧组件矩阵串台）。 */
 let hostActionsSeq = 0
+/** 任务中心轮询定时器（Mock 推进作业 / Host 事件兜底轮询）。 */
+let jobsClockTimer: ReturnType<typeof setInterval> | undefined
+/** Job 事件订阅取消函数（真实 Host 推送）。 */
+let jobsUnsubscribe: (() => void) | undefined
+/** 作业终态后的快照回写（≤2s，合并多次终态事件）。 */
+let jobSnapshotTimer: ReturnType<typeof setTimeout> | undefined
 
 const state = reactive<WorkbenchState>({
   booted: false,
@@ -312,6 +341,16 @@ const state = reactive<WorkbenchState>({
   ],
   ciQueue: 0,
   taskCount: 0,
+  jobs: [],
+  jobsStatus: 'idle',
+  jobsSource: 'mock',
+  jobsError: '',
+  jobsLoading: false,
+  jobsAt: 0,
+  currentJobId: '',
+  tasksSegment: 'active',
+  expandedJobIds: [],
+  batchPending: false,
   online: true,
   ignoreIgnored: false,
   compact: false,
@@ -324,6 +363,7 @@ const state = reactive<WorkbenchState>({
     confirm: null,
     confirmBar: null,
     actionDialog: null,
+    batchDialog: null,
     contextMenu: null,
   },
   componentDetail: emptyComponentDetail(),
@@ -494,6 +534,8 @@ function markAllRead(): void {
 
 function openDrawer(kind: DrawerKind): void {
   state.overlays.drawer = kind
+  // 任务中心：打开即拉取一次列表；随后由 JOB_UPDATED 事件 + 轮询兜底保持最新。
+  if (kind === 'tasks') void ensureJobsLoaded(true)
 }
 
 function closeDrawer(): void {
@@ -822,10 +864,12 @@ async function init(): Promise<void> {
     applyMockSnapshot('当前不在 WebView2 宿主中（浏览器 dev / CDP），展示内置 Mock 数据')
     state.booted = true
     state.booting = false
+    await initJobs()
     return
   }
   notify('正在连接 Host 并扫描本地仓库…（首次可能 10–20s）')
   await loadInitialSnapshot()
+  await initJobs()
 }
 
 async function refresh(): Promise<void> {
@@ -838,6 +882,7 @@ async function refresh(): Promise<void> {
     applyMockSnapshot('Mock：已重新生成快照')
     notify('已刷新（Mock 数据）', 'success')
     state.refreshing = false
+    void refreshJobs(true)
     return
   }
   notify('正在重新扫描本地仓库…（大工作区约 10–20s）')
@@ -1685,12 +1730,560 @@ function selectAllVisible(): void {
   state.checkedIds = visibleComponents().map((component) => component.id)
 }
 
+// ───────────────────────────── M2b 任务中心（Job） ─────────────────────────────
+
+function shortJobId(jobId: string): string {
+  return jobId.length > 14 ? `${jobId.slice(0, 14)}…` : jobId
+}
+
+function updateTaskCount(): void {
+  state.taskCount = state.jobs.filter((job) => job.active).length
+}
+
+function sortJobs(jobs: JobVm[]): JobVm[] {
+  return [...jobs].sort((a, b) => {
+    if (a.active !== b.active) return a.active ? -1 : 1
+    const aTime = a.active ? a.createdAt : (a.finishedAt ?? a.createdAt)
+    const bTime = b.active ? b.createdAt : (b.finishedAt ?? b.createdAt)
+    return (bTime || '').localeCompare(aTime || '')
+  })
+}
+
+/** 合并同一 job 的增量更新：进度计数单调不减，终止态不被迟到的进行中事件覆盖。 */
+function mergeJob(prev: JobVm, next: JobVm): JobVm {
+  if (prev.finishedAt && !next.finishedAt) return prev
+  return {
+    ...next,
+    ok: Math.max(prev.ok, next.ok),
+    failed: Math.max(prev.failed, next.failed),
+    skipped: Math.max(prev.skipped, next.skipped),
+    total: Math.max(prev.total, next.total),
+  }
+}
+
+/** 作业终态：通知中心 +1、可感知 Toast、并触发快照回写（卡片/状态栏 ≤2s）。 */
+function notifyJobTerminal(job: JobVm): void {
+  const meta = jobStateMeta(job.state)
+  const detail = `成功 ${job.ok} · 失败 ${job.failed} · 跳过 ${job.skipped}`
+  const title = `${jobKindLabel(job.kind)} · ${meta.label}`
+  const level = job.state === 'SUCCESS' ? 'info' : job.state === 'PARTIAL' ? 'warn' : 'err'
+  pushNotification(title, detail, level)
+  if (state.overlays.drawer !== 'tasks') {
+    const tone = job.state === 'SUCCESS' ? 'success' : job.state === 'PARTIAL' ? 'warning' : 'error'
+    notify(`${title}（${detail}）`, tone, 4_200)
+  }
+  scheduleJobSnapshotRefresh()
+}
+
+/** 作业终态后合并刷新快照（避免 PARTIAL 多项连续完成时重复全量刷新）。 */
+function scheduleJobSnapshotRefresh(): void {
+  if (jobSnapshotTimer !== undefined) clearTimeout(jobSnapshotTimer)
+  jobSnapshotTimer = setTimeout(() => {
+    jobSnapshotTimer = undefined
+    void refreshSnapshot().then(() => loadDetail())
+  }, 450)
+}
+
+/** 应用整份作业列表（Mock 轮询 / Host 列表刷新），并检测 active → 终态迁移。 */
+function applyJobs(nextJobs: JobVm[]): void {
+  const previous = new Map(state.jobs.map((job) => [job.id, job]))
+  const merged = nextJobs.map((next) => {
+    const prev = previous.get(next.id)
+    const job = prev ? mergeJob(prev, next) : next
+    if (prev && prev.active && !job.active) notifyJobTerminal(job)
+    return job
+  })
+  state.jobs = sortJobs(merged)
+  state.jobsAt = Date.now()
+  updateTaskCount()
+  syncCurrentJobSegment()
+}
+
+/** 单个 JOB_UPDATED 事件：按 id 合并（事件可能乱序/重复）。 */
+function applyJobUpdate(dto: JobDto): void {
+  const next = mapJob(dto)
+  const prev = state.jobs.find((job) => job.id === next.id)
+  if (prev) {
+    const merged = mergeJob(prev, next)
+    state.jobs = sortJobs(state.jobs.map((job) => (job.id === next.id ? merged : job)))
+    if (prev.active && !merged.active) notifyJobTerminal(merged)
+  } else {
+    state.jobs = sortJobs([...state.jobs, next])
+    if (!next.active) notifyJobTerminal(next)
+  }
+  state.jobsSource = isMockMode() ? 'mock' : 'host'
+  state.jobsStatus = 'ready'
+  state.jobsError = ''
+  state.jobsAt = Date.now()
+  updateTaskCount()
+  syncCurrentJobSegment()
+}
+
+function syncCurrentJobSegment(): void {
+  if (!state.currentJobId) return
+  const job = state.jobs.find((item) => item.id === state.currentJobId)
+  if (job) {
+    state.tasksSegment = job.active ? 'active' : 'history'
+    if (!state.expandedJobIds.includes(job.id)) state.expandedJobIds.push(job.id)
+  }
+}
+
+function activeJobs(): JobVm[] {
+  return state.jobs.filter((job) => job.active)
+}
+
+function historyJobs(): JobVm[] {
+  return state.jobs.filter((job) => !job.active)
+}
+
+function currentJob(): JobVm | null {
+  return state.jobs.find((job) => job.id === state.currentJobId) ?? null
+}
+
+function setTasksSegment(segment: TasksSegment): void {
+  state.tasksSegment = segment
+}
+
+function selectJob(jobId: string): void {
+  state.currentJobId = jobId
+  syncCurrentJobSegment()
+}
+
+function toggleJobExpanded(jobId: string): void {
+  const at = state.expandedJobIds.indexOf(jobId)
+  if (at >= 0) state.expandedJobIds.splice(at, 1)
+  else state.expandedJobIds.push(jobId)
+}
+
+async function refreshJobs(silent = false): Promise<void> {
+  if (state.jobsLoading) return
+  state.jobsLoading = true
+  if (!silent && state.jobsStatus !== 'ready') state.jobsStatus = 'loading'
+  try {
+    if (isMockMode()) {
+      mock.tickMockJobs()
+      applyJobs(mock.mockJobs().map(mapJob))
+      state.jobsSource = 'mock'
+      state.jobsStatus = 'ready'
+      state.jobsError = ''
+      return
+    }
+    const jobs = (await api.getJobs(50)).map(mapJob)
+    applyJobs(jobs)
+    state.jobsSource = 'host'
+    state.jobsStatus = 'ready'
+    state.jobsError = ''
+  } catch (error) {
+    state.jobsSource = 'host'
+    state.jobsStatus = 'error'
+    state.jobsError = isMethodUnavailable(error)
+      ? `Host 任务接口未就绪（getJobs/runBatch 未实现）：${toErrorMessage(error)}`
+      : toErrorMessage(error)
+  } finally {
+    state.jobsLoading = false
+    updateTaskCount()
+  }
+}
+
+function ensureJobsLoaded(force = false): void {
+  if (state.jobsLoading) return
+  if (!force && (state.jobsStatus === 'loading' || state.jobsStatus === 'ready')) return
+  void refreshJobs(force)
+}
+
 /**
- * AC-UI-15 M2b 边界：批量条/任务中心/卡片右键/菜单中的批量入口在 M2a 构建一律只 Toast
- * 「M2b 未接入（批量/作业/审计）」，不打开确认框、不调用 runRepoAction（Host 写调用=0）。
+ * 任务中心时钟：Mock 模式推进演示作业进度；Host 模式仅在「有进行中作业或抽屉打开」时
+ * 以 getJobs 轮询兜底（JOB_UPDATED 为主通道，事件丢失时仍可收敛）。
  */
-function batchCommand(command: string): void {
-  notify(`批量 ${command}：${M2B_BOUNDARY_TEXT}`, 'warning', 3600)
+function startJobsClock(): void {
+  if (jobsClockTimer !== undefined) return
+  jobsClockTimer = window.setInterval(() => {
+    if (isMockMode()) {
+      mock.tickMockJobs()
+      applyJobs(mock.mockJobs().map(mapJob))
+      state.jobsSource = 'mock'
+      state.jobsStatus = 'ready'
+      state.jobsError = ''
+      return
+    }
+    if (state.jobs.some((job) => job.active) || (state.overlays.drawer === 'tasks' && state.jobsStatus !== 'error')) {
+      void refreshJobs(true)
+    }
+  }, 1_500)
+}
+
+/** 初始化作业中心（Mock 演示 / Host 订阅 + 首次拉取）。 */
+async function initJobs(): Promise<void> {
+  if (state.jobsStatus === 'ready' || state.jobsStatus === 'loading') return
+  if (isMockMode()) {
+    mock.tickMockJobs()
+    applyJobs(mock.mockJobs().map(mapJob))
+    state.jobsSource = 'mock'
+    state.jobsStatus = 'ready'
+    state.jobsError = ''
+    startJobsClock()
+    return
+  }
+  if (!jobsUnsubscribe) jobsUnsubscribe = onJobUpdated((job) => applyJobUpdate(job))
+  await refreshJobs(true)
+  startJobsClock()
+}
+
+function openTaskCenter(jobId?: string): void {
+  if (jobId) {
+    state.currentJobId = jobId
+    state.tasksSegment = 'active'
+    if (!state.expandedJobIds.includes(jobId)) state.expandedJobIds.push(jobId)
+  }
+  openDrawer('tasks')
+  void ensureJobsLoaded(true)
+}
+
+// ───────────────────────────── M2b 批量入口 ─────────────────────────────
+
+/** 批量目标：批量选择模式取勾选集合，否则取当前选中组件（与 FR-BOARD-04 一致）。 */
+function batchTargetComponentIds(): string[] {
+  const checked = state.checkedIds.filter((id) => state.components.some((component) => component.id === id))
+  if (state.selectMode && checked.length > 0) return checked
+  return state.selectedComponentId ? [state.selectedComponentId] : []
+}
+
+function componentIdsText(componentIds: string[]): string {
+  if (componentIds.length <= 3) return componentIds.join('、')
+  return `${componentIds.slice(0, 2).join('、')} 等 ${componentIds.length} 个组件`
+}
+
+function commonBranchOf(componentIds: string[]): string {
+  const branches = componentIds.map(
+    (id) => state.components.find((component) => component.id === id)?.branch ?? '',
+  )
+  const first = branches[0] ?? ''
+  if (!first || first === '—') return ''
+  return branches.every((branch) => branch === first) ? first : ''
+}
+
+function commonTagOf(componentIds: string[]): string {
+  const tags = componentIds.map(
+    (id) => state.components.find((component) => component.id === id)?.tag ?? '',
+  )
+  const first = tags[0] ?? ''
+  if (!first) return ''
+  return tags.every((tag) => tag === first) ? first : ''
+}
+
+function openBatchDialog(dialog: BatchDialogVm): void {
+  closeConfirm()
+  closeContextMenu()
+  state.overlays.batchDialog = dialog
+}
+
+function closeBatchDialog(): void {
+  state.overlays.batchDialog = null
+}
+
+function submitBatchDialog(payload: { value?: string; dryRun?: boolean }): void {
+  const dialog = state.overlays.batchDialog
+  if (!dialog) return
+  state.overlays.batchDialog = null
+  dialog.submit(payload)
+}
+
+function openBatchConfirm(kind: BatchKind, componentIds: string[]): void {
+  const sync = kind === 'SYNC'
+  const repoCount = componentIds.length * 4
+  openConfirm({
+    title: sync ? `批量 SYNC ${componentIds.length} 个组件？` : `批量 Delete ${componentIds.length} 个组件？`,
+    body: sync
+      ? `将对 ${componentIds.length} 个组件的 ${repoCount} 个仓执行受控 SYNC（远程覆盖本地）。Host 会先预检并创建备份 ref；脏仓/未推送仓将失败或跳过，不整体回滚。逐仓结果提交后可在任务中心查看。`
+      : `将把 ${componentIds.length} 个组件的本地仓软删除到工作区 .trash（保留 30 天，可恢复），不写远端；失败项可在任务中心“仅重试失败项”。`,
+    detail: `组件：${componentIdsText(componentIds)}`,
+    confirmLabel: sync ? '确认 SYNC' : '确认软删除',
+    danger: true,
+    onConfirm: () => {
+      closeConfirm()
+      void submitBatch(kind, { componentIds })
+    },
+  })
+}
+
+function openClonePreview(componentIds: string[]): void {
+  const missing: { componentId: string; repoType: string; label: string }[] = []
+  for (const componentId of componentIds) {
+    const component = state.components.find((item) => item.id === componentId)
+    if (!component) continue
+    for (const repo of component.repos) {
+      if (repo.state !== 'MISSING') continue
+      missing.push({ componentId, repoType: repo.repoType, label: `${componentId} / ${repo.repoType}` })
+    }
+  }
+  if (missing.length === 0) {
+    notify('所选组件无缺失仓，无需 Clone', 'info', 4_000)
+    return
+  }
+  openBatchDialog({
+    kind: 'clone',
+    action: 'CLONE',
+    title: `批量 Clone 缺失仓（${missing.length} 个）`,
+    body: `将克隆 ${missing.length} 个缺失仓到本地工作区；已存在的仓不会重复克隆。提交后在任务中心逐仓显示进度与失败原因。`,
+    detail: `组件 ${componentIds.length} 个 · 缺失仓 ${missing.length} 个`,
+    confirmLabel: '确认 Clone',
+    danger: false,
+    showDryRun: true,
+    dryRunHint: '勾选后仅预览将克隆的仓库，不写本地',
+    preview: missing,
+    submit: (payload) => {
+      const args: BatchArgs = {}
+      if (payload.dryRun === true) args.dryRun = true
+      void submitBatch('CLONE', {
+        componentIds,
+        repoTypes: [...new Set(missing.map((item) => item.repoType))],
+        args,
+      })
+    },
+  })
+}
+
+function openBatchInput(kind: 'CREATE' | 'TAG', componentIds: string[]): void {
+  const isTag = kind === 'TAG'
+  openBatchDialog({
+    kind: isTag ? 'tag' : 'branch',
+    action: kind,
+    title: isTag ? `批量打 Tag（${componentIds.length} 个组件）` : `批量 CREATE 分支（${componentIds.length} 个组件）`,
+    body: isTag
+      ? `将在所选组件的各仓创建/切换到同名 Tag。名称由 Host 校验；同名 Tag 已存在或工作区脏的仓将失败。`
+      : `将在所选组件的各仓创建同名分支（已存在则切换）。名称由 Host 校验；工作区脏或游离 HEAD 的仓将失败。`,
+    detail: `组件：${componentIdsText(componentIds)}`,
+    confirmLabel: isTag ? '确认打 Tag' : '确认 CREATE',
+    danger: false,
+    inputLabel: isTag ? 'Tag 名称' : '分支名',
+    inputPlaceholder: isTag ? '例如 v1.2.0' : '例如 release/1.2',
+    initialValue: isTag ? commonTagOf(componentIds) : commonBranchOf(componentIds),
+    showDryRun: true,
+    dryRunHint: '勾选后仅校验名称并预览，不写本地',
+    submit: (payload) => {
+      const value = (payload.value ?? '').trim()
+      if (!value) {
+        notify(isTag ? '请填写 Tag 名称' : '请填写分支名', 'warning')
+        return
+      }
+      const args: BatchArgs = isTag ? { tag: value } : { branch: value }
+      if (payload.dryRun === true) args.dryRun = true
+      void submitBatch(kind, { componentIds, args })
+    },
+  })
+}
+
+/** 仅当 Host 明确未实现作业接口时阻止提交；瞬时失败（超时等）仍允许用户重试。 */
+function jobsApiUnavailable(): boolean {
+  if (isMockMode() || state.jobsStatus !== 'error') return false
+  return /未实现|E_UNKNOWN_METHOD|E_NOT_IMPLEMENTED/.test(state.jobsError)
+}
+
+/**
+ * 批量入口（BatchBar / 卡片右键 / 菜单）：先按 kind 走确认/参数对话框，
+ * 用户确认后才调用 runBatch（未确认 = 0 写）。
+ */
+function requestBatch(kind: BatchKind): void {
+  if (state.batchPending) {
+    notify('已有批量提交进行中，请稍候', 'warning')
+    return
+  }
+  if (jobsApiUnavailable()) {
+    notify(`无法提交${jobKindLabel(kind)}：${state.jobsError}`, 'warning', 6_000)
+    return
+  }
+  const componentIds = batchTargetComponentIds()
+  if (componentIds.length === 0) {
+    notify(state.selectMode ? '请先勾选要批量操作的组件' : '请先选择组件', 'warning')
+    return
+  }
+  switch (kind) {
+    case 'SYNC':
+    case 'DELETE':
+      openBatchConfirm(kind, componentIds)
+      return
+    case 'CLONE':
+      openClonePreview(componentIds)
+      return
+    case 'CREATE':
+    case 'TAG':
+      openBatchInput(kind, componentIds)
+      return
+    case 'RESTORE':
+      openRestoreConfirm(componentIds)
+      return
+    default:
+      notify(`批量 ${kind}：Host 未声明支持该作业类型`, 'warning', 4_200)
+  }
+}
+
+/** 真正的 Host/Mock 写入口：仅在确认/参数对话框提交后被调用。 */
+async function submitBatch(
+  kind: BatchKind,
+  options: { componentIds: string[]; repoTypes?: string[]; args?: BatchArgs },
+): Promise<void> {
+  if (state.batchPending) return
+  state.batchPending = true
+  const args: BatchArgs = { ...(options.args ?? {}) }
+  // 契约：SYNC/DELETE/RESTORE/CREATE/TAG 属强写 kind，Host 要求 args.confirm=true；
+  // 到达 submitBatch 说明用户已通过确认/参数对话框确认，故统一携带 confirm。
+  if (['SYNC', 'DELETE', 'RESTORE', 'CREATE', 'TAG'].includes(kind)) args.confirm = true
+  try {
+    if (isMockMode()) {
+      const result = mock.mockRunBatch(kind, options.componentIds, options.repoTypes, args)
+      applyJobs(mock.mockJobs().map(mapJob))
+      state.jobsSource = 'mock'
+      state.jobsStatus = 'ready'
+      state.jobsError = ''
+      const skipped = result.skipped > 0 ? ` · 跳过 ${result.skipped}` : ''
+      notify(`已提交${jobKindLabel(kind)} · job ${shortJobId(result.jobId)}（${result.total} 仓${skipped}）`, 'success', 4_200)
+      openTaskCenter(result.jobId)
+      return
+    }
+    const result = await api.runBatch({
+      kind,
+      componentIds: options.componentIds,
+      repoTypes: options.repoTypes,
+      args,
+    })
+    await refreshJobs(true)
+    if (!result.accepted) {
+      notify(
+        `批量 ${kind} 未被接受（accepted=false）${result.skipped > 0 ? ` · 跳过 ${result.skipped}` : ''}`,
+        'warning',
+        5_000,
+      )
+      return
+    }
+    if (result.jobId) {
+      notify(`已提交${jobKindLabel(kind)} · job ${shortJobId(result.jobId)}（${result.total} 仓）`, 'success', 4_200)
+      openTaskCenter(result.jobId)
+    } else {
+      notify(`批量 ${kind} 已提交（Host 未返回 jobId）`, 'info', 4_200)
+      openDrawer('tasks')
+    }
+  } catch (error) {
+    if (error instanceof HostError && error.code === 'E_CONFIRM_REQUIRED' && args.confirm !== true) {
+      openConfirm({
+        title: `批量 ${kind} 需要二次确认`,
+        body: toErrorMessage(error),
+        confirmLabel: '确认并提交',
+        danger: true,
+        onConfirm: () => {
+          closeConfirm()
+          void submitBatch(kind, { ...options, args: { ...args, confirm: true } })
+        },
+      })
+      return
+    }
+    const info = actionErrorInfo(error)
+    if (isMethodUnavailable(error)) {
+      notify(`Host 未实现 runBatch（M2b 后端未就绪）：${info.message}`, 'warning', 6_000)
+    } else {
+      notify(`批量 ${kind} 提交失败 · ${info.code}：${info.message}`, 'error', 6_500)
+    }
+    pushNotification(`批量 ${kind} 提交失败`, `${info.code}：${info.message}`, 'err')
+  } finally {
+    state.batchPending = false
+  }
+}
+
+/** 任务中心：取消作业（合作式；已开始仓取消、未开始仓保持原状，不整体回滚）。 */
+async function cancelJob(jobId: string): Promise<void> {
+  if (!jobId) return
+  try {
+    if (isMockMode()) {
+      const job = mock.mockCancelJob(jobId)
+      if (job) applyJobUpdate(job)
+      state.currentJobId = jobId
+      state.tasksSegment = 'history'
+      notify(`已请求取消 ${shortJobId(jobId)}：已开始仓标记取消，未开始仓保持原状（以实际扫描为准）`, 'warning', 4_200)
+      return
+    }
+    // Host 契约：cancelJob 回 { jobId, state }（仅状态，不是完整 job 快照）。
+    // 不能用它覆盖 items；先做状态补丁，再拉取完整列表（含逐仓 CANCELED/RUNNING 明细）。
+    const returned = await api.cancelJob(jobId)
+    const prev = state.jobs.find((job) => job.id === jobId)
+    const terminalStates: JobVm['state'][] = ['PARTIAL', 'SUCCESS', 'FAILED', 'CANCELED', 'INTERRUPTED']
+    if (returned && returned.items.length > 0) {
+      applyJobUpdate(returned)
+    } else if (returned && prev && terminalStates.includes(returned.state)) {
+      const patched: JobVm = {
+        ...prev,
+        state: returned.state,
+        cancellable: false,
+        active: false,
+        finishedAt: new Date().toISOString(),
+      }
+      state.jobs = sortJobs(state.jobs.map((job) => (job.id === jobId ? patched : job)))
+      if (prev.active) notifyJobTerminal(patched)
+      updateTaskCount()
+    }
+    await refreshJobs(true)
+    state.currentJobId = jobId
+    syncCurrentJobSegment()
+    notify(`已请求取消 ${shortJobId(jobId)}（合作式；终态以实际扫描为准）`, 'info', 3_600)
+  } catch (error) {
+    if (isMethodUnavailable(error)) notify('Host 未实现 cancelJob（M2b 后端未就绪）', 'warning', 5_000)
+    else if (error instanceof HostError && error.code === 'E_JOB_NOT_FOUND')
+      notify(`取消失败：任务不存在或已被淘汰（${shortJobId(jobId)}）`, 'warning', 4_000)
+    else notify(`取消失败：${toErrorMessage(error)}`, 'error', 5_000)
+  }
+}
+
+/** 任务中心：仅重试失败/取消/中断项（成功仓不重跑）。 */
+async function retryFailed(jobId: string): Promise<void> {
+  if (!jobId) return
+  try {
+    if (isMockMode()) {
+      const result = mock.mockRetryFailed(jobId)
+      if (!result) {
+        notify('该作业没有可重试的失败/取消项', 'warning', 4_000)
+        return
+      }
+      applyJobs(mock.mockJobs().map(mapJob))
+      state.currentJobId = result.jobId
+      if (!state.expandedJobIds.includes(result.jobId)) state.expandedJobIds.push(result.jobId)
+      state.tasksSegment = 'active'
+      notify(`已提交重试作业 · job ${shortJobId(result.jobId)}（仅 ${result.total} 个失败/取消项）`, 'success', 4_200)
+      return
+    }
+    const result = await api.retryFailed(jobId)
+    await refreshJobs(true)
+    if (result.accepted && result.jobId) {
+      state.currentJobId = result.jobId
+      if (!state.expandedJobIds.includes(result.jobId)) state.expandedJobIds.push(result.jobId)
+      state.tasksSegment = 'active'
+      notify(`已提交重试作业 · job ${shortJobId(result.jobId)}（仅 ${result.total || '—'} 项）`, 'success', 4_200)
+    } else {
+      // 契约：无可重试项时 { jobId:null, accepted:false, retried:0 }，不创建空作业。
+      notify('该作业没有可重试的失败/取消项', 'warning', 4_000)
+    }
+  } catch (error) {
+    if (isMethodUnavailable(error)) notify('Host 未实现 retryFailed（M2b 后端未就绪）', 'warning', 5_000)
+    else if (error instanceof HostError && error.code === 'E_JOB_NOT_FOUND')
+      notify(`重试失败：任务不存在或已被淘汰（${shortJobId(jobId)}）`, 'warning', 4_000)
+    else notify(`重试失败项失败：${toErrorMessage(error)}`, 'error', 5_000)
+  }
+}
+
+/**
+ * 批量 RESTORE（从工作区 .trash 恢复）：Host 已实现 kind=RESTORE（按仓名查找最近 .trash 备份，
+ * 目标已存在则 SKIPPED，不覆盖；写远端=0）。属破坏性操作，必须先确认。
+ * 备份 ref 仅在任务中心展示（Host 当前未提供按 ref 恢复的参数/列表接口，不伪造恢复入口）。
+ */
+function openRestoreConfirm(componentIds: string[]): void {
+  openConfirm({
+    title: `从 .trash 恢复 ${componentIds.length} 个组件的缺失仓？`,
+    body: `Host 将在工作区 .trash 中按仓名查找最近备份并恢复；目标路径已存在的仓跳过（不覆盖，需先 Delete）。不写远端；逐仓结果提交后可在任务中心查看。`,
+    detail: `组件：${componentIdsText(componentIds)}`,
+    confirmLabel: '确认恢复',
+    danger: true,
+    onConfirm: () => {
+      closeConfirm()
+      void submitBatch('RESTORE', { componentIds })
+    },
+  })
 }
 
 // ───────────────────────────── 右键菜单 ─────────────────────────────
@@ -1704,10 +2297,12 @@ function cardContextMenu(event: MouseEvent, componentId: string): void {
     { key: 'card.detail', label: '查看组件详情（抽屉）' },
     { key: 'card.locateFolder', label: '在文件夹视图定位' },
     { key: '-', label: '', separator: true },
-    { key: 'component.SYNC', label: `SYNC…（四仓，远程覆盖本地）· M2b 未接入`, danger: true },
-    { key: 'component.CREATE', label: 'CREATE…（四仓建同名分支）· M2b 未接入' },
-    { key: 'component.CLONE', label: 'Clone 缺失仓…· M2b 未接入', disabled: !hasMissing },
-    { key: 'component.DELETE', label: 'Delete…（仅本地，软删到 .trash）· M2b 未接入', danger: true },
+    { key: 'component.SYNC', label: 'SYNC…（四仓，远程覆盖本地，需确认）', danger: true },
+    { key: 'component.CREATE', label: 'CREATE…（四仓建同名分支）' },
+    { key: 'component.CLONE', label: 'Clone 缺失仓…', disabled: !hasMissing },
+    { key: 'component.TAG', label: '批量打 Tag…' },
+    { key: 'component.RESTORE', label: 'Restore…（从 .trash 恢复缺失仓，需确认）' },
+    { key: 'component.DELETE', label: 'Delete…（仅本地，软删到 .trash，需确认）', danger: true },
     { key: '-', label: '', separator: true },
     { key: 'copy.componentId', label: '复制组件 ID' },
     { key: 'copy.componentPath', label: '复制组件路径' },
@@ -2075,16 +2670,22 @@ function command(key: string): void {
       void runAction(key.slice('actions.'.length) as RepoAction)
       break
     case 'component.SYNC':
-      batchCommand('SYNC')
+      requestBatch('SYNC')
       break
     case 'component.CREATE':
-      batchCommand('CREATE')
+      requestBatch('CREATE')
       break
     case 'component.CLONE':
-      batchCommand('CLONE')
+      requestBatch('CLONE')
+      break
+    case 'component.TAG':
+      requestBatch('TAG')
+      break
+    case 'component.RESTORE':
+      requestBatch('RESTORE')
       break
     case 'component.DELETE':
-      batchCommand('DELETE')
+      requestBatch('DELETE')
       break
     case 'tools.ci':
       openModal('ci')
@@ -2178,6 +2779,10 @@ function closeTopOverlay(): void {
   }
   if (state.overlays.actionDialog) {
     closeActionDialog()
+    return
+  }
+  if (state.overlays.batchDialog) {
+    closeBatchDialog()
     return
   }
   if (state.overlays.confirm) {
@@ -2290,7 +2895,24 @@ export interface WorkbenchStore {
   toggleChecked: typeof toggleChecked
   clearChecked: typeof clearChecked
   selectAllVisible: typeof selectAllVisible
-  batchCommand: typeof batchCommand
+  // M2b 任务中心 / 批量入口
+  initJobs: typeof initJobs
+  refreshJobs: typeof refreshJobs
+  ensureJobsLoaded: typeof ensureJobsLoaded
+  activeJobs: typeof activeJobs
+  historyJobs: typeof historyJobs
+  currentJob: typeof currentJob
+  setTasksSegment: typeof setTasksSegment
+  selectJob: typeof selectJob
+  toggleJobExpanded: typeof toggleJobExpanded
+  openTaskCenter: typeof openTaskCenter
+  cancelJob: typeof cancelJob
+  retryFailed: typeof retryFailed
+  requestBatch: typeof requestBatch
+  submitBatch: typeof submitBatch
+  openBatchDialog: typeof openBatchDialog
+  closeBatchDialog: typeof closeBatchDialog
+  submitBatchDialog: typeof submitBatchDialog
   setView: typeof setView
   setSearch: typeof setSearch
   setSort: typeof setSort
@@ -2373,7 +2995,23 @@ export const workbench: WorkbenchStore = {
   toggleChecked,
   clearChecked,
   selectAllVisible,
-  batchCommand,
+  initJobs,
+  refreshJobs,
+  ensureJobsLoaded,
+  activeJobs,
+  historyJobs,
+  currentJob,
+  setTasksSegment,
+  selectJob,
+  toggleJobExpanded,
+  openTaskCenter,
+  cancelJob,
+  retryFailed,
+  requestBatch,
+  submitBatch,
+  openBatchDialog,
+  closeBatchDialog,
+  submitBatchDialog,
   setView,
   setSearch,
   setSort,

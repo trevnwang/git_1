@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useWorkbench } from '../../stores/workbench'
-import { M2B_BOUNDARY_TEXT } from '../../viewmodel'
 import type { MenuItemVm } from '../../types/workbench'
 
 const w = useWorkbench()
@@ -56,17 +55,19 @@ const MENUS: MenuDef[] = [
       { key: 'actions.COMMIT', label: '单仓 COMMIT', shortcut: 'Alt+4' },
       { key: 'actions.PUSH', label: '单仓 PUSH', shortcut: 'Alt+5' },
       { key: 'sep3', label: '', separator: true },
-      { key: 'component.SYNC', label: `组件 SYNC… — ${M2B_BOUNDARY_TEXT}` },
-      { key: 'component.CREATE', label: `组件 CREATE… — ${M2B_BOUNDARY_TEXT}` },
-      { key: 'component.CLONE', label: `批量 Clone… — ${M2B_BOUNDARY_TEXT}` },
-      { key: 'component.DELETE', label: `批量 Delete… — ${M2B_BOUNDARY_TEXT}`, danger: true },
-      { key: 'tools.tasks', label: '任务中心' },
+      { key: 'component.SYNC', label: '组件 SYNC…（四仓，远程覆盖本地）' },
+      { key: 'component.CREATE', label: '组件 CREATE…（四仓建同名分支）' },
+      { key: 'component.CLONE', label: '批量 Clone…（缺失仓）' },
+      { key: 'component.TAG', label: '批量打 Tag…（四仓同名 Tag）' },
+      { key: 'component.RESTORE', label: '批量 Restore…（从 .trash 恢复缺失仓）' },
+      { key: 'component.DELETE', label: '批量 Delete…（仅本地，软删到 .trash）', danger: true },
     ],
   },
   {
     key: 'tools',
     label: '工具(T)',
     items: [
+      { key: 'tools.tasks', label: '任务中心' },
       { key: 'tools.ci', label: 'CI 流水线' },
       { key: 'tools.unbound', label: '未绑定仓库' },
       { key: 'tools.logs', label: '日志与诊断' },

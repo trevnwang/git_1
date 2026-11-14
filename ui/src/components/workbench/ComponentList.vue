@@ -79,9 +79,9 @@ function focusLast(): void {
   void nextTick(() => document.querySelector<HTMLElement>(`[data-component-id="${component.id}"]`)?.focus())
 }
 
-function quick(componentId: string, command: 'SYNC' | 'CREATE'): void {
-  if (state.selectedComponentId !== componentId) void w.selectComponent(componentId)
-  w.batchCommand(command)
+async function quick(componentId: string, command: 'SYNC' | 'CREATE'): Promise<void> {
+  if (state.selectedComponentId !== componentId) await w.selectComponent(componentId)
+  w.requestBatch(command)
 }
 
 function selectRepoFacet(event: Event): void {

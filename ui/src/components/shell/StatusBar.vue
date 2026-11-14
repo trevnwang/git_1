@@ -40,7 +40,15 @@ const freshnessTitle = computed(() => {
       <span class="dot" :class="state.hostLinked ? '' : 'off'" aria-hidden="true" />Host
       <span class="dot" :class="state.action.pending ? 'warn' : ''" aria-hidden="true" />GitWorker
     </span>
-    <span class="seg" data-seg="queue" data-testid="status-queue" title="操作队列 / 任务中心">队列 {{ state.taskCount }}</span>
+    <button
+      type="button"
+      class="seg seg-btn queue-btn"
+      data-seg="queue"
+      data-testid="status-queue"
+      :class="{ busy: state.taskCount > 0 }"
+      :title="`任务队列：${state.taskCount} 个进行中作业 · 点击打开任务中心`"
+      @click="w.openDrawer('tasks')"
+    >队列 {{ state.taskCount }}</button>
     <button
       type="button"
       class="seg seg-btn"
@@ -103,6 +111,7 @@ const freshnessTitle = computed(() => {
   cursor: pointer;
 }
 .seg-btn:hover { color: var(--text); text-decoration: underline; }
+.queue-btn.busy { color: var(--st-info-fg); font-weight: 600; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st-success-fg); flex: 0 0 auto; }
 .dot.warn { background: var(--st-warning-fg); }
 .dot.err { background: var(--st-danger-fg); }
