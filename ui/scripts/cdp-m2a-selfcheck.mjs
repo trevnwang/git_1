@@ -3,8 +3,9 @@
  * 前置：Host 已启动并开启 CDP 9222；真实/Mock 均可。
  * 用法：node ui/scripts/cdp-m2a-selfcheck.mjs
  */
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const results = [];
 function check(id, ok, detail = '') {
