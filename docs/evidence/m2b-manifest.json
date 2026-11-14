@@ -1,33 +1,33 @@
 {
-  "commit": "159b393",
-  "generatedAt": "2026-11-14T19:27:36.891Z",
+  "commit": "efdd087",
+  "generatedAt": "2026-11-14T19:33:44.142Z",
   "suite": [
     {
       "name": "cdp-m2a-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2a-selfcheck.mjs",
-      "startedAt": "2026-11-14T19:26:28.075Z",
-      "finishedAt": "2026-11-14T19:26:31.799Z",
+      "startedAt": "2026-11-14T19:32:32.395Z",
+      "finishedAt": "2026-11-14T19:32:36.086Z",
       "result": "PASS"
     },
     {
       "name": "cdp-m2b1-fix-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2b1-fix-selfcheck.mjs",
-      "startedAt": "2026-11-14T19:26:31.799Z",
-      "finishedAt": "2026-11-14T19:26:54.469Z",
+      "startedAt": "2026-11-14T19:32:36.086Z",
+      "finishedAt": "2026-11-14T19:32:58.674Z",
       "result": "PASS"
     },
     {
       "name": "cdp-m2b2-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2b2-selfcheck.mjs",
-      "startedAt": "2026-11-14T19:26:54.469Z",
-      "finishedAt": "2026-11-14T19:27:24.101Z",
+      "startedAt": "2026-11-14T19:32:58.674Z",
+      "finishedAt": "2026-11-14T19:33:31.278Z",
       "result": "PASS"
     },
     {
       "name": "cdp-m2b2-realhost-check.mjs",
       "command": "node ui/scripts/cdp-m2b2-realhost-check.mjs",
-      "startedAt": "2026-11-14T19:27:24.150Z",
-      "finishedAt": "2026-11-14T19:27:36.816Z",
+      "startedAt": "2026-11-14T19:33:31.328Z",
+      "finishedAt": "2026-11-14T19:33:44.061Z",
       "result": "PASS"
     }
   ],
