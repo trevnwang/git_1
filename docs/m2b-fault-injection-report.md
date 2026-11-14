@@ -17,9 +17,9 @@
 | `GIT_NET_404` | 已实现 GitCli 注入 | `Clone_NetInjection_ClassifiesError(404)` → E_REMOTE_NOT_FOUND | PASS |
 | `GIT_NET_TIMEOUT` | 已实现 GitCli 注入 | `Clone_NetInjection_ClassifiesError(timeout)` → E_NETWORK | PASS |
 | `DISK_SPACE_LOW` | Debug 注入 Clone 预检 | `Clone_DiskSpaceLowInjection_ReturnsDiskFull`：E_DISK_FULL、零目录 | PASS |
-| `GIT_SLOW`（取消确定性） | 已实现 2s delay（Debug） | 取消测试仍为通用用例 | PARTIAL |
-| `DISK_WRITE_FAIL` | 未实现 | — | GAP |
-| `CRASH_BEFORE_WRITE` / `CRASH_AFTER_WRITE` | 未实现真实注入 | — | GAP |
+| `GIT_SLOW`（取消确定性） | Debug 2s delay + 取消返回 Canceled | `GitCli_GitSlow_ReturnsCanceledQuickly`：<1.5s 取消、零挂起 | PASS |
+| `DISK_WRITE_FAIL` | Debug GitCli 写命令注入 ENOSPC | `DiskWriteFailInjection_CreateFailsZeroBranch`：FAILED、零分支 | PASS |
+| `CRASH_BEFORE_WRITE` / `CRASH_AFTER_WRITE` | 独立 worker 进程真实 Kill（写前/写后） | `RealProcessCrashBeforeWrite...`=NOT_APPLIED；`RealProcessCrashAfterWrite...`=UNKNOWN_APPLIED | PASS |
 | `G-WIRE-REST` | 测试内 HttpListener Gitea REST 桩 | `Bind_UsesGiteaRestAndReportsMissingRepos`：两仓返回/缺仓 2；只记录 method/url/status | PASS |
 | `G-WIRE-GIT` | 测试内 git http-backend 代理 | `GWireGit_CloneThroughProxy...`：clone 成功、记录 GET smart-HTTP、不记录凭据 | PASS |
 
@@ -35,9 +35,9 @@
 
 ## 3. 结论
 
-**故障注入报告尚未通过 M2b final DoD**（但 G-WIRE 与 GIT_NET 注入已补齐）。剩余阻断：
+**故障注入矩阵注入点已全部 PASS**；AC-SAFE 逐条证据/归档仍需收口（本报告不替代 AC-SAFE 签收）。剩余：
 
-1. 补 `GIT_NET_404/TIMEOUT`、`GIT_SLOW` 专项用例，实现 `CRASH_AFTER_WRITE` 注入；
+1. ~~补 `GIT_NET_404/TIMEOUT`、`GIT_SLOW` 专项，实现 `CRASH_*`~~（已完成）；
 2. 实现 `G-WIRE-REST`/`G-WIRE-GIT` 并生成安全证据三件套；
 3. ~~真机演练 `CRASH_AFTER_WRITE`~~（已由真实进程 Kill 测试覆盖）；
 4. 按 AC-SAFE-01…13 逐条补期望/实测/证据，更新本报告为 PASS 后才可作为 Gate 材料。

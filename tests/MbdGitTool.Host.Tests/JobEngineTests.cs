@@ -1788,6 +1788,47 @@ public sealed class JobEngineTests
         }
     }
     [Fact]
+    public async Task GitCli_GitSlow_ReturnsCanceledQuickly()
+    {
+        using var workspace = new TempWorkspace();
+        var git = new GitCli();
+        Environment.SetEnvironmentVariable("MBD_FAULT_INJECT", "GIT_SLOW");
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var result = await git.RunAsync(workspace.Root, new[] { "fetch", "origin" }, cts.Token);
+            stopwatch.Stop();
+            Assert.True(result.Canceled);
+            Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1.5), $"取消耗时过长：{stopwatch.Elapsed}");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("MBD_FAULT_INJECT", null);
+        }
+    }
+
+    [Fact]
+    public async Task DiskWriteFailInjection_CreateFailsZeroBranch()
+    {
+        using var fixture = BatchWorkspace.Create("CF220A_Disk_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        var clone = fixture.Clones["CF220A_Disk_IMPL"];
+        var batch = new BatchOperationService(config, new RepoActionService(config: config), paths: new PathPolicy(fixture.Root));
+        var repoRef = MakeRepoRef("CF220A_Disk", "IMPL", clone, "SYNCED", TestGit.Capture(clone, "rev-parse", "HEAD"));
+        Environment.SetEnvironmentVariable("MBD_FAULT_INJECT", "DISK_WRITE_FAIL");
+        try
+        {
+            var result = await batch.CreateBranchAsync(repoRef, "IMPL", new StoredJobArguments("disk/fail", null, null, true, false, false, false, false, false, null, null, false, null), CancellationToken.None);
+            Assert.Equal(JobItemStates.Failed, result.State);
+            Assert.Empty(TestGit.Capture(clone, "for-each-ref", "--format=%(refname)", "refs/heads/disk/fail"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("MBD_FAULT_INJECT", null);
+        }
+    }
+    [Fact]
     public async Task FixDetached_CreatesAndChecksOutBranchFromHead()
     {
         using var fixture = BatchWorkspace.Create("CF218A_Det_IMPL");

@@ -15,9 +15,16 @@ var journalDir = args[0];
 var repoPath = args[1];
 var preHead = args[2];
 var marker = args[3];
+var mode = args.Length > 4 ? args[4] : "after";
 
 var journal = new OperationJournal(journalDir);
 journal.Begin("CRASH_DRILL", "CF900_Crash", "IMPL", preHead, repoPath, "drill-job", "drill-job:1");
+
+File.WriteAllText(marker, "ready");
+if (mode == "before")
+{
+    Thread.Sleep(TimeSpan.FromMinutes(5));
+}
 
 File.WriteAllText(Path.Combine(repoPath, "drill-after-write.txt"), DateTime.UtcNow.ToString("O"));
 var git = new GitCli();

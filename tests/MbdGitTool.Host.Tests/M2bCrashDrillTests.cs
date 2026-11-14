@@ -79,6 +79,47 @@ public sealed class M2bCrashDrillTests
         Assert.Equal(JournalReconciler.UnknownApplied, doc.RootElement.GetProperty("result").GetString());
     }
 
+    [Fact]
+    public async Task RealProcessCrashBeforeWrite_ReconcileMarksNotApplied()
+    {
+        var repoRoot = FindRepoRoot();
+        var workerDll = Path.Combine(repoRoot, "tests", "MbdGitTool.CrashDrillWorker", "bin", "Debug", "net10.0-windows", "MbdGitTool.CrashDrillWorker.dll");
+        using var workspace = new TempWorkspace();
+        var repo = Path.Combine(workspace.Root, "repo");
+        Directory.CreateDirectory(repo);
+        TestGit.Run(repo, "init", "-q", "--initial-branch=main");
+        TestGit.ConfigureIdentity(repo);
+        File.WriteAllText(Path.Combine(repo, "README.md"), "base");
+        TestGit.Run(repo, "add", "README.md");
+        TestGit.Run(repo, "commit", "-q", "-m", "base");
+        var preHead = TestGit.Capture(repo, "rev-parse", "HEAD");
+
+        var journalDir = Path.Combine(workspace.Root, "journal");
+        var marker = Path.Combine(workspace.Root, "ready.marker");
+        var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = workspace.Root };
+        start.ArgumentList.Add(workerDll);
+        start.ArgumentList.Add(journalDir);
+        start.ArgumentList.Add(repo);
+        start.ArgumentList.Add(preHead);
+        start.ArgumentList.Add(marker);
+        start.ArgumentList.Add("before");
+        using var process = Process.Start(start)!;
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        while (!File.Exists(marker) && DateTime.UtcNow < deadline && !process.HasExited) await Task.Delay(200);
+        Assert.True(File.Exists(marker), "worker 未进入写前阶段");
+        if (!process.HasExited) process.Kill(entireProcessTree: true);
+        using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15))) await process.WaitForExitAsync(cts.Token);
+        Assert.Equal(preHead, TestGit.Capture(repo, "rev-parse", "HEAD"));
+
+        var journal = new OperationJournal(journalDir);
+        Assert.Equal(1, journal.CountUnresolved());
+        var config = TestAudit.NewConfig();
+        var report = new JournalReconciler(journal, new OperationAuditService(config)).Reconcile();
+        Assert.Equal(1, report.NotApplied);
+        Assert.Equal(0, report.UnknownApplied);
+        Assert.Equal(JournalReconciler.NotApplied, report.Items[0].Status);
+        Assert.Equal(0, journal.CountUnresolved());
+    }
     private static string FindRepoRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

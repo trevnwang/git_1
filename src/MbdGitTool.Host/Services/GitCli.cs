@@ -80,7 +80,21 @@ public class GitCli
 
             if (fault == "GIT_SLOW" && isNetwork)
             {
-                await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return GitResult.Cancelled();
+                }
+            }
+
+            var isWrite = arguments.Any(arg => arg is "commit" or "push" or "branch" or "reset" or "stash"
+                or "checkout" or "switch" or "update-ref" or "merge" or "rebase" or "init" or "clone" or "add");
+            if (isWrite && fault == "DISK_WRITE_FAIL")
+            {
+                return new GitResult(128, string.Empty, "fatal: No space left on device (injected DISK_WRITE_FAIL)");
             }
         }
 #endif
