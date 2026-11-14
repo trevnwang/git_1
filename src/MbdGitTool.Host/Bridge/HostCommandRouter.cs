@@ -414,8 +414,8 @@ public sealed class HostCommandRouter : IDisposable
                     if (!allDeleted || job.State != "SUCCESS")
                     {
                         _audit.Record("COMPONENT_UNBIND", componentId, null, null, null, null, false,
-                            "E_DELETE_PENDING", 0, actor: Environment.UserName,
-                            requestId: Guid.NewGuid().ToString("N"), jobId: jobId, result: job.State);
+                            "E_DELETE_PARTIAL", 0, actor: Environment.UserName,
+                            requestId: Guid.NewGuid().ToString("N"), jobId: jobId, result: "PARTIAL");
                         return CommandResult.Success(new { componentId, mode = "LOCAL_DELETE", jobId, state = job.State, isManaged = true, isDeleted = false, items = job.Items });
                     }
                     var (markOk, markError) = _management.MarkDeleted(componentId);

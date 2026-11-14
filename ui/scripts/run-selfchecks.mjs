@@ -10,7 +10,7 @@
  * 环境：MBD_GITEA_URL / MBD_GITEA_PROBE_URL 指向测试 Gitea。
  */
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -65,8 +65,17 @@ const manifest = {
   commit,
   generatedAt: new Date().toISOString(),
   suite: suites,
-  checks: [],
-  note: 'SKIP 不计入 COVERED；AC 逐条证据见 docs/m2b-ac-op-gap.md',
+  checks: suites.map((suite) => {
+    const evidence = suite.artifact ?? `artifacts/${suite.name.replace(/\.mjs$/, '')}/result.json`
+    let detail = null
+    try {
+      const absolute = join(here, '..', '..', evidence)
+      if (existsSync(absolute)) detail = JSON.parse(readFileSync(absolute, 'utf8'))
+    } catch {
+      /* ignore */
+    }
+    return { ac: suite.name, status: suite.result, evidence, detail }
+  }),  note: 'SKIP 不计入 COVERED；AC 逐条证据见 docs/m2b-ac-op-gap.md',
 }
 const evidenceDir = join(here, '..', '..', 'docs', 'evidence')
 mkdirSync(evidenceDir, { recursive: true })

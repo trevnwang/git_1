@@ -754,6 +754,14 @@ public sealed class JobEngine : IDisposable
                 "仓库正被外部 git 操作占用（.git/index.lock 存在）；未执行任何写操作，请等待外部操作结束后重试"), null, repoState);
         }
 
+        // AC-SAFE-08：写前先把 pre_head/expect_head 落库（崩溃后仍可审计；不每条重写整份 job 的路径在此接受）。
+        if (repo?.Repo.LocalPath is { Length: > 0 } preflightPath)
+        {
+            item.PreHead ??= await ReadJournalHeadAsync(repo, cancellationToken).ConfigureAwait(false);
+            item.ExpectHead ??= repo.Repo.HeadSha;
+            PersistUnsafe();
+        }
+
         if (arguments.DryRun)
         {
             // dryRun：只做逐仓只读预检（状态矩阵/本地/分支/upstream/dirty/untracked/unpushed/stash），
