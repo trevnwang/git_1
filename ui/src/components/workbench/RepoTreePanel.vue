@@ -22,6 +22,17 @@ const displayName = computed(() => repo.value?.repoName || fallbackName.value)
 const hasChanges = computed(() => (repo.value?.dirtyCount ?? 0) + (repo.value?.untrackedCount ?? 0) > 0)
 
 const emptyState = computed(() => {
+  const tree = panel.value
+  // 错误态优先：error/errorCode 必须自成一态，绝不显示成“空目录”。
+  if (tree.error || tree.status === 'error') {
+    return {
+      icon: '✕',
+      title: '无法读取目录',
+      desc: `${tree.errorCode ? `${tree.errorCode} · ` : ''}${tree.error || '未知错误'}`,
+      primary: '重试',
+      primaryKey: 'retry',
+    }
+  }
   if (!repo.value || repo.value.state === 'MISSING') {
     return {
       icon: '∅',
@@ -40,22 +51,22 @@ const emptyState = computed(() => {
       primaryKey: 'init',
     }
   }
-  if (repo.value.state === 'UNKNOWN' || panel.value.status === 'error') {
-    return {
-      icon: '⏱',
-      title: '状态未知',
-      desc: panel.value.error || '数据过期或扫描尚未完成。',
-      primary: '重试',
-      primaryKey: 'retry',
-    }
-  }
   if (repo.value.state === 'INVALID') {
     return {
       icon: '✕',
       title: '仓库绑定异常',
-      desc: panel.value.error || '路径或命名不符合绑定规则。',
+      desc: tree.error || '路径或命名不符合绑定规则。',
       primary: '修复绑定…',
       primaryKey: 'repair',
+    }
+  }
+  if (repo.value.state === 'UNKNOWN' || tree.status === 'unavailable') {
+    return {
+      icon: '⏱',
+      title: '目录不可用',
+      desc: tree.error || '状态未知：数据过期或扫描尚未完成，请重试。',
+      primary: '重试',
+      primaryKey: 'retry',
     }
   }
   return {
@@ -132,18 +143,25 @@ function onTreeContextMenu(event: MouseEvent, node: TreeNodeVm): void {
         <div data-testid="repo-tree-empty">
           <EmptyState :icon="emptyState.icon" :title="emptyState.title" :desc="emptyState.desc">
             <button type="button" class="empty-btn primary" @click.stop="onEmptyAction">{{ emptyState.primary }}</button>
-            <button type="button" class="empty-btn" @click.stop="w.loadTree(repoType, true)">重试</button>
+            <button v-if="emptyState.primaryKey !== 'retry'" type="button" class="empty-btn" @click.stop="w.loadTree(repoType, true)">重试</button>
           </EmptyState>
         </div>
       </template>
       <template v-else-if="panel.status === 'error'">
         <div data-testid="repo-tree-empty">
-          <EmptyState icon="✕" title="无法读取目录" :desc="`${panel.errorCode} ${panel.error}`">
+          <EmptyState
+            icon="✕"
+            title="无法读取目录"
+            :desc="`${panel.errorCode ? `${panel.errorCode} · ` : ''}${panel.error || '未知错误'}`"
+          >
             <button type="button" class="empty-btn primary" @click.stop="w.loadTree(repoType, true)">重试</button>
           </EmptyState>
         </div>
       </template>
       <template v-else>
+        <div v-if="panel.error" class="tree-error-banner" data-testid="tree-error-banner">
+          {{ panel.errorCode }} · {{ panel.error }}
+        </div>
         <FileTree
           :entries="panel.entries"
           :expanded="panel.expanded"
@@ -158,8 +176,8 @@ function onTreeContextMenu(event: MouseEvent, node: TreeNodeVm): void {
           @contextmenu="onTreeContextMenu"
           @scroll="w.setTreeScroll(repoType, $event)"
         />
-        <div v-if="panel.truncated" class="truncated" data-testid="tree-truncated" title="打开文件夹查看全部">
-          仅显示前 {{ panel.entries.length }} 项（共 {{ panel.totalEntries }} 项，打开文件夹查看全部）
+        <div v-if="panel.truncated" class="truncated" data-testid="tree-truncated" title="目录条目超过 Host 上限，已截断">
+          已截断：仅显示前 {{ panel.entries.length }} 项<template v-if="panel.totalEntries > panel.entries.length">（共 {{ panel.totalEntries }} 项，打开文件夹查看全部）</template>
         </div>
       </template>
     </div>
@@ -231,6 +249,16 @@ function onTreeContextMenu(event: MouseEvent, node: TreeNodeVm): void {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.tree-error-banner {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--st-danger-bd);
+  background: var(--st-danger-bg);
+  color: var(--st-danger-fg);
+  font-size: 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .empty-btn {
   height: 24px;

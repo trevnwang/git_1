@@ -61,6 +61,10 @@ function openCurrent(): void {
   w.openInExplorer()
 }
 
+function openComponentDetail(): void {
+  if (component.value.id) w.openComponentDrawer(component.value.id)
+}
+
 function openFile(): void {
   const node = fileNode.value
   if (node) void w.openFolderNode(node)
@@ -90,6 +94,14 @@ function openFile(): void {
         {{ displayName }}<span v-if="hasChanges" class="star">*</span>
       </span>
       <StateChip v-if="repo" :state="repo.state" compact />
+      <button
+        type="button"
+        class="icon-btn"
+        title="查看组件详情（抽屉）"
+        aria-label="查看组件详情"
+        data-testid="info-detail"
+        @click="openComponentDetail"
+      >ⓘ</button>
       <button
         type="button"
         class="icon-btn"
@@ -176,8 +188,12 @@ function openFile(): void {
         <div class="field" data-testid="info-dirty">
           <span class="field-label">未提交</span>
           <span class="field-value">
-            已跟踪 {{ repo.dirtyCount }} · 未跟踪 {{ repo.untrackedCount }} · stash {{ repo.stashCount }}
+            已暂存 {{ repo.stagedCount }} · 已跟踪 {{ repo.dirtyCount }} · 未跟踪 {{ repo.untrackedCount }} · stash {{ repo.stashCount }}
           </span>
+        </div>
+        <div class="field" data-testid="info-last-op">
+          <span class="field-label">最近操作</span>
+          <span class="field-value truncate" :title="w.lastOpText()">{{ w.lastOpText() }}</span>
         </div>
         <div class="field">
           <span class="field-label">状态</span>

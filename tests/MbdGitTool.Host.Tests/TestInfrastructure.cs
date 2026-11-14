@@ -95,7 +95,7 @@ internal static class TestData
         Components: components.Select(ToComponent).ToList(),
         Counts: new CountsDto(components.Length, components.Sum(c => c.Repos.Count), 0),
         Freshness: new FreshnessDto(DateTime.UtcNow.ToString("O"), null, false, true),
-        Capabilities: new CapabilitiesDto(true, true, true, false, false));
+        Capabilities: new CapabilitiesDto(true, true, true, true, false));
 
     public static SnapshotIndex Index(string workspaceRoot, params ComponentSpec[] components) =>
         SnapshotIndex.Build(Snapshot(workspaceRoot, components));
@@ -130,13 +130,19 @@ internal static class TestData
         Repos: spec.Repos.Select(repo => ToRepo(spec.ComponentId, repo)).ToList());
 }
 
-/// <summary>真实 git 夹具命令（本地只读测试用）。</summary>
+/// <summary>真实 git 夹具命令（本地只读/写测试用）。</summary>
 internal static class TestGit
 {
     public static void InitRepo(string path)
     {
         Directory.CreateDirectory(path);
         Run(path, "init", "-q");
+        ConfigureIdentity(path);
+    }
+
+    /// <summary>本地提交身份/避免 GPG 交互（写操作测试必需）。</summary>
+    public static void ConfigureIdentity(string path)
+    {
         Run(path, "config", "user.email", "test@example.com");
         Run(path, "config", "user.name", "Test");
         Run(path, "config", "commit.gpgsign", "false");
@@ -149,7 +155,41 @@ internal static class TestGit
         Run(path, "commit", "-q", "-m", message, "--no-gpg-sign");
     }
 
+    /// <summary>执行 git 并返回 stdout（trim；失败抛异常）。</summary>
+    public static string Capture(string workingDirectory, params string[] arguments)
+    {
+        var startInfo = BuildStartInfo(workingDirectory, arguments);
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("无法启动 git");
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"git {string.Join(' ', arguments)} 失败（exit={process.ExitCode}）：{stdout}{stderr}");
+        }
+
+        return stdout.Trim();
+    }
+
     public static void Run(string workingDirectory, params string[] arguments)
+    {
+        var startInfo = BuildStartInfo(workingDirectory, arguments);
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("无法启动 git");
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"git {string.Join(' ', arguments)} 失败（exit={process.ExitCode}）：{stdout}{stderr}");
+        }
+    }
+
+    private static ProcessStartInfo BuildStartInfo(string workingDirectory, string[] arguments)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -172,19 +212,72 @@ internal static class TestGit
         startInfo.Environment["GIT_AUTHOR_EMAIL"] = "test@example.com";
         startInfo.Environment["GIT_COMMITTER_NAME"] = "Test";
         startInfo.Environment["GIT_COMMITTER_EMAIL"] = "test@example.com";
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("无法启动 git");
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException(
-                $"git {string.Join(' ', arguments)} 失败（exit={process.ExitCode}）：{stdout}{stderr}");
-        }
+        return startInfo;
     }
 }
+
+/// <summary>
+/// 本地 bare remote + 两个 clone 夹具（无网络/无 Gitea）：
+/// <c>ws/remote/CF100A_Demo_Impl.git</c>（bare）、<c>ws/cloneA</c>（写入方）、<c>ws/CF100A_Demo_Impl</c>（读取方，可被工作区扫描识别）。
+/// </summary>
+internal sealed class GitRemoteFixture : IDisposable
+{
+    private readonly TempWorkspace _workspace;
+
+    private GitRemoteFixture(TempWorkspace workspace, string barePath, string cloneA, string cloneB)
+    {
+        _workspace = workspace;
+        BarePath = barePath;
+        CloneA = cloneA;
+        CloneB = cloneB;
+    }
+
+    public string Root => _workspace.Root;
+
+    public string BarePath { get; }
+
+    public string CloneA { get; }
+
+    public string CloneB { get; }
+
+    public static GitRemoteFixture Create(string repoDirectoryName = "CF100A_Demo_Impl")
+    {
+        var workspace = new TempWorkspace();
+        workspace.Dir("remote");
+        workspace.Dir("cloneA");
+
+        var barePath = workspace.PathFor(Path.Combine("remote", repoDirectoryName + ".git"));
+        TestGit.Run(workspace.Root, "init", "--bare", "-q", "--initial-branch=main", barePath);
+
+        var cloneA = workspace.PathFor("cloneA");
+        TestGit.Run(workspace.Root, "clone", "-q", barePath, cloneA);
+        TestGit.ConfigureIdentity(cloneA);
+        System.IO.File.WriteAllText(Path.Combine(cloneA, "README.md"), "init");
+        TestGit.CommitAll(cloneA, "init");
+        TestGit.Run(cloneA, "push", "-q", "-u", "origin", "main");
+
+        var cloneB = workspace.Dir(repoDirectoryName);
+        TestGit.Run(workspace.Root, "clone", "-q", barePath, cloneB);
+        TestGit.ConfigureIdentity(cloneB);
+
+        return new GitRemoteFixture(workspace, barePath, cloneA, cloneB);
+    }
+
+    /// <summary>cloneA 写入并 push（推进 origin/main）。</summary>
+    public void CommitAndPushFromA(string message)
+    {
+        System.IO.File.WriteAllText(Path.Combine(CloneA, message.Replace(' ', '_') + ".txt"), message);
+        TestGit.CommitAll(CloneA, message);
+        TestGit.Run(CloneA, "push", "-q", "origin", "main");
+    }
+
+    public static string Head(string path) => TestGit.Capture(path, "rev-parse", "HEAD");
+
+    public static string Branch(string path) => TestGit.Capture(path, "rev-parse", "--abbrev-ref", "HEAD");
+
+    public void Dispose() => _workspace.Dispose();
+}
+
 
 /// <summary>记录调用的启动器（测试绝不真正打开文件）。</summary>
 internal sealed class RecordingLauncher : IProcessLauncher

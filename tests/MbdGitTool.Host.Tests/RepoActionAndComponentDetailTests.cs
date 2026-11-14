@@ -37,7 +37,7 @@ public sealed class RepoActionServiceTests
 
     [Theory]
     [MemberData(nameof(StatesWithMatrix))]
-    public void GetAvailability_MatchesSpecMatrix_AndM1AlwaysDisabled(string state, string expected)
+    public void GetAvailability_MatchesSpecMatrix_AndEnabledFollowsMatrix(string state, string expected)
     {
         var repo = Repo(state);
         var service = new RepoActionService();
@@ -50,7 +50,8 @@ public sealed class RepoActionServiceTests
         Assert.Equal(expected, actual);
         Assert.All(availability, item =>
         {
-            Assert.False(item.Enabled);
+            // M2：能力开关 RepoActions=true，Enabled 严格等于矩阵允许（FR-ACT-02 / D-024）。
+            Assert.Equal(item.MatrixAllowed, item.Enabled);
             Assert.Equal("M2", item.Stage);
             Assert.False(string.IsNullOrWhiteSpace(item.Reason));
         });
@@ -102,19 +103,17 @@ public sealed class RepoActionServiceTests
     }
 
     [Fact]
-    public void Run_MatrixAllowed_ReturnsNotImplemented()
+    public void Run_MatrixAllowed_LocalPathMissing_ReturnsRepoNotLocal()
     {
         var service = new RepoActionService();
 
+        // SYNCED 矩阵允许 PULL，但快照里的本地路径不存在 → 执行前置 E_REPO_NOT_LOCAL（不写）。
         var result = service.Run(
             new RunRepoActionParams { ComponentId = "CF100A_Demo", RepoType = "IMPL", Action = "PULL" },
             Index("SYNCED"));
 
         Assert.False(result.Ok);
-        Assert.Equal(BridgeErrorCodes.NotImplemented, result.Error!.Code);
-        Assert.Contains("M2", result.Error.Message);
-        Assert.NotNull(result.Error.Details);
-        Assert.Equal("M2", result.Error.Details!["writeStage"]);
+        Assert.Equal(BridgeErrorCodes.RepoNotLocal, result.Error!.Code);
     }
 
     private static RepoRef Repo(string state)
@@ -165,7 +164,9 @@ public sealed class ComponentDetailServiceTests
         Assert.Equal(4, detail.Repos.Count);
         Assert.Equal(new[] { "DESIGN", "IMPL", "MIL", "SIL" }, detail.Repos.Select(repo => repo.RepoType));
         Assert.All(detail.Repos, repo => Assert.Equal(5, repo.Actions.Count));
-        Assert.All(detail.Repos, repo => Assert.All(repo.Actions, action => Assert.False(action.Enabled)));
+        Assert.All(detail.Repos, repo => Assert.All(
+            repo.Actions,
+            action => Assert.Equal(action.MatrixAllowed, action.Enabled)));
         Assert.Equal(2, detail.Repos[1].DirtyCount);
         Assert.False(detail.Repos[2].IsLocal);
         Assert.Equal(1, detail.Repos[3].Ahead);

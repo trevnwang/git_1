@@ -159,16 +159,15 @@ public sealed class RealWorkspaceSmokeTests
                 + $"launcher={Path.GetFileName(launcher.Calls[0].FileName)}");
         }
 
-        // 8) runRepoAction：M1 只读占位
+        // 8) runRepoAction：M2 已启用；PULL 成功或按矩阵被拒均合法（禁止 E_NOT_IMPLEMENTED）
         var actionResult = await DispatchAsync(
             router,
             "runRepoAction",
             new { componentId = component.ComponentId, repoType = "IMPL", action = "PULL" });
-        Assert.False(actionResult.Ok);
-        Assert.Contains(
-            actionResult.Error!.Code,
-            new[] { BridgeErrorCodes.NotImplemented, BridgeErrorCodes.ActionNotAllowed });
-        _output.WriteLine($"runRepoAction code={actionResult.Error.Code}");
+        Assert.True(
+            actionResult.Ok || actionResult.Error?.Code == BridgeErrorCodes.ActionNotAllowed,
+            actionResult.Error?.Code);
+        _output.WriteLine($"runRepoAction ok={actionResult.Ok} code={actionResult.Error?.Code}");
     }
 
     private static Task<CommandResult> DispatchAsync(

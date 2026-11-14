@@ -7,20 +7,32 @@ using System.Threading.Tasks;
 
 namespace MbdGitTool.Host.Services;
 
-/// <summary>git 只读调用结果。</summary>
+/// <summary>git 调用结果。</summary>
 public sealed record GitResult(int ExitCode, string Stdout, string Stderr)
 {
     public bool Success => ExitCode == 0;
 
+    /// <summary>超时（由 <see cref="GitCli"/> 杀进程树后返回），调用方映射 <c>E_TIMEOUT</c>。</summary>
+    public bool TimedOut { get; init; }
+
+    /// <summary>调用方取消（协作式取消），调用方按取消语义处理。</summary>
+    public bool Canceled { get; init; }
+
     public static GitResult Fail(string error) => new(-1, string.Empty, error);
+
+    public static GitResult Timeout() => new(-1, string.Empty, "git 调用超时") { TimedOut = true };
+
+    public static GitResult Cancelled() => new(-1, string.Empty, "git 调用已取消") { Canceled = true };
 
     public string TrimmedStdout => Stdout.Trim();
 }
 
 /// <summary>
-/// git 只读调用封装（SRS §12.2 / FR-SCAN-03）。
+/// git 调用封装（SRS §12.2 / FR-SCAN-03；M2 起同时承载单仓写操作）。
 /// <para><b>硬性约束</b>：参数一律走 <see cref="ProcessStartInfo.ArgumentList"/>（禁止 shell 字符串拼接）；</para>
-/// <para>固定加 <c>--no-optional-locks</c> 与 <c>-C &lt;path&gt;</c>，设置 <c>GIT_TERMINAL_PROMPT=0</c>，只读默认超时 20s。</para>
+/// <para>固定加 <c>--no-optional-locks</c> 与 <c>-C &lt;path&gt;</c>，设置 <c>GIT_TERMINAL_PROMPT=0</c>；</para>
+/// <para>默认超时 20s（只读探测）；写操作由调用方传更长超时（fetch/pull/push 120s，commit/checkout 60s）；</para>
+/// <para><b>凭据</b>：可选 <c>extraEnvironment</c> 注入（如 <c>GIT_CONFIG_COUNT/KEY/VALUE</c> 的 http.extraHeader），不对参数或日志输出 token。</para>
 /// </summary>
 public sealed class GitCli
 {
@@ -31,15 +43,19 @@ public sealed class GitCli
     public string GitExecutable { get; init; } = "git";
 
     /// <summary>
-    /// 执行一次 git 只读命令。方法永不抛异常：超时/取消/启动失败均返回失败结果（<see cref="GitResult.Success"/> = false）。
+    /// 执行一次 git 命令。方法永不抛异常：超时/取消/启动失败均返回失败结果（<see cref="GitResult.Success"/> = false）。
     /// </summary>
     /// <param name="workingDirectory">仓库路径（经 <c>-C</c> 传入，不进入 shell）。</param>
     /// <param name="arguments">子命令及参数（逐个元素加入 ArgumentList）。</param>
+    /// <param name="cancellationToken">协作式取消；取消后杀进程树并返回 <see cref="GitResult.Canceled"/>。</param>
+    /// <param name="timeout">本次调用超时；null = <see cref="DefaultTimeout"/>（20s）。</param>
+    /// <param name="extraEnvironment">额外环境变量（可空；凭据配置用，禁止写入日志/响应）。</param>
     public async Task<GitResult> RunAsync(
         string workingDirectory,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken = default,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        IReadOnlyDictionary<string, string>? extraEnvironment = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentNullException.ThrowIfNull(arguments);
@@ -68,6 +84,15 @@ public sealed class GitCli
         startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
         startInfo.Environment["GCM_INTERACTIVE"] = "never";
 
+        // 凭据等额外环境（值可能含 token，禁止记录/回显）。
+        if (extraEnvironment is not null)
+        {
+            foreach (var pair in extraEnvironment)
+            {
+                startInfo.Environment[pair.Key] = pair.Value;
+            }
+        }
+
         using var process = new Process { StartInfo = startInfo };
         try
         {
@@ -95,7 +120,7 @@ public sealed class GitCli
         {
             KillProcessTree(process);
             await DrainAsync(stdoutTask, stderrTask).ConfigureAwait(false);
-            return GitResult.Fail(cancellationToken.IsCancellationRequested ? "git 调用已取消" : "git 调用超时");
+            return cancellationToken.IsCancellationRequested ? GitResult.Cancelled() : GitResult.Timeout();
         }
 
         string stdout;
@@ -108,7 +133,7 @@ public sealed class GitCli
         catch (OperationCanceledException)
         {
             KillProcessTree(process);
-            return GitResult.Fail("git 调用已取消");
+            return cancellationToken.IsCancellationRequested ? GitResult.Cancelled() : GitResult.Timeout();
         }
 
         return new GitResult(process.ExitCode, stdout, stderr);

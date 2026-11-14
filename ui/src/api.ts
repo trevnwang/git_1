@@ -25,6 +25,7 @@ export interface RepoDto {
   behind: number
   dirtyCount: number
   untrackedCount: number
+  stagedCount?: number
   stashCount?: number
   isLocal: boolean
   localPath: string | null
@@ -90,6 +91,14 @@ export interface FreshnessDto {
   remoteStale: boolean
 }
 
+export interface CapabilitiesDto {
+  fileTree?: boolean
+  workspaceTree?: boolean
+  openPath?: boolean
+  repoActions?: boolean
+  ci?: boolean
+}
+
 export interface SnapshotDto {
   source: string
   workspaceRoot: string | null
@@ -100,6 +109,8 @@ export interface SnapshotDto {
   freshness?: FreshnessDto | null
   owner?: string | null
   giteaBaseUrl?: string | null
+  /** Host 能力开关（M2：repoActions=true）；UI 能力门禁的兜底来源（HostInfo 缺失时）。 */
+  capabilities?: CapabilitiesDto | null
 }
 
 export interface TreeNodeDto {
@@ -132,6 +143,7 @@ export interface RepoTreeDto {
   truncated?: boolean
   totalEntries?: number
   error?: string | null
+  errorCode?: string | null
 }
 
 export interface WorkspaceNodeDto {
@@ -167,7 +179,9 @@ export interface WorkspaceTreeDto {
   readAt?: string
   entries: WorkspaceNodeDto[]
   truncated?: boolean
+  totalEntries?: number
   error?: string | null
+  errorCode?: string | null
 }
 
 export interface CommitDto {
@@ -193,10 +207,28 @@ export interface OpenPathResultDto {
   message?: string
 }
 
+/** runRepoAction 参数（契约：{ componentId, repoType, action, args }）。 */
+export interface RepoActionArgs {
+  branch?: string
+  tag?: string
+  message?: string
+  /** 二次确认后重试时置 true（Host 返回 E_CONFIRM_REQUIRED 时）。 */
+  confirm?: boolean
+}
+
+/** runRepoAction 成功响应（M2：Host 返回执行结果；M1 仍拒绝 E_NOT_IMPLEMENTED）。 */
 export interface RepoActionResultDto {
   jobId?: string
   accepted: boolean
+  action?: string
+  componentId?: string
+  repoType?: string
   state?: string
+  preHead?: string
+  postHead?: string
+  branch?: string
+  output?: string
+  durationMs?: number
   errorCode?: string
   message?: string
 }
@@ -238,7 +270,7 @@ export const TIMEOUTS: Record<RequestMethod, number> = {
   getRepoTree: 10_000,
   getWorkspaceTree: 10_000,
   openPath: 8_000,
-  runRepoAction: 5_000,
+  runRepoAction: 120_000,
   getCiStatus: 2_000,
   getHostInfo: 2_000,
 }
@@ -591,6 +623,7 @@ export function normalizeSnapshot(value: unknown): SnapshotDto | null {
 
   const countsRecord = asRecord(prop(record, 'counts'))
   const freshnessRecord = asRecord(prop(record, 'freshness'))
+  const capabilitiesRecord = asRecord(prop(record, 'capabilities'))
 
   return {
     source,
@@ -599,6 +632,17 @@ export function normalizeSnapshot(value: unknown): SnapshotDto | null {
     generatedAt: readString(record, 'generatedAt') ?? '',
     owner: readNullableString(record, 'owner'),
     giteaBaseUrl: readNullableString(record, 'giteaBaseUrl'),
+    capabilities: capabilitiesRecord
+      ? {
+          fileTree: prop(capabilitiesRecord, 'fileTree') === undefined ? undefined : readBoolean(capabilitiesRecord, 'fileTree'),
+          workspaceTree:
+            prop(capabilitiesRecord, 'workspaceTree') === undefined ? undefined : readBoolean(capabilitiesRecord, 'workspaceTree'),
+          openPath: prop(capabilitiesRecord, 'openPath') === undefined ? undefined : readBoolean(capabilitiesRecord, 'openPath'),
+          repoActions:
+            prop(capabilitiesRecord, 'repoActions') === undefined ? undefined : readBoolean(capabilitiesRecord, 'repoActions'),
+          ci: prop(capabilitiesRecord, 'ci') === undefined ? undefined : readBoolean(capabilitiesRecord, 'ci'),
+        }
+      : null,
     counts: countsRecord
       ? {
           components: readNumber(countsRecord, 'components'),
@@ -670,6 +714,7 @@ export function normalizeRepo(value: unknown): RepoDto | null {
     behind: readNumber(record, 'behind'),
     dirtyCount: readNumber(record, 'dirtyCount'),
     untrackedCount: readNumber(record, 'untrackedCount'),
+    stagedCount: readNumber(record, 'stagedCount'),
     stashCount: readNumber(record, 'stashCount'),
     isLocal: readBoolean(record, 'isLocal'),
     localPath: readNullableString(record, 'localPath'),
@@ -727,6 +772,7 @@ export function normalizeRepoTree(value: unknown): RepoTreeDto {
     truncated: readBoolean(record, 'truncated'),
     totalEntries: readNumber(record, 'totalEntries'),
     error: readNullableString(record, 'error'),
+    errorCode: readNullableString(record, 'errorCode'),
   }
 }
 
@@ -782,7 +828,9 @@ export function normalizeWorkspaceTree(value: unknown): WorkspaceTreeDto {
     generatedAt: readString(record, 'generatedAt'),
     readAt: readString(record, 'readAt'),
     truncated: readBoolean(record, 'truncated'),
+    totalEntries: prop(record, 'totalEntries') === undefined ? undefined : readNumber(record, 'totalEntries'),
     error: readNullableString(record, 'error'),
+    errorCode: readNullableString(record, 'errorCode'),
     entries: entries
       .map(normalizeWorkspaceNode)
       .filter((node): node is WorkspaceNodeDto => node !== null),
@@ -852,8 +900,17 @@ export function normalizeRepoActionResult(value: unknown): RepoActionResultDto {
   return {
     jobId: readString(record, 'jobId'),
     accepted: readBoolean(record, 'accepted'),
+    action: readString(record, 'action')?.toUpperCase(),
+    componentId: readString(record, 'componentId'),
+    repoType: readString(record, 'repoType')?.toUpperCase(),
     state: readString(record, 'state'),
-    errorCode: readString(record, 'errorCode'),
+    preHead: readString(record, 'preHead'),
+    postHead: readString(record, 'postHead'),
+    branch: readString(record, 'branch'),
+    output: readString(record, 'output'),
+    durationMs: prop(record, 'durationMs') === undefined ? undefined : readNumber(record, 'durationMs'),
+    // Host 错误码字段既可能是 errorCode，也可能是桥接层的 code；两者都保留以便完整映射。
+    errorCode: readString(record, 'errorCode') ?? readString(record, 'code'),
     message: readString(record, 'message'),
   }
 }
@@ -935,7 +992,11 @@ export interface RunRepoActionParams {
   componentId: string
   repoType: string
   action: string
-  args?: Record<string, unknown>
+  args?: RepoActionArgs
+}
+
+export interface ComponentDetailParams {
+  componentId: string
 }
 
 export interface WorkspaceTreeParams {
@@ -977,8 +1038,21 @@ export const api = {
   async openPath(params: OpenPathParams): Promise<OpenPathResultDto> {
     return normalizeOpenPath(await request<unknown>('openPath', params))
   },
+  async getComponentDetail(params: ComponentDetailParams): Promise<ComponentDto> {
+    const component = normalizeComponent(await request<unknown>('getComponentDetail', { componentId: params.componentId }))
+    if (!component) throw new HostError('E_INVALID_RESPONSE', 'getComponentDetail 响应无法识别')
+    return component
+  },
   async runRepoAction(params: RunRepoActionParams): Promise<RepoActionResultDto> {
-    return normalizeRepoActionResult(await request<unknown>('runRepoAction', params))
+    // 契约严格按 { componentId, repoType, action, args } 透传；args 始终携带（缺省空对象）。
+    return normalizeRepoActionResult(
+      await request<unknown>('runRepoAction', {
+        componentId: params.componentId,
+        repoType: params.repoType,
+        action: params.action,
+        args: params.args ?? {},
+      }),
+    )
   },
   async getCiStatus(componentId: string): Promise<CiStatusDto> {
     return normalizeCiStatus(await request<unknown>('getCiStatus', { componentId }))

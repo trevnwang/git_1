@@ -3,6 +3,7 @@
  * 组件模板禁止散落状态映射，统一走这里。
  */
 import type { ComponentDto, CommitDto, RepoDto, TreeNodeDto, WorkspaceNodeDto } from './api'
+import { HostError, toErrorMessage } from './api'
 import type {
   ActionAvailability,
   CommitVm,
@@ -104,6 +105,7 @@ export function emptyRepoVm(repoType: RepoType): RepoVm {
     behind: 0,
     dirtyCount: 0,
     untrackedCount: 0,
+    stagedCount: 0,
     stashCount: 0,
     isLocal: false,
     localPath: null,
@@ -156,6 +158,7 @@ export function mapRepo(dto: RepoDto, fallbackName: string): RepoVm {
     behind: dto.behind ?? 0,
     dirtyCount: dto.dirtyCount ?? 0,
     untrackedCount: dto.untrackedCount ?? 0,
+  stagedCount: dto.stagedCount ?? 0,
     stashCount: dto.stashCount ?? 0,
     isLocal: Boolean(dto.isLocal),
     localPath: dto.localPath ?? null,
@@ -540,12 +543,13 @@ const MATRIX: Record<string, Record<RepoAction, Cell>> = {
     COMMIT: 'MISSING：仓库未克隆',
     PUSH: 'MISSING：仓库未克隆',
   },
+  // SRS §7.6：UNKNOWN 仍允许 FETCH（重试扫描/远程探测），其余写操作禁用。
   UNKNOWN: {
-    PULL: '状态未知：数据过期，请先刷新/重试扫描',
-    FETCH: '状态未知：数据过期，请先刷新/重试扫描',
-    CHKOUT: '状态未知：数据过期，请先刷新/重试扫描',
-    COMMIT: '状态未知：数据过期，请先刷新/重试扫描',
-    PUSH: '状态未知：数据过期，请先刷新/重试扫描',
+    PULL: '状态未知：数据过期，请先 FETCH / 重试扫描',
+    FETCH: 'y',
+    CHKOUT: '状态未知：数据过期，请先 FETCH / 重试扫描',
+    COMMIT: '状态未知：数据过期，请先 FETCH / 重试扫描',
+    PUSH: '状态未知：数据过期，请先 FETCH / 重试扫描',
   },
 }
 
@@ -565,6 +569,112 @@ export const ACTION_TITLE: Record<RepoAction, string> = {
   PUSH: '推送当前分支',
 }
 
+// ───────────────────────────── runRepoAction 错误码映射（M2 契约） ─────────────────────────────
+
+export interface ActionErrorInfo {
+  code: string
+  /** 中文标题（错误类别）。 */
+  message: string
+  /** 建议的下一步（显示在 Toast 第二段）。 */
+  hint: string
+  /** Host 返回的原始明细（可能为空）。 */
+  detail: string
+  retryable: boolean
+}
+
+interface ActionErrorMeta {
+  message: string
+  hint: string
+  retryable?: boolean
+}
+
+const ACTION_ERROR_MAP: Record<string, ActionErrorMeta> = {
+  E_CONFIRM_REQUIRED: {
+    message: '该操作需要二次确认',
+    hint: '确认后将携带 confirm=true 重试（只重试一次）',
+  },
+  E_DIRTY_WORKTREE: {
+    message: '工作区存在未提交改动',
+    hint: '请先 COMMIT 或 stash 后再执行',
+  },
+  E_NOTHING_TO_COMMIT: {
+    message: '没有可提交的改动（staged 为空）',
+    hint: '先暂存改动，再执行 COMMIT',
+  },
+  E_GIT_NON_FF: {
+    message: '非快进合并被拒绝',
+    hint: '请先 FETCH，再手动 Merge/Rebase；PULL 仅支持 --ff-only',
+  },
+  E_GIT_FAILED: {
+    message: 'Git 执行失败',
+    hint: '查看 Host 日志后重试（仓库未做破坏性改动）',
+    retryable: true,
+  },
+  E_INVALID_ARGUMENT: {
+    message: '参数无效',
+    hint: '请检查分支/Tag 名称或提交信息后重试',
+  },
+  E_TIMEOUT: {
+    message: '等待 Host 超时，结果未知',
+    hint: '请先刷新查看仓库实际状态，再决定是否重试',
+    retryable: true,
+  },
+  E_NOT_IMPLEMENTED: {
+    message: 'M1 只读 / M2 需 Host 支持',
+    hint: '当前构建未开放写操作（Host 返回 E_NOT_IMPLEMENTED）',
+  },
+  E_NO_HOST: {
+    message: '未连接 Host',
+    hint: '请通过桌面宿主运行，浏览器 Mock 不执行写操作',
+  },
+  E_ACTION_NOT_ALLOWED: {
+    message: '当前仓库状态不允许该操作',
+    hint: '请按状态矩阵先修复仓库状态（如先提交/先 PULL）',
+  },
+  E_BUSY: {
+    message: '仓库被其他 git 进程占用',
+    hint: '关闭外部 git 操作后重试；禁止删除 .git/index.lock',
+    retryable: true,
+  },
+  E_CONCURRENT_CHANGE: {
+    message: '仓库状态在预检后发生变化',
+    hint: '请刷新后重试',
+    retryable: true,
+  },
+  E_OFFLINE: {
+    message: '网络不可达',
+    hint: '检查网络/代理后重试',
+    retryable: true,
+  },
+  E_REPO_NOT_LOCAL: {
+    message: '仓库未克隆到本地',
+    hint: '请先 Clone 该仓',
+  },
+  E_ACCESS_DENIED: {
+    message: '访问被拒绝',
+    hint: '检查路径/文件权限或以合适身份运行',
+  },
+  E_INTERNAL: {
+    message: 'Host 内部错误',
+    hint: '请重试；若持续失败请导出诊断日志',
+    retryable: true,
+  },
+}
+
+/** 把 runRepoAction 的任意异常映射为「错误码 + 中文消息 + 下一步」；未知码保留原样。 */
+export function actionErrorInfo(error: unknown): ActionErrorInfo {
+  const code = error instanceof HostError && error.code ? error.code : 'E_UNKNOWN'
+  const raw = error instanceof HostError ? error.message : toErrorMessage(error)
+  const meta = ACTION_ERROR_MAP[code]
+  return {
+    code,
+    message: meta?.message ?? (raw || '操作失败'),
+    hint: meta?.hint ?? '',
+    detail: raw && raw !== meta?.message ? raw : '',
+    retryable: meta?.retryable ?? false,
+  }
+}
+
 /** 无聚焦仓 / 仓缺失时的统一禁用原因（FR-ACT-01 / AC-UI-08）。 */
 export const NO_REPO_REASON = '请先在文件树中选择仓库'
 
@@ -581,18 +691,18 @@ export function actionAvailability(
   }
   const state = repo.state.toUpperCase()
   const row = MATRIX[state]
-  const normalizedState = state === 'UNKNOWN' ? 'UNKNOWN' : ''
   for (const action of REPO_ACTIONS) {
     if (pending) {
       result[action] = { enabled: false, reason: '该仓有操作进行中', confirm: false }
       continue
     }
-    if (normalizedState) {
-      result[action] = {
-        enabled: false,
-        reason: row?.[action] && row[action] !== 'y' && row[action] !== 'c' ? String(row[action]) : '状态未知：数据过期，请先刷新/重试扫描',
-        confirm: false,
-      }
+    // FR-ACT-03：COMMIT 仅在有已暂存改动时可用（Host 不再自动 git add -A）。
+    if (
+      action === 'COMMIT' &&
+      repo.stagedCount <= 0 &&
+      (row?.[action] === 'y' || row?.[action] === 'c')
+    ) {
+      result[action] = { enabled: false, reason: '无已暂存改动：请先 git add 暂存后提交', confirm: false }
       continue
     }
     const cell = row?.[action]

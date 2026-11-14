@@ -29,6 +29,9 @@ public static class BridgeErrorCodes
     public const string Submodule = "E_SUBMODULE";
     public const string LaunchFailed = "E_LAUNCH_FAILED";
     public const string GitFailed = "E_GIT_FAILED";
+    public const string GitNonFastForward = "E_GIT_NON_FF";
+    public const string DirtyWorktree = "E_DIRTY_WORKTREE";
+    public const string NothingToCommit = "E_NOTHING_TO_COMMIT";
     public const string ActionNotAllowed = "E_ACTION_NOT_ALLOWED";
     public const string NotImplemented = "E_NOT_IMPLEMENTED";
     public const string CiDisabled = "E_CI_DISABLED";

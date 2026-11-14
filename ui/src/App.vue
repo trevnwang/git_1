@@ -13,6 +13,8 @@ import ToastHost from './components/overlays/ToastHost.vue'
 import DrawerHost from './components/overlays/DrawerHost.vue'
 import ModalHost from './components/overlays/ModalHost.vue'
 import ConfirmDialog from './components/overlays/ConfirmDialog.vue'
+import ActionDialog from './components/overlays/ActionDialog.vue'
+import ComponentDrawer from './components/overlays/ComponentDrawer.vue'
 import ContextMenu from './components/overlays/ContextMenu.vue'
 import { useWorkbench } from './stores/workbench'
 import { REPO_ACTIONS } from './types/workbench'
@@ -85,6 +87,8 @@ onBeforeUnmount(() => {
     <ToastHost />
     <DrawerHost />
     <ModalHost />
+    <ComponentDrawer />
+    <ActionDialog />
     <ContextMenu />
     <ConfirmDialog />
   </div>

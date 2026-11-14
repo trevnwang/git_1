@@ -57,6 +57,8 @@ public sealed record RepoFacts
 
     public int UntrackedCount { get; init; }
 
+    public int StagedCount { get; init; }
+
     public bool Stashed { get; init; }
 
     /// <summary>index 存在未解决冲突（git ls-files -u 非空）。</summary>

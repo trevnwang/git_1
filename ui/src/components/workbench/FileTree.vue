@@ -237,7 +237,9 @@ onMounted(() => {
             @contextmenu="onContextMenu($event, row)"
           >
             <template v-if="row.synthetic">
-              <span class="synthetic-text">{{ row.synthetic === 'loading' ? '加载中…' : '（空）' }}</span>
+              <span class="synthetic-text" :class="{ error: row.synthetic === 'empty' }">{{
+                row.synthetic === 'loading' ? '加载中…' : '（空目录）'
+              }}</span>
             </template>
             <template v-else-if="row.node">
               <button
@@ -260,7 +262,12 @@ onMounted(() => {
                 :class="`tone-${gitStatusTone(row.node.gitStatus)}`"
                 :title="row.node.gitStatus"
               >{{ gitStatusLetter(row.node.gitStatus) }}</span>
-              <span v-else-if="row.node.error" class="git-status tone-danger" :title="row.node.error">!</span>
+              <span
+                v-else-if="row.node.error"
+                class="git-status tone-danger"
+                data-testid="tree-node-error"
+                :title="`目录读取错误：${row.node.error}`"
+              >!</span>
             </template>
           </div>
         </div>
@@ -323,4 +330,5 @@ onMounted(() => {
 .tone-success { color: var(--st-success-fg); }
 .tone-danger { color: var(--st-danger-fg); }
 .synthetic-text { color: var(--text-2); font-size: 11px; }
+.synthetic-text.error { color: var(--st-danger-fg); }
 </style>

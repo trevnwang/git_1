@@ -170,14 +170,14 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_U
               <h3>工作区</h3>
               <div class="field"><label>本地根目录</label><input disabled :value="state.workspaceRoot || '（Host 未返回工作区根目录）'" /></div>
               <div class="field"><label>扫描频率</label><input disabled value="指纹 15s / 深扫变化触发" /></div>
-              <p class="hint">M1 接入真实目录扫描与首扫三阶段进度。</p>
+              <p class="hint">M1 已接入真实目录扫描；首扫三阶段进度在 M2/M3 收口。</p>
             </section>
             <section id="settings-auth" class="settings-section">
               <h3>认证</h3>
               <div class="field"><label>Gitea 地址</label><input disabled :value="state.giteaBaseUrl || '（Host 未返回）'" /></div>
               <div class="field"><label>组织</label><input disabled :value="state.owner || '（未配置）'" /></div>
               <div class="field"><label>Token 状态</label><input disabled value="已注入（环境变量/凭据管理器；值不展示）" /></div>
-              <p class="hint">M1 接入真实连接测试与 PAT 校验；Token 不落配置文件。</p>
+              <p class="hint">M2 已启用单仓写操作（PULL/FETCH/CHKOUT/COMMIT/PUSH）；Token 仅经环境变量/凭据引用，不落配置文件。</p>
             </section>
             <section id="settings-safety" class="settings-section">
               <h3>操作与安全</h3>
@@ -244,7 +244,7 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_U
           <div class="kv"><span>工作区</span><span class="mono">{{ state.workspaceRoot || '—' }}</span></div>
           <div class="kv"><span>组件 / 仓</span><span>{{ state.counts.components }} / {{ state.counts.repos }}</span></div>
           <div class="kv"><span>当前聚焦仓</span><span class="mono">{{ scope }}</span></div>
-          <p class="hint">M1 只读：写操作（PULL/FETCH/CHKOUT/COMMIT/PUSH）在 M2 接入；文件树与文件夹视图只读。</p>
+          <p class="hint">M2：单仓写操作（PULL/FETCH/CHKOUT/COMMIT/PUSH）已启用；文件树/文件夹视图只读；批量写操作与 CI 在 M3/v2 接入。</p>
         </div>
       </div>
 

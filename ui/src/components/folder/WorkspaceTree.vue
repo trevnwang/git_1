@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useVirtualRows } from '../../composables/useVirtualRows'
 import { useWorkbench } from '../../stores/workbench'
-import { formatAgo, REPO_LABEL } from '../../viewmodel'
+import { formatAgo, REPO_LABEL, REPO_SHORT } from '../../viewmodel'
 import type { WorkspaceNodeVm } from '../../types/workbench'
 import EmptyState from '../common/EmptyState.vue'
 import StateChip from '../common/StateChip.vue'
@@ -282,21 +282,42 @@ onBeforeUnmount(() => window.removeEventListener('resize', measure))
               <span v-if="row.repo" class="repo-type">{{ REPO_LABEL[row.node.repoType ?? 'IMPL'] }}</span>
               <span class="ws-label truncate" :title="row.node.path || row.node.label">{{ row.node.label }}</span>
               <span v-if="row.loading" class="loading">加载中…</span>
-              <span v-else-if="row.node.state && (row.node.kind === 'COMPONENT' || row.node.kind === 'REPO')" class="ws-state">
-                <StateChip :state="row.node.state" compact />
-                <span v-if="row.node.kind === 'REPO' && row.node.state === 'MISSING'" class="missing-mark">未克隆</span>
-                <span v-else-if="row.node.kind === 'REPO'" class="repo-meta muted">
-                  {{ row.node.branch ?? '—' }}<template v-if="row.node.ahead"> ↑{{ row.node.ahead }}</template><template v-if="row.node.behind"> ↓{{ row.node.behind }}</template>
+              <template v-else>
+                <span v-if="row.node.state && (row.node.kind === 'COMPONENT' || row.node.kind === 'REPO')" class="ws-state">
+                  <StateChip :state="row.node.state" compact />
+                  <span v-if="row.node.kind === 'REPO' && row.node.state === 'MISSING'" class="missing-mark">未克隆</span>
+                  <span v-else-if="row.node.kind === 'REPO'" class="repo-meta muted">
+                    {{ row.node.branch ?? '—' }}<template v-if="row.node.ahead"> ↑{{ row.node.ahead }}</template><template v-if="row.node.behind"> ↓{{ row.node.behind }}</template>
+                  </span>
                 </span>
-              </span>
-              <span v-else-if="row.node.kind === 'COMPONENT'" class="comp-meta">
-                <span v-for="item in row.node.repos" :key="item.key" class="mini-dot" :class="`tone-${item.tone}`" :title="`${repoLabel(item)}：${item.state}`" />
-              </span>
-              <span v-else-if="displayState(row.node)" class="git-letter">{{ displayState(row.node).slice(0, 1) }}</span>
+                <!-- 组件行四仓 mini chips（D/I/M/S + 状态色），布局保持单行 -->
+                <span v-if="row.node.kind === 'COMPONENT'" class="comp-meta" data-testid="folder-component-chips">
+                  <span
+                    v-for="item in row.node.repos"
+                    :key="item.key"
+                    class="mini-chip"
+                    :class="`tone-${item.tone}`"
+                    :title="`${repoLabel(item)}：${item.state}（${item.branch ?? '—'}）`"
+                    data-testid="folder-repo-chip"
+                  >
+                    <span class="mini-dot" aria-hidden="true" />{{ REPO_SHORT[item.repoType ?? 'IMPL'] }}
+                  </span>
+                </span>
+                <span v-else-if="displayState(row.node)" class="git-letter">{{ displayState(row.node).slice(0, 1) }}</span>
+              </template>
+              <span v-if="row.node.error" class="node-error" data-testid="workspace-node-error" :title="row.node.error">!</span>
               <span v-if="row.node.kind === 'FILE'" class="muted file-time">{{ formatAgo(row.node.mtime, state.now) }}</span>
             </div>
           </div>
         </div>
+      </div>
+      <div
+        v-if="state.folder.error && state.folder.status !== 'error'"
+        class="ws-banner ws-error"
+        data-testid="workspace-error-banner"
+      >{{ state.folder.errorCode }} · {{ state.folder.error }}</div>
+      <div v-if="state.folder.truncated" class="ws-banner ws-truncated" data-testid="workspace-truncated">
+        已截断：仅显示前 {{ state.folder.entries.length }} 项<template v-if="state.folder.totalEntries > state.folder.entries.length">（共 {{ state.folder.totalEntries }} 项）</template>
       </div>
     </div>
   </section>
@@ -385,15 +406,40 @@ onBeforeUnmount(() => window.removeEventListener('resize', measure))
 .repo-meta { font-size: 10px; font-family: ui-monospace, Consolas, monospace; }
 .missing-mark { font-size: 10px; color: var(--st-neutral-fg); border: 1px dashed var(--st-neutral-bd); border-radius: 4px; padding: 0 3px; }
 .comp-meta { display: inline-flex; gap: 3px; flex: 0 0 auto; }
-.mini-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--rail); }
-.mini-dot.tone-success { background: var(--st-success-fg); }
-.mini-dot.tone-warning { background: var(--st-warning-fg); }
-.mini-dot.tone-info { background: var(--st-info-fg); }
-.mini-dot.tone-purple { background: var(--st-purple-fg); }
-.mini-dot.tone-cyan { background: var(--st-cyan-fg); }
-.mini-dot.tone-danger { background: var(--st-danger-fg); }
-.mini-dot.tone-neutral { background: var(--st-neutral-bd); }
-.mini-dot.tone-hatched { background: var(--st-unknown-fg); }
+.mini-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 14px;
+  padding: 0 3px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-2);
+}
+.mini-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.mini-chip.tone-success { color: var(--st-success-fg); background: var(--st-success-bg); border-color: var(--st-success-bd); }
+.mini-chip.tone-warning { color: var(--st-warning-fg); background: var(--st-warning-bg); border-color: var(--st-warning-bd); }
+.mini-chip.tone-info { color: var(--st-info-fg); background: var(--st-info-bg); border-color: var(--st-info-bd); }
+.mini-chip.tone-purple { color: var(--st-purple-fg); background: var(--st-purple-bg); border-color: var(--st-purple-bd); }
+.mini-chip.tone-cyan { color: var(--st-cyan-fg); background: var(--st-cyan-bg); border-color: var(--st-cyan-bd); }
+.mini-chip.tone-danger { color: var(--st-danger-fg); background: var(--st-danger-bg); border-color: var(--st-danger-bd); }
+.mini-chip.tone-neutral { color: var(--st-neutral-fg); background: var(--st-neutral-bg); border-style: dashed; border-color: var(--st-neutral-bd); }
+.mini-chip.tone-hatched { color: var(--st-unknown-fg); background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--border) 4px 8px); border-color: var(--st-neutral-bd); }
+.node-error { font-family: ui-monospace, Consolas, monospace; font-size: 10px; font-weight: 700; color: var(--st-danger-fg); flex: 0 0 auto; }
+.ws-banner {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font-size: 10px;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-banner.ws-error { border-top: 1px solid var(--st-danger-bd); background: var(--st-danger-bg); color: var(--st-danger-fg); }
+.ws-banner.ws-truncated { border-top: 1px solid var(--st-warning-bd); background: var(--st-warning-bg); color: var(--st-warning-fg); }
 .git-letter { font-family: ui-monospace, Consolas, monospace; font-size: 10px; font-weight: 700; color: var(--st-warning-fg); }
 .file-time { font-size: 9px; }
 .loading { font-size: 10px; color: var(--text-2); }

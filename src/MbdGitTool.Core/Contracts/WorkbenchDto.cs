@@ -42,7 +42,7 @@ public sealed record ComponentRepoDto(
     IReadOnlyList<RepoActionAvailabilityDto> Actions,
     CiHintDto? Ci);
 
-/// <summary>单仓操作可用性（M1 enabled 恒 false，matrixAllowed 取 spec §6.2 矩阵）。</summary>
+/// <summary>单仓操作可用性（M2：enabled = matrixAllowed；矩阵取 spec §6.2 / SRS §7.6）。</summary>
 public sealed record RepoActionAvailabilityDto(
     string Action,
     bool Enabled,

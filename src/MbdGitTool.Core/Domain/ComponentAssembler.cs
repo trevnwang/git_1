@@ -304,6 +304,7 @@ public static class ComponentAssembler
             Behind: evaluation.Behind,
             DirtyCount: input.Facts.DirtyCount,
             UntrackedCount: input.Facts.UntrackedCount,
+            StagedCount: input.Facts.StagedCount,
             IsLocal: input.Facts.Exists,
             LocalPath: input.Facts.LocalPath,
             Flags: evaluation.Flags.ToWireNames(),

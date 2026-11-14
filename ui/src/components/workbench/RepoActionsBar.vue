@@ -20,7 +20,11 @@ function label(action: string): string {
 function title(action: (typeof REPO_ACTIONS)[number]): string {
   const cell = availability.value[action]
   if (cell.enabled) {
-    return cell.confirm ? `${ACTION_TITLE[action]}（M2 需二次确认）` : ACTION_TITLE[action]
+    const base = ACTION_TITLE[action]
+    const scope = repo.value?.repoName || repo.value?.repoType || ''
+    if (cell.confirm) return `${base} · ${scope}（执行前弹出确认/输入对话框）`
+    if (action === 'FETCH') return `${base} · ${scope}（免确认，直接执行）`
+    return `${base} · ${scope}`
   }
   return cell.reason
 }
@@ -37,6 +41,7 @@ function onClick(action: (typeof REPO_ACTIONS)[number]): void {
     :data-action-scope="scopeText"
     :aria-label="`单仓操作：${scope}`"
     :aria-busy="busy"
+    :data-pending="state.action.pending ?? ''"
     role="toolbar"
   >
     <button

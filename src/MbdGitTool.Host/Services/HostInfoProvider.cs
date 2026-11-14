@@ -23,7 +23,7 @@ public sealed class HostInfoProvider
             FileTree: true,
             WorkspaceTree: true,
             OpenPath: true,
-            RepoActions: false, // M1 只读
+            RepoActions: true,  // M2：单仓操作已接入
             Ci: false,          // v1 Mock 占位
             ComponentDetail: true),
         Limits: new HostLimitsDto(

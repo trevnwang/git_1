@@ -38,7 +38,7 @@ public sealed class HostCommandRouter : IDisposable
             ["getRepoTree"] = TimeSpan.FromSeconds(10),
             ["getWorkspaceTree"] = TimeSpan.FromSeconds(10),
             ["openPath"] = TimeSpan.FromSeconds(8),
-            ["runRepoAction"] = TimeSpan.FromSeconds(5),
+            ["runRepoAction"] = TimeSpan.FromSeconds(120),
             ["getCiStatus"] = TimeSpan.FromSeconds(2),
             ["getHostInfo"] = TimeSpan.FromSeconds(2)
         };
@@ -49,7 +49,7 @@ public sealed class HostCommandRouter : IDisposable
     private readonly FileTreeReader _reader = new();
     private readonly GitStatusIndex _gitStatus;
     private readonly CommitsService _commits;
-    private readonly RepoActionService _actions = new();
+    private readonly RepoActionService _actions;
     private readonly ComponentDetailService _componentDetail;
     private readonly RepoDetailService _repoDetail;
     private readonly CiStatusService _ci;
@@ -67,9 +67,13 @@ public sealed class HostCommandRouter : IDisposable
         IProcessLauncher? launcher = null,
         string? webView2Version = null)
     {
+        ArgumentNullException.ThrowIfNull(config);
         _snapshots = snapshots ?? throw new ArgumentNullException(nameof(snapshots));
         _gitStatus = new GitStatusIndex();
         _commits = new CommitsService();
+
+        // 单仓操作（M2）：网络类动作凭据由 token 注入（仅环境变量，不进入参数/日志/响应）。
+        _actions = new RepoActionService(giteaToken: _snapshots.Config.GiteaToken);
 
         Func<SnapshotIndex> indexProvider = () => _snapshots.Index;
         _componentDetail = new ComponentDetailService(indexProvider, _actions);
@@ -237,7 +241,8 @@ public sealed class HostCommandRouter : IDisposable
             {
                 await EnsureSnapshotAsync(cancellationToken).ConfigureAwait(false);
                 var parsed = ParseParams<RunRepoActionParams>(parameters);
-                return await RunIoAsync(() => _actions.Run(parsed, _snapshots.Index), cancellationToken)
+                // M2：真实单仓操作（异步执行，不走 _ioGate，避免长任务占满 FS/git 并发闸）。
+                return await _actions.RunAsync(parsed, _snapshots.Index, cancellationToken)
                     .ConfigureAwait(false);
             }
 

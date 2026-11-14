@@ -201,6 +201,7 @@ function selectRepoFacet(event: Event): void {
             :checked="state.checkedIds.includes(component.id)"
             :select-mode="state.selectMode"
             @select="w.selectComponent(component.id)"
+            @detail="w.openComponentDrawer(component.id)"
             @check="w.toggleChecked(component.id)"
             @quick="quick(component.id, $event)"
             @contextmenu="w.cardContextMenu($event, component.id)"

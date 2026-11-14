@@ -1,18 +1,66 @@
 <script setup lang="ts">
+import { nextTick, ref, watch } from 'vue'
 import { useWorkbench } from '../../stores/workbench'
 
 const w = useWorkbench()
 const state = w.state
+const dialogEl = ref<HTMLElement | null>(null)
+let previousFocus: HTMLElement | null = null
+
+watch(
+  () => state.overlays.confirm,
+  (value) => {
+    if (value) {
+      previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      void nextTick(() => {
+        dialogEl.value?.querySelector<HTMLElement>('.confirm-actions .btn.primary')?.focus()
+      })
+    } else if (previousFocus) {
+      previousFocus.focus?.()
+      previousFocus = null
+    }
+  },
+)
+
+function cancel(): void {
+  const pending = state.overlays.confirm
+  w.closeConfirm()
+  pending?.onCancel?.()
+}
+
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    cancel()
+    return
+  }
+  if (event.key !== 'Tab') return
+  const nodes = [...(dialogEl.value?.querySelectorAll<HTMLElement>('button') ?? [])].filter(
+    (node) => !node.hasAttribute('disabled'),
+  )
+  if (nodes.length === 0) return
+  const first = nodes[0]
+  const last = nodes[nodes.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
 </script>
 
 <template>
-  <div v-if="state.overlays.confirm" class="overlay" @click.self="w.closeConfirm()">
+  <div v-if="state.overlays.confirm" class="overlay" @click.self="cancel">
     <section
+      ref="dialogEl"
       class="confirm"
       data-testid="confirm-dialog"
       role="alertdialog"
       aria-modal="true"
       :aria-label="state.overlays.confirm.title"
+      @keydown="onKeydown"
     >
       <header class="confirm-head">
         <span class="confirm-title">{{ state.overlays.confirm.title }}</span>
@@ -22,7 +70,7 @@ const state = w.state
         <p v-if="state.overlays.confirm.detail" class="confirm-detail mono">{{ state.overlays.confirm.detail }}</p>
       </div>
       <footer class="confirm-actions">
-        <button type="button" class="btn" autofocus @click="w.closeConfirm()">取消</button>
+        <button type="button" class="btn" autofocus @click="cancel">取消</button>
         <button
           type="button"
           class="btn"

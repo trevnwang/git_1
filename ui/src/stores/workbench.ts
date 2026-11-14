@@ -11,11 +11,12 @@ import {
   isMethodUnavailable,
   toErrorMessage,
 } from '../api'
-import type { CommitDto, HostInfoDto, RepoTreeDto, SnapshotDto, WorkspaceTreeDto } from '../api'
+import type { CommitDto, HostInfoDto, RepoActionArgs, RepoTreeDto, SnapshotDto, WorkspaceTreeDto } from '../api'
 import * as mock from '../mocks/workbenchMock'
 import { REPO_ACTIONS } from '../types/workbench'
 import {
   actionAvailability,
+  actionErrorInfo,
   emptyComponentVm,
   filterComponents,
   formatAgo,
@@ -28,11 +29,16 @@ import {
   mapWorkspaceEntries,
   pickDefaultRepo,
   repoOf,
+  shortSha,
   sortComponents,
   sortTreeNodes,
 } from '../viewmodel'
 import type {
+  ActionAvailability,
+  ActionDialogPayload,
+  ActionDialogVm,
   CommitVm,
+  ComponentDetailState,
   ComponentVm,
   ConfirmVm,
   DrawerKind,
@@ -88,6 +94,8 @@ interface WorkbenchState {
   fallbackReason: string
   counts: { components: number; repos: number; missingRepos: number }
   freshness: { localAt: string | null; remoteAt: string | null; localStale: boolean; remoteStale: boolean }
+  /** SnapshotDto.capabilities（HostInfo 缺失时的能力兜底）。 */
+  capabilities: { repoActions: boolean | null }
   components: ComponentVm[]
   search: string
   sortBy: 'severity' | 'id' | 'activity'
@@ -116,11 +124,16 @@ interface WorkbenchState {
   theme: 'system' | 'light' | 'dark'
   overlays: {
     drawer: DrawerKind | null
+    /** 组件详情抽屉：非 null 时为当前展示的组件 ID。 */
+    componentDrawer: string | null
     modal: ModalKind | null
     filterOpen: boolean
     confirm: ConfirmVm | null
+    /** M2 五键动作对话框（COMMIT 输入 / CHKOUT 选择 / 通用确认）。 */
+    actionDialog: ActionDialogVm | null
     contextMenu: ContextMenuState | null
   }
+  componentDetail: ComponentDetailState
   toasts: ToastVm[]
   hostInfo: HostInfoDto | null
   now: number
@@ -156,9 +169,15 @@ function emptyFolder(): FolderTreeState {
     loadingPaths: new Set<string>(),
     error: '',
     errorCode: '',
+    truncated: false,
+    totalEntries: 0,
     fallback: false,
     at: 0,
   }
+}
+
+function emptyComponentDetail(): ComponentDetailState {
+  return { componentId: '', status: 'idle', component: null, source: 'snapshot', error: '' }
 }
 
 function readStoredView(): ViewMode {
@@ -193,6 +212,7 @@ const state = reactive<WorkbenchState>({
   fallbackReason: '',
   counts: { components: 0, repos: 0, missingRepos: 0 },
   freshness: { localAt: null, remoteAt: null, localStale: false, remoteStale: false },
+  capabilities: { repoActions: null },
   components: [],
   search: '',
   sortBy: 'severity',
@@ -257,11 +277,14 @@ const state = reactive<WorkbenchState>({
   theme: 'system',
   overlays: {
     drawer: null,
+    componentDrawer: null,
     modal: null,
     filterOpen: false,
     confirm: null,
+    actionDialog: null,
     contextMenu: null,
   },
+  componentDetail: emptyComponentDetail(),
   toasts: [],
   hostInfo: null,
   now: Date.now(),
@@ -277,23 +300,36 @@ function selectedComponent(): ComponentVm {
 function focusedRepo(): RepoVm | null {
   const component = selectedComponent()
   if (!component.id) return null
-  const repo = repoOf(component, state.focusedRepoType)
-  if (!repo || repo.state === 'MISSING') return null
-  return repo
+  return repoOf(component, state.focusedRepoType)
 }
 
 function visibleComponents(): ComponentVm[] {
   return sortComponents(filterComponents(state.components, state.search, state.filter), state.sortBy)
 }
 
-function availability() {
-  const hostReadOnly = state.hostLinked && state.hostInfo !== null && state.hostInfo.features?.repoActions !== true
-  if (hostReadOnly) {
-    const disabled = { ...{} } as Record<RepoAction, { enabled: false; reason: string; confirm: boolean }>
-    for (const action of REPO_ACTIONS) {
-      disabled[action] = { enabled: false, reason: `M1 只读：${action} 将在 M2 接入（需备份/确认）`, confirm: false }
+function blockedAvailability(reasonFor: (action: RepoAction) => string): Record<RepoAction, ActionAvailability> {
+  const result = {} as Record<RepoAction, ActionAvailability>
+  for (const action of REPO_ACTIONS) result[action] = { enabled: false, reason: reasonFor(action), confirm: false }
+  return result
+}
+
+/**
+ * 五键可用性：Host 能力门禁（features.repoActions）→ 本地状态矩阵（spec §6.2）。
+ * M1 Host 返回 repoActions=false：5 键全禁用并给出 M1 理由；M2=true：按状态矩阵启用。
+ */
+function availability(): Record<RepoAction, ActionAvailability> {
+  if (state.hostLinked) {
+    const infoFlag = state.hostInfo ? state.hostInfo.features?.repoActions : undefined
+    const snapshotFlag = state.capabilities.repoActions
+    if (infoFlag === undefined && snapshotFlag === null) {
+      return blockedAvailability((action) => `正在读取 Host 能力（getHostInfo / snapshot.capabilities）…${action} 暂不可用`)
     }
-    return disabled
+    const allowed = infoFlag === true || (infoFlag === undefined && snapshotFlag === true)
+    if (!allowed) {
+      return blockedAvailability(
+        (action) => `M1 只读：${action} 需 Host 开启 features.repoActions 或 snapshot.capabilities.repoActions（M2 接入）`,
+      )
+    }
   }
   return actionAvailability(focusedRepo(), state.action.pending)
 }
@@ -308,7 +344,7 @@ function lastOpText(): string {
   const clock = formatClock(op.at)
   const scope = op.scope ? ` · ${op.scope}` : ''
   if (op.state === 'running') return `${op.action} 执行中${scope} · ${clock}`
-  if (op.state === 'success') return `✓ ${op.action} 成功${scope} · ${clock}`
+  if (op.state === 'success') return `✓ ${op.action} 成功${op.message ? ` · ${op.message}` : ''}${scope} · ${clock}`
   return `✕ ${op.action} 失败${scope} · ${op.code ?? 'E_UNKNOWN'} · ${clock}`
 }
 
@@ -404,6 +440,80 @@ function closeConfirm(): void {
   state.overlays.confirm = null
 }
 
+// ───────────────────────────── M2 动作对话框 / 组件详情抽屉 ─────────────────────────────
+
+function openActionDialog(dialog: ActionDialogVm): void {
+  closeConfirm()
+  closeContextMenu()
+  state.overlays.actionDialog = dialog
+}
+
+function closeActionDialog(): void {
+  state.overlays.actionDialog = null
+}
+
+/** 对话框提交后先关闭再执行，避免执行期间浮层遮挡状态。 */
+function submitActionDialog(payload: ActionDialogPayload): void {
+  const dialog = state.overlays.actionDialog
+  if (!dialog) return
+  state.overlays.actionDialog = null
+  dialog.submit(payload)
+}
+
+function openComponentDrawer(componentId: string): void {
+  if (!componentId) return
+  closeContextMenu()
+  closeConfirm()
+  state.overlays.componentDrawer = componentId
+  void loadComponentDetail(componentId)
+}
+
+function closeComponentDrawer(): void {
+  state.overlays.componentDrawer = null
+}
+
+/**
+ * 组件详情：优先 Host getComponentDetail（M1 已实现），任意失败回退当前快照组件；
+ * 两种来源都在抽屉内标注，避免把回退数据伪装成 Host 实时详情。
+ */
+async function loadComponentDetail(componentId: string): Promise<void> {
+  state.componentDetail = {
+    componentId,
+    status: 'loading',
+    component: null,
+    source: 'snapshot',
+    error: '',
+  }
+  const applyFallback = (note: string): void => {
+    if (state.overlays.componentDrawer !== componentId) return
+    const component = state.components.find((item) => item.id === componentId) ?? null
+    state.componentDetail = {
+      componentId,
+      status: component ? 'ready' : 'error',
+      component,
+      source: 'snapshot',
+      error: component ? note : note || '快照中未找到该组件',
+    }
+  }
+  if (isMockMode()) {
+    applyFallback('Mock 模式：展示快照数据')
+    return
+  }
+  try {
+    const dto = await api.getComponentDetail({ componentId })
+    if (state.overlays.componentDrawer !== componentId) return
+    state.componentDetail = {
+      componentId,
+      status: 'ready',
+      component: mapComponent(dto),
+      source: 'host',
+      error: '',
+    }
+  } catch (error) {
+    applyFallback(`组件详情接口不可用（${toErrorMessage(error)}），已回退快照`)
+  }
+}
+
 function openContextMenu(x: number, y: number, items: ContextMenuState['items']): void {
   state.overlays.contextMenu = { x, y, items }
 }
@@ -428,7 +538,8 @@ function toggleTheme(): void {
 
 // ───────────────────────────── 快照 / 初始化 ─────────────────────────────
 
-function applySnapshot(snapshot: SnapshotDto, options: { mockFallback: boolean; reason?: string }): void {
+/** 仅应用快照数据（不动选中/不触发 loadActive）；供动作后定向刷新复用。 */
+function applySnapshotHeader(snapshot: SnapshotDto, options: { mockFallback: boolean; reason?: string }): void {
   state.hostLinked = !options.mockFallback && hasHostBridge()
   state.mockFallback = options.mockFallback
   state.source = snapshot.source
@@ -457,6 +568,9 @@ function applySnapshot(snapshot: SnapshotDto, options: { mockFallback: boolean; 
     localStale: Boolean(snapshot.freshness?.localStale),
     remoteStale: Boolean(snapshot.freshness?.remoteStale),
   }
+  state.capabilities = {
+    repoActions: snapshot.capabilities?.repoActions ?? null,
+  }
   state.snapshotEmpty = components.length === 0
   state.hostFailed = false
   snapshotRetryIndex = 0
@@ -464,6 +578,10 @@ function applySnapshot(snapshot: SnapshotDto, options: { mockFallback: boolean; 
     clearTimeout(snapshotRetryTimer)
     snapshotRetryTimer = undefined
   }
+}
+
+function applySnapshot(snapshot: SnapshotDto, options: { mockFallback: boolean; reason?: string }): void {
+  applySnapshotHeader(snapshot, options)
 
   const currentId = state.components.some((component) => component.id === state.selectedComponentId)
     ? state.selectedComponentId
@@ -626,9 +744,12 @@ function applyTree(panel: RepoTreePanelState, dto: RepoTreeDto, fallback: boolea
   panel.loadedPaths = new Set<string>()
   panel.loadingPaths = new Set<string>()
   registerTreeNodes(panel, panel.entries)
-  panel.status = 'ready'
-  panel.error = ''
-  panel.errorCode = ''
+  const treeError = dto.error ?? ''
+  // Host 可在“部分目录不可读”时返回 error + entries：有数据时保留列表并用横幅提示；
+  // 无数据时进入 error 空态（展示 errorCode），绝不伪装成“空目录”。
+  panel.status = treeError && panel.entries.length === 0 ? 'error' : 'ready'
+  panel.error = treeError
+  panel.errorCode = treeError ? dto.errorCode ?? 'E_TREE_READ_FAILED' : ''
   panel.truncated = Boolean(dto.truncated)
   panel.totalEntries = dto.totalEntries ?? panel.entries.length
   panel.fallback = fallback
@@ -644,12 +765,16 @@ async function loadTree(repoType: RepoType, force = false): Promise<void> {
     panel.status = 'unavailable'
     panel.entries = []
     panel.byPath = new Map()
+    panel.truncated = false
+    panel.totalEntries = 0
     panel.error = repo?.state === 'MISSING' ? '仓库未克隆（MISSING）' : '该仓不在当前快照中'
     panel.errorCode = repo?.state === 'MISSING' ? 'E_REPO_NOT_LOCAL' : 'E_NOT_FOUND'
     return
   }
   if (repo.state === 'INVALID') {
     panel.status = 'unavailable'
+    panel.truncated = false
+    panel.totalEntries = 0
     panel.error = '仓库绑定异常（INVALID）'
     panel.errorCode = 'E_BINDING_ERROR'
     return
@@ -679,7 +804,7 @@ async function loadTree(repoType: RepoType, force = false): Promise<void> {
   } catch (error) {
     if (currentEpoch !== epoch) return
     panel.status = 'error'
-    panel.error = toErrorMessage(error)
+    panel.error = error instanceof HostError ? error.message : toErrorMessage(error)
     panel.errorCode = error instanceof HostError ? error.code : 'E_IO_ERROR'
   }
 }
@@ -919,64 +1044,232 @@ async function doOpenPath(
 
 async function runAction(action: RepoAction): Promise<void> {
   if (state.action.pending) return
+  if (state.overlays.actionDialog || state.overlays.confirm) return
   const repo = focusedRepo()
   if (!repo) {
     notify('请先在文件树中选择仓库', 'warning')
     return
   }
-  const availabilityMap = availability()
-  const cell = availabilityMap[action]
+  const cell = availability()[action]
   if (!cell.enabled) {
     notify(cell.reason, 'warning', 4000)
     return
   }
+  const target: ActionTarget = { componentId: selectedComponent().id, repoType: repo.repoType }
+  switch (action) {
+    case 'COMMIT':
+      openCommitDialog(target, repo)
+      return
+    case 'CHKOUT':
+      openCheckoutDialog(target, repo)
+      return
+    case 'PULL':
+      // spec §6.3：常规 PULL = 预检 + --ff-only，不弹确认。
+      void executeRepoAction('PULL', {}, false, target)
+      return
+    case 'PUSH':
+      // spec §6.4：常规 PUSH 免确认；无 upstream 发布分支才需确认（M2 后续细化）。
+      void executeRepoAction('PUSH', {}, false, target)
+      return
+    default:
+      // FETCH 为短网络只读探测，按 spec §6.4 免确认直接执行。
+      void executeRepoAction('FETCH', {}, false, target)
+  }
+}
+
+// ───────────────────────────── M2 五键执行 ─────────────────────────────
+
+interface ActionTarget {
+  componentId: string
+  repoType: RepoType
+}
+
+function openCommitDialog(target: ActionTarget, repo: RepoVm): void {
+  openActionDialog({
+    kind: 'commit',
+    action: 'COMMIT',
+    title: 'COMMIT · 提交已暂存改动',
+    body: `将提交 ${repo.repoName || repo.repoType}（${repo.repoType}）当前分支 ${repo.branch} 的已暂存改动；提交信息必填（1–200 字符）。`,
+    detail: repo.localPath ?? undefined,
+    confirmLabel: '提交',
+    danger: false,
+    initialMessage: '',
+    info: [
+      { label: '仓库', value: repo.repoName || repo.repoType },
+      { label: '分支', value: repo.branch },
+      {
+        label: '未提交',
+        value: `已跟踪 ${repo.dirtyCount} · 未跟踪 ${repo.untrackedCount}`,
+        tone: repo.dirtyCount + repo.untrackedCount > 0 ? 'warning' : 'muted',
+      },
+    ],
+    submit: (payload) => {
+      const message = (payload.message ?? '').trim()
+      if (!message) {
+        notify('提交信息不能为空', 'warning')
+        openCommitDialog(target, repo)
+        return
+      }
+      void executeRepoAction('COMMIT', { message }, false, target)
+    },
+  })
+}
+
+function openCheckoutDialog(target: ActionTarget, repo: RepoVm): void {
+  const suggestions = [...new Set([repo.branch, repo.tag ?? '', repo.compareRef?.replace(/^refs\/remotes\/origin\//, '') ?? ''])]
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0 && item !== '—')
+  const dirtyHint =
+    repo.dirtyCount + repo.untrackedCount > 0
+      ? `该仓有 ${repo.dirtyCount + repo.untrackedCount} 处未提交改动；若 Host 返回 E_DIRTY_WORKTREE，请先 COMMIT 或 stash 再检出。`
+      : undefined
+  openActionDialog({
+    kind: 'checkout',
+    action: 'CHKOUT',
+    title: 'CHKOUT · 检出分支 / Tag',
+    body: `将 ${repo.repoName || repo.repoType}（${repo.repoType}）从 ${repo.branch} 检出到指定分支或 Tag。`,
+    detail: dirtyHint ?? repo.localPath ?? undefined,
+    confirmLabel: '检出',
+    danger: false,
+    initialRefKind: repo.tag && repo.branch === '—' ? 'tag' : 'branch',
+    initialRefValue: '',
+    suggestions,
+    info: [
+      { label: '仓库', value: repo.repoName || repo.repoType },
+      { label: '当前分支', value: repo.branch },
+      { label: '当前 HEAD', value: shortSha(repo.headSha) },
+    ],
+    submit: (payload) => {
+      const refValue = (payload.refValue ?? '').trim()
+      if (!refValue) {
+        notify('请填写分支或 Tag 名称', 'warning')
+        openCheckoutDialog(target, repo)
+        return
+      }
+      const refKind = payload.refKind === 'tag' ? 'tag' : 'branch'
+      void executeRepoAction('CHKOUT', refKind === 'tag' ? { tag: refValue, confirm: true } : { branch: refValue, confirm: true }, true, target)
+    },
+  })
+}
+
+/** 动作成功后定向刷新快照（refresh 容错 + getSnapshot），不重建选中。 */
+async function refreshSnapshot(): Promise<void> {
+  if (isMockMode()) {
+    applyMockSnapshot('Mock：动作后刷新')
+    return
+  }
+  try {
+    try {
+      await api.refresh()
+    } catch {
+      // refresh 只回 ack 或 M1 未实现均可容忍；后续 getSnapshot 才是事实源。
+    }
+    const snapshot = await api.getSnapshot()
+    applySnapshotHeader(snapshot, { mockFallback: snapshot.source === 'mock' })
+    const component = selectedComponent()
+    if (component.id && !repoOf(component, state.focusedRepoType)) {
+      state.focusedRepoType = pickDefaultRepo(component)
+    }
+  } catch (error) {
+    notify(`操作已完成，但状态刷新失败：${toErrorMessage(error)}（请手动刷新）`, 'warning', 5000)
+  }
+}
+
+/** 成功后刷新 snapshot + 详情/四仓树（FR-ACT-06：≤2s 回写）。 */
+async function refreshAfterAction(): Promise<void> {
+  await refreshSnapshot()
+  await loadActive()
+}
+
+async function executeRepoAction(
+  action: RepoAction,
+  args: RepoActionArgs,
+  confirmed: boolean,
+  target: ActionTarget,
+): Promise<void> {
+  if (state.action.pending) return
   state.action.pending = action
   state.action.lastOp = {
     action,
-    scope: repo.repoType,
+    scope: target.repoType,
     state: 'running',
     at: new Date().toISOString(),
   }
-  const component = selectedComponent()
+  const startedAt = Date.now()
   try {
-    await delay(360)
     if (isMockMode()) {
-      // Mock 桥与 M1 后端一致：返回 E_NOT_IMPLEMENTED
+      await delay(360)
+      // 与 M1 Host 契约一致：Mock 仍返回 E_NOT_IMPLEMENTED，绝不伪造成功。
       mock.mockRunRepoAction(action)
     }
     const result = await api.runRepoAction({
-      componentId: component.id,
-      repoType: repo.repoType,
+      componentId: target.componentId,
+      repoType: target.repoType,
       action,
+      args,
     })
     if (!result.accepted) {
       throw new HostError(result.errorCode ?? 'E_ACTION_NOT_ALLOWED', result.message ?? '操作被拒绝')
     }
+    const short = shortSha(result.postHead ?? result.preHead ?? null)
+    const headText = short === '—' ? '' : short
     state.action.lastOp = {
       action,
-      scope: repo.repoType,
+      scope: target.repoType,
       state: 'success',
       at: new Date().toISOString(),
-      message: result.jobId,
+      message: headText || result.message,
     }
-    notify(`✓ ${action} 已受理（M2 job ${result.jobId ?? '—'}）`, 'success')
-    void loadTree(state.focusedRepoType, true)
-    void loadDetail()
+    if (action === 'COMMIT') {
+      notify(headText ? `已提交 ${headText}` : '已提交（Host 未返回 SHA）', 'success', 2800)
+    } else if (action === 'CHKOUT') {
+      const ref = result.branch || args.tag || args.branch || ''
+      notify(`已检出 ${ref}${headText ? ` · HEAD ${headText}` : ''}`, 'success', 2800)
+    } else {
+      const duration = result.durationMs ?? Date.now() - startedAt
+      notify(`${action} 完成${headText ? ` · HEAD ${headText}` : ''}（${Math.round(duration)}ms）`, 'success', 2800)
+    }
+    // 动作本身已结束：先释放按钮（刷新在后台继续），避免大工作区全量重扫期间锁死五键。
+    state.action.pending = null
+    await refreshAfterAction()
   } catch (error) {
-    const code = error instanceof HostError ? error.code : 'E_UNKNOWN'
+    const info = actionErrorInfo(error)
+    if (info.code === 'E_CONFIRM_REQUIRED' && !confirmed) {
+      // Host 要求二次确认：只重试一次（confirmed=true），再次要求确认即停止，避免无限循环。
+      state.action.lastOp = { action, scope: target.repoType, state: 'idle', at: new Date().toISOString() }
+      openConfirm({
+        title: `${action} 需要二次确认`,
+        body: info.detail || info.message,
+        detail: info.hint,
+        confirmLabel: '确认并重试',
+        danger: true,
+        onCancel: () => {
+          state.action.lastOp = { action, scope: target.repoType, state: 'idle', at: new Date().toISOString() }
+        },
+        onConfirm: () => {
+          closeConfirm()
+          void executeRepoAction(action, { ...args, confirm: true }, true, target)
+        },
+      })
+      return
+    }
     state.action.lastOp = {
       action,
-      scope: repo.repoType,
+      scope: target.repoType,
       state: 'error',
       at: new Date().toISOString(),
-      code,
+      code: info.code,
     }
-    if (code === 'E_NOT_IMPLEMENTED' || isMethodUnavailable(error)) {
-      notify('M1 只读，M2 接入', 'warning', 3600)
-      pushNotification(`${action} 未执行`, `M1 只读：${action} 将在 M2 启用（${repo.repoType}）`, 'warn')
+    if (info.code === 'E_CONFIRM_REQUIRED') {
+      notify(`✕ ${action} 失败 · E_CONFIRM_REQUIRED：Host 仍要求确认，已停止自动重试`, 'error', 6000)
+      pushNotification(`${action} 失败`, 'E_CONFIRM_REQUIRED：二次确认后仍被拒绝，请检查仓库状态', 'err')
+    } else if (info.code === 'E_NOT_IMPLEMENTED' || info.code === 'E_NO_HOST') {
+      notify(`${info.code}：${info.message} · ${info.hint}`, 'warning', 5200)
+      pushNotification(`${action} 未执行`, `${info.code}：${info.message}（${info.hint}）`, 'warn')
     } else {
-      notify(`操作失败：${toErrorMessage(error)}`, 'error', 6000)
-      pushNotification(`${action} 失败`, toErrorMessage(error), 'err')
+      const detailText = info.detail ? ` · ${info.detail}` : ''
+      notify(`✕ ${action} 失败 · ${info.code}：${info.message}${detailText}${info.hint ? `。${info.hint}` : ''}`, 'error', 6500)
+      pushNotification(`${action} 失败`, `${info.code}：${info.message}${detailText}`, 'err')
     }
   } finally {
     state.action.pending = null
@@ -1035,6 +1328,7 @@ function cardContextMenu(event: MouseEvent, componentId: string): void {
   const hasMissing = component.repos.some((repo) => repo.state === 'MISSING')
   openContextMenu(event.clientX, event.clientY, [
     { key: 'card.openWorkbench', label: '在工作台打开' },
+    { key: 'card.detail', label: '查看组件详情（抽屉）' },
     { key: 'card.locateFolder', label: '在文件夹视图定位' },
     { key: '-', label: '', separator: true },
     { key: 'component.SYNC', label: 'SYNC…（四仓，远程覆盖本地）', danger: true },
@@ -1079,6 +1373,7 @@ function workspaceNodeToRepo(node: WorkspaceNodeVm): RepoVm | null {
     behind: node.behind,
     dirtyCount: node.dirtyCount,
     untrackedCount: 0,
+    stagedCount: 0,
     stashCount: 0,
     isLocal: node.hasChildren,
     localPath: node.path ? `${state.workspaceRoot}\\${node.path}` : null,
@@ -1121,12 +1416,18 @@ async function ensureFolderLoaded(force = false): Promise<void> {
       state.folder.byPath.set(node.key, node)
       for (const repo of node.repos) state.folder.byPath.set(repo.key, repo)
     }
-    state.folder.status = 'ready'
+    const treeError = dto.error ?? ''
+    // 与四仓树同口径：有错误且无条目 → error 空态；有数据 → 保留列表 + error/truncated 横幅。
+    state.folder.status = treeError && state.folder.entries.length === 0 ? 'error' : 'ready'
+    state.folder.error = treeError
+    state.folder.errorCode = treeError ? dto.errorCode ?? 'E_TREE_READ_FAILED' : ''
+    state.folder.truncated = Boolean(dto.truncated)
+    state.folder.totalEntries = dto.totalEntries ?? state.folder.entries.length
     state.folder.fallback = fallback
     state.folder.at = Date.now()
   } catch (error) {
     state.folder.status = 'error'
-    state.folder.error = toErrorMessage(error)
+    state.folder.error = error instanceof HostError ? error.message : toErrorMessage(error)
     state.folder.errorCode = error instanceof HostError ? error.code : 'E_IO_ERROR'
   }
 }
@@ -1442,6 +1743,7 @@ function command(key: string): void {
     default:
       if (key.startsWith('card.')) {
         if (key === 'card.openWorkbench') setView('workbench')
+        else if (key === 'card.detail') openComponentDrawer(state.selectedComponentId)
         else if (key === 'card.locateFolder') {
           setView('folder')
           const node = state.folder.byPath.get(`component:${state.selectedComponentId}`)
@@ -1496,8 +1798,14 @@ function closeTopOverlay(): void {
     closeContextMenu()
     return
   }
+  if (state.overlays.actionDialog) {
+    closeActionDialog()
+    return
+  }
   if (state.overlays.confirm) {
+    const cancel = state.overlays.confirm.onCancel
     closeConfirm()
+    cancel?.()
     return
   }
   if (state.overlays.filterOpen) {
@@ -1506,6 +1814,10 @@ function closeTopOverlay(): void {
   }
   if (state.overlays.modal) {
     closeModal()
+    return
+  }
+  if (state.overlays.componentDrawer) {
+    closeComponentDrawer()
     return
   }
   if (state.overlays.drawer) {
@@ -1575,6 +1887,13 @@ export interface WorkbenchStore {
   closeContextMenu: typeof closeContextMenu
   openFilter: typeof openFilter
   closeFilter: typeof closeFilter
+  openActionDialog: typeof openActionDialog
+  closeActionDialog: typeof closeActionDialog
+  submitActionDialog: typeof submitActionDialog
+  openComponentDrawer: typeof openComponentDrawer
+  closeComponentDrawer: typeof closeComponentDrawer
+  loadComponentDetail: typeof loadComponentDetail
+  refreshSnapshot: typeof refreshSnapshot
   toggleTheme: typeof toggleTheme
   cardContextMenu: typeof cardContextMenu
   treeContextMenu: typeof treeContextMenu
@@ -1646,6 +1965,13 @@ export const workbench: WorkbenchStore = {
   closeContextMenu,
   openFilter,
   closeFilter,
+  openActionDialog,
+  closeActionDialog,
+  submitActionDialog,
+  openComponentDrawer,
+  closeComponentDrawer,
+  loadComponentDetail,
+  refreshSnapshot,
   toggleTheme,
   cardContextMenu,
   treeContextMenu,

@@ -42,6 +42,7 @@ export interface RepoVm {
   behind: number
   dirtyCount: number
   untrackedCount: number
+  stagedCount: number
   stashCount: number
   isLocal: boolean
   localPath: string | null
@@ -136,6 +137,8 @@ export interface FolderTreeState {
   loadingPaths: Set<string>
   error: string
   errorCode: string
+  truncated: boolean
+  totalEntries: number
   fallback: boolean
   at: number
 }
@@ -210,6 +213,45 @@ export interface ConfirmVm {
   confirmLabel: string
   danger: boolean
   onConfirm: () => void
+  /** 点“取消”/Esc/遮罩关闭时回调（可选）。 */
+  onCancel?: () => void
+}
+
+// ───────────────────────────── M2 单仓动作对话框 ─────────────────────────────
+
+export type ActionDialogKind = 'commit' | 'checkout' | 'confirm'
+
+export interface ActionDialogPayload {
+  message?: string
+  refKind?: 'branch' | 'tag'
+  refValue?: string
+}
+
+export interface ActionDialogVm {
+  kind: ActionDialogKind
+  action: RepoAction
+  title: string
+  body: string
+  detail?: string
+  confirmLabel: string
+  danger: boolean
+  /** 只读摘要行（PULL 的 behind / PUSH 的 branch+ahead 等）。 */
+  info?: { label: string; value: string; tone?: 'muted' | 'warning' | 'danger' }[]
+  initialMessage?: string
+  initialRefKind?: 'branch' | 'tag'
+  initialRefValue?: string
+  /** CHKOUT 的候选 ref（来自快照分支/Tag），仅作 datalist 提示。 */
+  suggestions?: string[]
+  submit: (payload: ActionDialogPayload) => void
+}
+
+/** 组件详情抽屉的数据（优先 Host getComponentDetail，失败回退快照）。 */
+export interface ComponentDetailState {
+  componentId: string
+  status: 'idle' | 'loading' | 'ready' | 'error'
+  component: ComponentVm | null
+  source: 'host' | 'snapshot'
+  error: string
 }
 
 export interface FilterState {

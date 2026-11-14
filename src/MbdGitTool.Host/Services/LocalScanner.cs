@@ -250,6 +250,7 @@ public sealed class LocalScanner
                 : status.Detached ? HeadKind.DetachedCommit : HeadKind.Branch,
             DirtyTracked = status.DirtyTracked,
             DirtyCount = status.DirtyCount,
+            StagedCount = status.StagedCount,
             UntrackedCount = status.UntrackedCount,
             Unmerged = status.Unmerged,
             LocalTags = localTags.Success ? SplitLines(localTags.Stdout) : Array.Empty<string>()
@@ -462,7 +463,15 @@ public sealed class LocalScanner
 
             if (line.StartsWith("1 ", StringComparison.Ordinal) || line.StartsWith("2 ", StringComparison.Ordinal))
             {
-                status = status with { DirtyTracked = true, DirtyCount = status.DirtyCount + 1 };
+                // porcelain v2：`1 XY ...` / `2 XY ...`，X=index（staged）状态，Y=worktree 状态。
+                var x = line.Length > 2 ? line[2] : ' ';
+                var stagedChange = x != ' ' && x != '.';
+                status = status with
+                {
+                    DirtyTracked = true,
+                    DirtyCount = status.DirtyCount + 1,
+                    StagedCount = stagedChange ? status.StagedCount + 1 : status.StagedCount
+                };
                 continue;
             }
 
@@ -664,6 +673,8 @@ public sealed class LocalScanner
         public bool DirtyTracked { get; init; }
 
         public int DirtyCount { get; init; }
+
+    public int StagedCount { get; init; }
 
         public int UntrackedCount { get; init; }
 

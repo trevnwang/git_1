@@ -54,7 +54,8 @@ public sealed record RepoDto(
     bool? IsStale = null,
     string? ErrorCode = null,
     CommitDto? LastCommit = null,
-    CiLatestDto? Ci = null);
+    CiLatestDto? Ci = null,
+    int StagedCount = 0);
 
 public sealed record CountsDto(int Components, int Repos, int MissingRepos);
 

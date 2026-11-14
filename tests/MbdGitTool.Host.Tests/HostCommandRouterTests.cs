@@ -39,7 +39,7 @@ public sealed class HostCommandRouterTests
         Assert.NotNull(snapshot.Counts);
         Assert.NotNull(snapshot.Freshness);
         Assert.NotNull(snapshot.Capabilities);
-        Assert.False(snapshot.Capabilities!.RepoActions);
+        Assert.True(snapshot.Capabilities!.RepoActions);
     }
 
     [Fact]
@@ -54,7 +54,7 @@ public sealed class HostCommandRouterTests
         Assert.True(info.Features.FileTree);
         Assert.True(info.Features.WorkspaceTree);
         Assert.True(info.Features.OpenPath);
-        Assert.False(info.Features.RepoActions);
+        Assert.True(info.Features.RepoActions);
         Assert.Equal(2000, info.Limits.MaxDirectoryEntries);
         Assert.Equal(200, info.Limits.MaxCommitsPerPage);
     }
@@ -113,26 +113,64 @@ public sealed class HostCommandRouterTests
     }
 
     [Fact]
-    public async Task Dispatch_RunRepoAction_IsReadOnly()
+    public async Task Dispatch_RunRepoAction_MockLocalPathMissing_ReturnsRepoNotLocal()
     {
         using var router = CreateMockRouter();
         await CallAsync(router, "getSnapshot", null);
 
+        // M2：矩阵允许但 Mock 快照的本地路径不存在 → E_REPO_NOT_LOCAL（不产生写操作）。
         var result = await CallAsync(
             router,
             "runRepoAction",
             new { componentId = "MOCK_CF1001_ChanganSigProcgBascFct", repoType = "DESIGN", action = "PULL" });
 
         Assert.False(result.Ok);
-        Assert.Contains(
-            result.Error!.Code,
-            new[] { BridgeErrorCodes.NotImplemented, BridgeErrorCodes.ActionNotAllowed });
+        Assert.Equal(BridgeErrorCodes.RepoNotLocal, result.Error!.Code);
 
         var badAction = await CallAsync(
             router,
             "runRepoAction",
             new { componentId = "MOCK_CF1001_ChanganSigProcgBascFct", repoType = "DESIGN", action = "RESET" });
         Assert.Equal(BridgeErrorCodes.InvalidArgument, badAction.Error!.Code);
+    }
+
+    [Fact]
+    public async Task Dispatch_RunRepoAction_RealRepo_CommitSucceedsAndTokenNotLeaked()
+    {
+        var token = "ghp_router_fake_token_9876543210";
+        using var fixture = GitRemoteFixture.Create();
+        var config = new AppConfig { WorkspaceRoot = fixture.Root, GiteaToken = token };
+        using var router = new HostCommandRouter(
+            config,
+            new SnapshotService(config),
+            new RecordingLauncher());
+
+        var snapshot = await CallAsync(router, "getSnapshot", null);
+        Assert.True(snapshot.Ok);
+        Assert.Equal("local", Assert.IsType<SnapshotDto>(snapshot.Data).Source);
+
+        File.WriteAllText(Path.Combine(fixture.CloneB, "router-commit.txt"), "x");
+        TestGit.Run(fixture.CloneB, "add", "router-commit.txt");
+        var result = await CallAsync(
+            router,
+            "runRepoAction",
+            new
+            {
+                componentId = "CF100A_Demo",
+                repoType = "IMPL",
+                action = "COMMIT",
+                args = new { message = "router e2e commit" }
+            });
+
+        Assert.True(result.Ok);
+        Assert.Equal("router e2e commit", TestGit.Capture(fixture.CloneB, "log", "-1", "--pretty=%s"));
+        var json = JsonSerializer.Serialize(result, WebJson);
+        Assert.Contains("\"accepted\":true", json, StringComparison.Ordinal);
+        Assert.DoesNotContain(token, json, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(token + ":")),
+            json,
+            StringComparison.Ordinal);
     }
 
     [Fact]

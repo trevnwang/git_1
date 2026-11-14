@@ -18,6 +18,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   select: []
+  detail: []
   check: []
   quick: [command: 'SYNC' | 'CREATE']
   contextmenu: [event: MouseEvent]
@@ -40,6 +41,12 @@ const title = computed(() =>
 
 function onClick(): void {
   emit('select')
+}
+
+/** 双击卡片 = 打开组件详情抽屉（FR-CARD-02），不替换工作台。 */
+function onDblClick(): void {
+  emit('select')
+  emit('detail')
 }
 
 function onCheck(event: Event): void {
@@ -69,7 +76,7 @@ function onContextMenu(event: MouseEvent): void {
     data-testid="component-card"
     :title="title"
     @click="onClick"
-    @dblclick="onClick"
+    @dblclick.stop="onDblClick"
     @contextmenu="onContextMenu"
   >
     <span class="card-rail" aria-hidden="true" />

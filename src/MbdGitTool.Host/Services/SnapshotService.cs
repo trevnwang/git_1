@@ -408,7 +408,7 @@ public sealed class SnapshotService : IDisposable
                 FileTree: true,
                 WorkspaceTree: true,
                 OpenPath: true,
-                RepoActions: false,
+                RepoActions: true, // M2：单仓操作已接入
                 Ci: false),
             Owner: _config.GiteaOrg,
             GiteaBaseUrl: _config.GiteaBaseUrl);

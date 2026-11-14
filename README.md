@@ -24,6 +24,7 @@ docs/
 ├─ ui-redesign-spec.md         # v3 工作台 UI 规格（参考图为准）
 ├─ ui-redesign-code-plan.md    # v3 API/文件树/路径安全实现方案
 ├─ ui-v3-status.md             # UI v3 阶段报告、评审 P0 修复与剩余项
+├─ m2-ops-status.md            # M2 单仓真实写操作、staged-only 提交、评审修复与实测
 ├─ review-ui-v3.md / review-req-v3.md / review-code-v3.md   # 三路对抗评审
 └─ m0-status.md                # M0 完成状态、运行方式、CI 锚点映射
 artifacts/                     # 发布产物（gitignored）：publish/ + zip
