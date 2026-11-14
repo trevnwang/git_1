@@ -8,7 +8,7 @@
 
 ## 1. 数据与写者
 
-1. `component.is_managed/is_deleted`：语义为管理状态，不是聚合态；新增写者 `COMPONENT_MGMT`，只写该两列与 updated_at；其余 component 列仍由 `STATUS_CALC` 写。迁移：已扫描发现的四仓组件默认 `is_managed=1,is_deleted=0`。
+1. `component.is_managed/is_deleted`：语义为管理状态，不是聚合态；新增写者 `COMPONENT_MGMT`，只写该两列、INSERT component 行与 updated_at；其余 component 列仍由 `STATUS_CALC` 写。`repo.is_local/local_path` 仍由 LOCAL_SCAN 单写，管理操作不直接写。迁移：已扫描发现的四仓组件默认 `is_managed=1,is_deleted=0`。
 2. `job_item.baseline_ref`：新增可空列（CREATE 基线 ref），写者 JOB_RUNNER；不改既有列语义。
 3. `baseline_snapshot`：PK 保持 `(component_id, tag, repo_type)`；TAG 收口固定写 4 行；重复/移动 tag 覆盖同键行，历史由 `operation_log` 保留（before/after 旧/新 SHA）。`tag_present=0` 行由缺 Tag 仓写入。
 4. `DELETE_PENDING` 不新增表/列：只使用 `<workspace>/.trash/.pending/*.json` 文件记录；不改变 §7.2/§7.4 状态枚举。

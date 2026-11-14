@@ -110,7 +110,7 @@
 | 文件夹视图 | 工作区根 → 组件目录 → 四仓目录 → 文件目录树；展开/双击打开；按状态/RepoType/本地改动过滤；与工作台一键切换（§11.5） |
 | 文件树 | 四仓只读文件树（懒加载/排序/展开/双击默认程序打开/状态标记/路径安全，只读无写入口）；单仓详情内文件 Tab 复用同一规则（§9.14） |
 | 详情 | 组件详情抽屉（4 仓总览）、单仓详情抽屉（概览/历史/差异/文件/CI 占位）；双击组件卡片进入，不替换工作台布局 |
-| 批量操作 | Clone（幂等/预检/部分失败）、Pull、Fetch、Checkout 分支、切 Tag（detached）、受控 SYNC、本地删除、CREATE 分支（dry-run）；入口=菜单栏操作菜单 + 组件卡片右键 + 卡片区顶部批量条（§11.6） |
+| 批量操作 | Clone（幂等/预检/部分失败）、Pull、Fetch、Checkout 分支、切 Tag（detached）、受控 SYNC、本地删除、CREATE 分支（dry-run）；入口=菜单栏操作菜单 + 组件卡片右键 + 卡片区顶部批量条（§11.6）+ 组件纳入/移出（AC-UI-16，“已移出”视图） |
 | 单仓操作 | 底部按钮条 **PULL / FETCH / CHKOUT / COMMIT / PUSH**（作用于当前聚焦仓；前置/确认/失败/进行中规则见 §9.16；M1 只读禁用，M2 接入） |
 | 任务与安全 | 任务中心（进度/取消/重试/逐仓结果）、破坏性确认、备份 ref、审计日志 |
 | 首启 | 配置向导 + **三阶段首扫进度（`LOCAL_DISCOVERY` 本地发现 → `REMOTE_RECONCILE` 远程对账 → `STATUS_CALC` 状态计算，进度事件含 `{stage,total,current,cancellable}`，可跳过远程降级）** + 就绪门控与自动重判 |
@@ -384,19 +384,19 @@ RepoType ∈ {Design, Impl, MIL, SIL}（匹配大小写不敏感）
 
 ### 8.1 表清单（废弃“极简五表”表述）
 
-> **冻结说明**：字段名自 v0.2 起冻结（变更需 ADR）；**v1 建表 16 张**（含 3 张空表预留/治理表）。`repo` 的远程字段（full_name/remote_url/default_branch/archived）由 REMOTE_SYNC 写，本地字段（is_local/local_path）由 LOCAL_SCAN 写；如实现要求严格单写者，可拆 `repo`/`repo_local` 两表（语义不变）。字段清单自 v0.2.1 起与历史图集（已并入正文） 对齐（`repo.renamed_from`、`component.is_managed`、`local_state.scan_error`、`baseline_snapshot.tag_object_sha`、`job.started_at`、`ci_status` 全列已在本表登记），D4 ER 缺失列由已并入本表。
+> **冻结说明**：字段名自 v0.2 起冻结（变更需 ADR）；**v1 建表 16 张**（含 3 张空表预留/治理表）。`repo` 的远程字段（full_name/remote_url/default_branch/archived）由 REMOTE_SYNC 写，本地字段（is_local/local_path）由 LOCAL_SCAN 单写（管理操作只触发重扫，不直接写 is_local）；如实现要求严格单写者，可拆 `repo`/`repo_local` 两表（语义不变）。字段清单自 v0.2.1 起与历史图集（已并入正文） 对齐（`repo.renamed_from`、`component.is_managed`、`local_state.scan_error`、`baseline_snapshot.tag_object_sha`、`job.started_at`、`ci_status` 全列已在本表登记），D4 ER 缺失列由已并入本表。
 
 | 表 | 主键 | 关键字段 | 唯一写者 |
 |---|---|---|---|
 | `component` | component_id | display_name, local_root, aggregate_status, status_calc_at, incomplete, is_managed, is_deleted, last_activity_at（最近活动时间，供工作台“最近活动”排序）, timestamps | STATUS_CALC（业务列）/ COMPONENT_MGMT（is_managed/is_deleted） |
-| `repo` | repo_id（Gitea 数字 id） | component_id FK, repo_type(CHECK DESIGN/IMPL/MIL/SIL/OTHER), full_name UK, remote_url, default_branch, archived, renamed_from, is_local, local_path, timestamps | REMOTE_SYNC（远程列）/ LOCAL_SCAN（local_path）/ COMPONENT_MGMT（is_local 的删除置 0，D-028） |
+| `repo` | repo_id（Gitea 数字 id） | component_id FK, repo_type(CHECK DESIGN/IMPL/MIL/SIL/OTHER), full_name UK, remote_url, default_branch, archived, renamed_from, is_local, local_path, timestamps | REMOTE_SYNC（远程列）/ LOCAL_SCAN（is_local/local_path 单写） |
 | `remote_ref` | (repo_id, ref_type, ref_name) | ref_type(CHECK BRANCH/TAG), commit_hash, observed_at, synced_at, generation | REMOTE_SYNC |
 | `local_state` | repo_id | head_type(CHECK BRANCH/DETACHED_TAG/DETACHED_COMMIT/UNBORN), head_ref, head_sha, upstream_ref, upstream_sha, ahead, behind, dirty_count, untracked_count, op_in_progress, fingerprint, scan_at, scan_error, last_success_at | LOCAL_SCAN |
 | `repo_status` | repo_id | main_status, flags_json, error_code, data_source, is_stale, calc_at | STATUS_CALC |
 | `ci_status`（v1 空表） | (repo_id, commit_sha) | provider, state, run_id, run_url, branch, build_number, failed_stage, started_at, finished_at, duration_ms, fetched_at, updated_at；`ci_latest` 视图 = 每 repo 最新 commit 对应行（v1 空） | 预留（v2 REMOTE_SYNC） |
 | `job` | job_id | kind(CHECK CLONE/PULL/FETCH/CHECKOUT/TAG/SYNC/DELETE/CREATE/RESTORE/REPAIR/RECLONE/CREATE_UNDO/PUSH/COMMIT), target_json, state(CHECK QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED/INTERRUPTED/PARTIAL；**部分成功统一用 `PARTIAL`**), total/succeeded/failed/**skipped（整数计数）**, cancel_requested, started_at, finished_at, timestamps | JOB_RUNNER |
 | `job_item` | (job_id, repo_id) | state(CHECK QUEUED/RUNNING/OK/FAILED/BUSY/SKIPPED/CANCELLED/**INTERRUPTED**), attempt, pre_head, expect_head, post_head, backup_ref, baseline_ref, reconcile_status(CHECK NOT_APPLIED/UNKNOWN_APPLIED，可空), message, error_code, started_at, finished_at, updated_at | JOB_RUNNER |
-| `operation_log`（审计） | id | ts, actor, action(CHECK 同 job.kind 集), target_json, before_json, after_json, result, error_code, request_id | 各写者追加 |
+| `operation_log`（审计） | id | ts, actor, action(CHECK = job.kind ∪ {COMPONENT_BIND, COMPONENT_UNBIND, CREATE_UNDO, RECONCILE}，D-028), target_json, before_json, after_json, result, error_code, request_id | 各写者追加 |
 | `sync_run` | run_id | kind(CHECK ORG_LIST/REFS/FULL_RECONCILE), started_at/finished_at, duration_ms, coverage, total/ok/failed, error | REMOTE_SYNC |
 | `app_setting` | key | value（非敏感配置；凭据只存引用） | UI/ORCH |
 | `unbound_repo` | repo_id | full_name, reason(CHECK DOCS/PATTERN/CASE_CONFLICT/UNKNOWN), discovered_at | REMOTE_SYNC |
@@ -1159,7 +1159,7 @@ interface ICiProvider {
 - **测试层级/依赖**：Host 单测/黑盒集成（临时 git 仓 + `GIT_TRACE2_EVENT`）
 - **Given**：仓在 `main`，含 `README.md`（同名文件但无同名 ref）、tag `v1.0.0`、远端新分支 `feature`（`main` 为其祖先）、detached 夹具、可正常 push 的仓。
 - **When**：① CHKOUT `branch="README.md"`；② CHKOUT `tag="v9.9.9"`；③ CHKOUT/PULL `branch="+main"`/`"-main"`；④ PULL `args.branch="feature"`（当前分支 `main`）；⑤ DETACHED 状态 PUSH；⑥ 正常 PUSH 并采集 argv。
-- **Then**：① `E_REF_NOT_FOUND`（kind=branch），HEAD/分支不变（禁止“假成功”走路径模式）；② `E_REF_NOT_FOUND`（kind=tag）；③ `E_INVALID_ARGUMENT`；④ **拒绝**（`E_ACTION_NOT_ALLOWED` 或 `E_INVALID_ARGUMENT`，details 给 expected/current），当前分支**不得**被快进到 `origin/feature`，且拒绝发生在任何 git 网络命令之前（argv 无 fetch/push）；⑤ `E_ACTION_NOT_ALLOWED`，HEAD 不变；⑥ PUSH argv 无 `--force`/`-f`/`--mirror`/`--delete`/前导 `+`；⑦ 仅远端存在的分支不得静默 DWIM 成假成功：要么真实建本地跟踪分支（需 M2a 明确支持并记录），要么 `E_REF_NOT_FOUND` + UI 明确文案。
+- **Then**：① `E_REF_NOT_FOUND`（kind=branch），HEAD/分支不变（禁止“假成功”走路径模式）；② `E_REF_NOT_FOUND`（kind=tag）；③ `E_INVALID_ARGUMENT`；④ **拒绝**（`E_ACTION_NOT_ALLOWED`，details 给 expected/current），当前分支**不得**被快进到 `origin/feature`，且拒绝发生在任何 git 网络命令之前（argv 无 fetch/push）；⑤ `E_ACTION_NOT_ALLOWED`，HEAD 不变；⑥ PUSH argv 无 `--force`/`-f`/`--mirror`/`--delete`/前导 `+`；⑦ 仅远端存在的分支必须真实建本地跟踪分支并记录（AC-OP-09 已支持）；若建分支失败则 `E_REF_NOT_FOUND` + UI 明确文案，禁止静默 DWIM 假成功。
 - **关联 NFR/OQ**：FR-REPO-01；ADR §2.2-2④；Gate P1-3/N-1（N-1 未修复前本 AC 判未通过）
 
 #### AC-UI-16 · 组件纳入/移出入口
@@ -1435,6 +1435,9 @@ interface ICiProvider {
 | E_REF_NOT_FOUND | GIT-E001 | 否 | WARN | 先提交/确认 ref |
 | E_NOTHING_TO_COMMIT | OP-E004 | 否 | INFO | 先 add 暂存 |
 | E_INVALID_ARGUMENT | OP-E004 | 否 | WARN | 修正参数 |
+| E_GIT_NON_FF | GIT-E001 | 否 | WARN | 手动 merge/rebase 后重试 |
+| E_REPAIR_FAILED | FS-E001 | 否 | ERROR | 按 diff 修复/改用 Re-clone |
+| E_RECLONE_FAILED | NET-E001 | 是 | ERROR | 检查远程/清理后重试 |
 ---
 
 ---
@@ -1453,7 +1456,7 @@ interface ICiProvider {
 - **纳入**：`bindComponent { componentId, displayName? }` → 远程只读校验四仓（full_name 清单、缺仓清单）；远程不可用 fail-closed、不写库；缺仓允许纳入但标 BINDING_ERROR（D-015）；确认后写 management 状态并审计 `COMPONENT_BIND`，**不直接改 repo 远程/本地字段**。
 - **移出**：`unbindComponent { componentId, mode }`：
   - `STOP_MANAGE`：`is_managed=0`；本地目录/repo 行保留；默认视图过滤，“已移出”视图可见；可重新纳入。
-  - `LOCAL_DELETE`：**必须复用 DELETE job 语义**（`confirm=true` + `confirmText=componentId` + 四阻断预检 + `.trash`），仅当四仓全部删除成功或已不存在才置 `is_deleted=1,is_local=0`；任一仓失败 → 整体 `PARTIAL`，不将组件置已移出，列出失败仓并允许重试；不提供“强制删除”。
+  - `LOCAL_DELETE`：**必须复用 DELETE job 语义**（`confirm=true` + `confirmText=componentId` + 四阻断预检 + `.trash`），仅当四仓全部删除成功或已不存在才置 `is_deleted=1`；`is_local` 由下一次 LOCAL_SCAN 置 0，管理 API 不直接写；任一仓失败 → 整体 `PARTIAL`，不将组件置已移出，列出失败仓并允许重试；不提供“强制删除”。
   - 两种方式均审计 `COMPONENT_UNBIND`（details 含 mode/逐仓结果），远端零写。
 - **UI**：工作台提供“纳入组件”“移出组件”入口；纳入弹层显示四仓 full_name/缺仓；移出确认必须展示“停止管理 vs 本地删除”差异、影响仓与 `.trash` 备份说明；入口与“已移出”视图按 AC-UI-16 验收。
 - **验收**：AC-OP-31/32 原断言 + 默认迁移（既有组件仍显示）+ 部分失败 PARTIAL + 重新纳入恢复。
@@ -1478,7 +1481,7 @@ interface ICiProvider {
 - **RECLONE（origin 不匹配/远程不可用）**：
   - 前置：远程可达、凭据作用域通过、原目录通过 clean/未推送/untracked/stash 预检（否则拒绝）；
   - 先把原目录移动到 `.trash/<stamp>/<repoName>`（stamp 唯一，冲突则加后缀），再 clone；clone 失败 → 自动 move back 并 FAILED；
-  - 成功后 `is_local=1`，扫描重算；`.trash` 备份保留 30 天。
+  - 成功后由下一次 LOCAL_SCAN 置 `is_local=1` 并重算状态；`.trash` 备份保留 30 天。
 - **确认**：REPAIR/RECLONE 均需确认；RECLONE 需输入组件 ID 强确认并展示 `.trash` 备份路径。
 - **审计**：action=`REPAIR`/`RECLONE`，含 pre/post HEAD 与结果；失败零改动（按上述回滚）。
 - **验收**：AC-OP-05 目标存在不覆盖/转 Repair 提示；AC-REPO-08 两场景 + 失败回滚。
@@ -1512,7 +1515,7 @@ interface ICiProvider {
 
 ## 16.7 测试环境门禁与证据分级
 
-- 真实 Gitea 测试默认地址**只写入** `docs/testing-gitea-gate.md`，本需求不硬编码内网 IP；探测规则：`MBD_GITEA_URL`/`MBD_GITEA_PROBE_URL`，GET `<base>/api/v1/version`，超时 2.5s。
+- 真实 Gitea 测试默认地址**只写入** `docs/testing-gitea-gate.md`，本需求不硬编码内网 IP；探测规则：`MBD_GITEA_URL`/`MBD_GITEA_PROBE_URL`；GET `<base>/api/v1/version` + `GET /api/v1/user`（带 token，校验身份）+ `GET /api/v1/orgs/{org}/repos?limit=1`（校验 org/权限），超时 2.5s；三项全 2xx 才算 L2 可达。禁止条件恒真/空断言；runner 必须记录每项 HTTP status。
 - **两级证据**：
   - L1 本地/CI 必跑：单元、本地 bare remote、Mock CDP、单二进制 Gitea/WireMock 夹具（§13.2 已要求）——**不允许 SKIP**；
   - L2 共享测试实例：可达才跑；不可达 SKIP，写 `artifacts/<name>/result.json` `{skipped:true,url,reason,commit}`，**SKIP 不计入 DoD 的真实证据**。
@@ -1547,7 +1550,7 @@ interface ICiProvider {
 5. 独立 Gate（需求/代码/UX）签字：报告文件 + 结论 + 日期 + commit；M2 = M2a ∧ M2b；D-025 §4 的 M2b 出口按 D-028 增补 AC-OP-34/35（ADR 记录，不降低原 AC）。
 # Annex A — 验收标准目录（AC Catalog，normative）
 
-> 本附录由原 AC Catalog 合并而来，含 AC-OP-01…32、AC-REPO-01…11、AC-SAFE、AC-UI 等逐条 Given/When/Then；与正文冲突时以正文中的安全/范围硬约束为准。
+> 本附录由原 AC Catalog 合并而来，含 AC-OP-01…35、AC-REPO-01…11、AC-SAFE、AC-UI 等逐条 Given/When/Then；与正文冲突时以正文中的安全/范围硬约束为准。
 
 
 | 项 | 内容 |
@@ -1730,7 +1733,7 @@ AC-<域>-<NN>[.<子字母>]
 - **测试层级/依赖**：IT（`G-WIRE`）
 - **Given**：`G-WIRE` 两套 stub：① `GET /api/v1/user` → 401；② 200 但 token scope 仅 `read:user`（无 `read:repository`），`/orgs/MBD/repos` → 403。
 - **When**：分别点“测试连接”。
-- **Then**：① 401 场景：`data-error-code="CFG-E002"`，UI 含“重新生成最小 scope Token”入口；`app_setting` 不写认证状态；② 403 场景：`CFG-E002` + 缺失权限清单**逐项列出** `read:repository`、`write:repository`（缺失项数=2）；③ 两场景均**不**弹出成功态、不进入下一步；④ 错误码与文案分离：文案本地化字符串变化后错误码不变（`data-error-code` 仍 `CFG-E002`）。
+- **Then**：① 401 场景：`data-error-code="E_AUTH_FAILED"`（`details.srsCode=NET-E001`），UI 含“重新生成最小 scope Token”入口；`app_setting` 不写认证状态；② 403 场景：`E_AUTH_FAILED`（`details.srsCode=NET-E001`）+ 缺失权限清单**逐项列出** `read:repository`、`write:repository`（缺失项数=2）；③ 两场景均**不**弹出成功态、不进入下一步；④ 错误码与文案分离：文案本地化字符串变化后错误码不变（`data-error-code` 仍 `E_AUTH_FAILED`）。
 - **关联 NFR/OQ**：NFR-REL-02；—
 
 #### AC-CFG-06 · Token 明文零泄漏（日志/配置/命令行/remote URL/诊断包）
@@ -2463,7 +2466,7 @@ AC-<域>-<NN>[.<子字母>]
 - **测试层级/依赖**：IT（`F-UNMERGED`、`F-IN_PROGRESS`、`F-INVALID-REMOTE`、`F-EMPTY`、`F-DETACHED-COMMIT`）
 - **Given**：5 仓分别处于上述状态，1 仓 `F-BEHIND` 可同步。
 - **When**：对组件执行 SYNC（含 dry-run 与确认）。
-- **Then**：① 5 仓在预检表中逐行标记“跳过+原因”，SYNC 不执行 `reset --hard`（`.git` 对象/索引 hash 不变）；② 被跳过仓返回 `OP-E004`；③ 仅 `F-BEHIND` 仓完成 SYNC；④ `job.succeeded=1`、`failed=0`、`job.skipped=5`（SRS v0.2.1 §8.1 已补整数计数列），且被跳过 5 仓逐行 `job_item.state=SKIPPED`（SRS §8.1 合法值）；组件 `OP_PARTIAL_FAILED` 或按清除规则；⑤ DETACHED 仓：§7.6 中 SYNC=❌，跳过并提示“先建分支”（R-25 已关闭），不做目标分支猜测。
+- **Then**：① 5 仓在预检表中逐行标记“跳过+原因”，SYNC 不执行 `reset --hard`（`.git` 对象/索引 hash 不变）；② 被跳过仓返回 `OP-E004`；③ 仅 `F-BEHIND` 仓完成 SYNC；④ `job.succeeded=1`、`failed=0`、`job.skipped=5`（SRS v0.2.1 §8.1 已补整数计数列），且被跳过 5 仓逐行 `job_item.state=SKIPPED`（SRS §8.1 合法值）；组件 `OP_PARTIAL_FAILED`（skipped>0 时），清除需显式确认并写审计；⑤ DETACHED 仓：§7.6 中 SYNC=❌，跳过并提示“先建分支”（R-25 已关闭），不做目标分支猜测。
 - **关联 NFR/OQ**：FR-OP-05、SRS §7.6；R-25 已关闭（§7.6 DETACHED SYNC=❌）
 
 #### AC-OP-18 · SYNC 的 untracked（SYNCED 前置态）：默认保留且无需确认；显式勾选删除前必须 dry-run + 确认
@@ -2537,7 +2540,7 @@ AC-<域>-<NN>[.<子字母>]
 - **测试层级/依赖**：IT（`MBD_FAULT_INJECT=CRASH_AT_ITEM_2` 确定性终止；任务 DB/JSON）
 - **Given**：16 项批量 FETCH，用故障注入在第 2 项执行前终止 Host 进程（不靠墙钟/人工时机）。
 - **When**：重启 Host，打开任务中心。
-- **Then**：① 重启后 job 状态为 `INTERRUPTED`，job_item 为 `INTERRUPTED`；未开始 item 保持 `QUEUED` 且不重复执行；② 已成功项保持 OK，当前项按实际 git 状态记 INTERRUPTED/FAILED；③ 失败项可“仅重试失败项”，新 job 的 target 只含失败 repo_id；④ 任务中心逐项显示状态/错误码；⑤ 不产生重复目录/重复 ref；⑥ 无需等待真实 kill，注入点固定即可复现。
+- **Then**：① 重启后 job 状态为 `INTERRUPTED`，job_item 为 `INTERRUPTED`；未开始 item 保持 `QUEUED` 且不重复执行；② 已成功项保持 OK，当前项记 `INTERRUPTED`；③ 失败项可“仅重试失败项”，新 job 的 target 只含失败 repo_id；④ 任务中心逐项显示状态/错误码；⑤ 不产生重复目录/重复 ref；⑥ 无需等待真实 kill，注入点固定即可复现。
 - **关联 NFR/OQ**：FR-OP-08、AC-OP-03、FR-SAFE-04；确定性注入见 §16.6。
 #### AC-OP-27 · 取消语义：合作式取消、`CANCELLED` 逐仓、未开始保持原状、触发重扫
 
@@ -2585,7 +2588,7 @@ AC-<域>-<NN>[.<子字母>]
 - **测试层级/依赖**：E2E（真实 DELETE job 语义）
 - **Given**：组件 `A`（4 仓已克隆、clean、无未推送）。
 - **When**：① 仅停止管理；② 重新纳入后选择本地删除（输入组件 ID 强确认）；③ 再模拟一仓删除失败。
-- **Then**：① 停止管理：`is_managed=0`，`component`/`repo` 行保留，本地目录保留，默认视图过滤、“已移出”可见，重新纳入恢复；② 本地删除：复用 DELETE job（confirm+typed componentId+四阻断+`.trash`），仅四仓全部成功/已不存在时置 `is_deleted=1,repo.is_local=0`；目录进 `.trash`，看板默认隐藏；③ 一仓失败 → 整体 `PARTIAL`，组件**不**置已移出，列出失败仓并可重试；④ 两模式均写审计 `COMPONENT_UNBIND`（mode/逐仓结果），远端零变更；⑤ 不提供强制删除；⑥ 重新纳入恢复显示且 DB 一致。
+- **Then**：① 停止管理：`is_managed=0`，`component`/`repo` 行保留，本地目录保留，默认视图过滤、“已移出”可见，重新纳入恢复；② 本地删除：复用 DELETE job（confirm+typed componentId+四阻断+`.trash`），仅四仓全部成功/已不存在时置 `is_deleted=1`；`repo.is_local` 由下一次扫描置 0；目录进 `.trash`，看板默认隐藏；③ 一仓失败 → 整体 `PARTIAL`，组件**不**置已移出，列出失败仓并可重试；④ 两模式均写审计 `COMPONENT_UNBIND`（mode/逐仓结果），远端零变更；⑤ 不提供强制删除；⑥ 重新纳入恢复显示且 DB 一致。
 - **关联 NFR/OQ**：FR-OP-12、§16.1；R-27 已关闭。
 #### AC-OP-34 · M2b 证据门禁：SKIP 不计 COVERED、真实证据可追溯
 
@@ -2651,7 +2654,7 @@ AC-<域>-<NN>[.<子字母>]
 - **测试层级/依赖**：IT（`F-DIRTY`、`F-UNMERGED`）
 - **Given**：① 仓有 1 个已 staged 文件 + 1 个 unstaged 文件；② `F-UNMERGED` 仓。
 - **When**：① 输入 message 点 Commit；② 对 unmerged 仓点 Commit。
-- **Then**：① 场景① 仅 staged 文件被提交（`git show --stat` 只含 1 文件），成功后 `main_status` 转为 `AHEAD`（有未推送提交）或 `SYNCED`（随后 push 测试）；② message 与输入一致；③ 场景② 被拒并提示“存在未解决冲突”，`git status` 不变；④ 不提供冲突解决/rebase UI（页面无相关控件断言）；⑤ 提交写审计。
+- **Then**：① 场景① 仅 staged 文件被提交（`git show --stat` 只含 1 文件），成功后 `main_status` 转为 `AHEAD`（测试不执行 push）；② message 与输入一致；③ 场景② 被拒并提示“存在未解决冲突”，`git status` 不变；④ 不提供冲突解决/rebase UI（页面无相关控件断言）；⑤ 提交写审计。
 - **关联 NFR/OQ**：FR-REPO-03；—
 
 #### AC-REPO-07 · Reset（v1.1）：v1 不暴露入口
@@ -2667,7 +2670,7 @@ AC-<域>-<NN>[.<子字母>]
 - **测试层级/依赖**：IT（`F-INVALID-NOTREPO`、`F-INVALID-REMOTE`）
 - **Given**：① 目录非 git 仓（`F-INVALID-NOTREPO`）；② 是 git 仓但 origin 不匹配（`F-INVALID-REMOTE`）。
 - **When**：分别执行 Repair（①）/ Re-clone（②，含备份现有目录到 `.trash`）。
-- **Then**：① 场景① Repair 后目录成为合法仓且 origin 匹配，`main_status` 脱离 INVALID（→ SYNCED/EMPTY 等真实态）；② 场景② Re-clone 先备份原目录进 `.trash` 再 clone，成功后 `is_local=1`、`main_status` 正确；③ 两场景均走预检+job+逐仓结果；④ 组件 `BINDING_ERROR` 在修复后按真实状态重算（若四仓齐则脱离 BINDING_ERROR）；⑤ 审计记录 repair/re-clone；⑥ **失败路径**：REPAIR/RECLONE 任一步失败 → 目录/HEAD/远程零改动（按 §16.3 回滚），`job_item=FAILED` + `E_REPAIR_FAILED`/`E_RECLONE_FAILED`（附录 D D.2）；REPAIR 备份保留在 `.trash` 30 天，失败后可人工恢复；⑦ Re-clone 前必须通过 clean/未推送/untracked/stash 预检，否则拒绝。
+- **Then**：① 场景① Repair 后目录成为合法仓且 origin 匹配，`main_status` 脱离 INVALID（→ SYNCED/EMPTY 等真实态）；② 场景② Re-clone 先备份原目录进 `.trash` 再 clone，成功后由下一次 LOCAL_SCAN 置 `is_local=1`、`main_status` 正确；③ 两场景均走预检+job+逐仓结果；④ 组件 `BINDING_ERROR` 在修复后按真实状态重算（若四仓齐则脱离 BINDING_ERROR）；⑤ 审计记录 repair/re-clone；⑥ **失败路径**：REPAIR/RECLONE 任一步失败 → 目录/HEAD/远程零改动（按 §16.3 回滚），`job_item=FAILED` + `E_REPAIR_FAILED`/`E_RECLONE_FAILED`（附录 D D.2）；REPAIR 备份保留在 `.trash` 30 天，失败后可人工恢复；⑦ Re-clone 前必须通过 clean/未推送/untracked/stash 预检，否则拒绝。
 - **关联 NFR/OQ**：FR-REPO-05（旧 AC-18 仅映射见 §1.4）；—
 
 #### AC-REPO-09 · `NO_UPSTREAM` 三子型修复：set-upstream / 发布分支
@@ -2856,7 +2859,7 @@ AC-<域>-<NN>[.<子字母>]
 - **测试层级/依赖**：IT + VIS
 - **Given**：附录 D 全量设置键表（以 SRS v0.2.1 附录 D 为唯一清单；实测 **38 键**：`workspace.root`、`server.baseUrl`、`server.org`、`auth.mode`、`proxy.mode`、`proxy.url`、`tls.extraCa`、`git.path`、`scan.fingerprintIntervalSec`、`scan.hotIntervalSec`、`scan.coldIntervalMin`、`remote.listWatermarkMin`、`remote.refreshMin`、`remote.fullSweepHours`、`fetch.beforeWrite`、`ttl.localSec`、`ttl.fetchSec`、`ttl.remoteSec`、`delete.retentionDays`、`backup.retentionDays`、`log.keepDays`、`audit.keepDays`、`ui.theme`、`ui.density`、`ui.reduceMotion`、`ci.enabled`、`ci.baseUrl`、`ci.token`、`ci.pollIntervalSec`、`dirty.includeUntracked`、`remote.prune`、`safety.requireTypedConfirm`）。
 - **When**：打开 P8 设置页，逐分区核对键。
-- **Then**：① 分区固定六组：通用/工作区/认证/操作与安全/CI 集成（禁用占位）/实验特性（v1 无可配置键，仅说明/开关占位，R-18 关闭）；② 附录 D 每个键均可在 UI 找到对应控件（键→控件映射表 100% 命中，**32/32**；含 `backup.retentionDays`、`ci.token`、`dirty.includeUntracked`、`remote.prune`、`safety.requireTypedConfirm`）；③ `ci.enabled/ci.baseUrl/ci.token/ci.pollIntervalSec` 在 CI 分区且为禁用态 + 实验标记（`ci.token` 控件只显示“已存凭据引用/尾 4 位”）；④ 每控件显示当前值与默认值（重置入口存在），缺键即失败（不得出现附录 D 无定义的设置项）；⑤ 快照通过。
+- **Then**：① 分区固定六组：通用/工作区/认证/操作与安全/CI 集成（禁用占位）/实验特性（v1 无可配置键，仅说明/开关占位，R-18 关闭）；② 附录 D 每个键均可在 UI 找到对应控件（键→控件映射表 100% 命中，**38/38**；含 `backup.retentionDays`、`ci.token`、`dirty.includeUntracked`、`remote.prune`、`safety.requireTypedConfirm`）；③ `ci.enabled/ci.baseUrl/ci.token/ci.pollIntervalSec` 在 CI 分区且为禁用态 + 实验标记（`ci.token` 控件只显示“已存凭据引用/尾 4 位”）；④ 每控件显示当前值与默认值（重置入口存在），缺键即失败（不得出现附录 D 无定义的设置项）；⑤ 快照通过。
 - **关联 NFR/OQ**：FR-OPS-03、附录 D；R-13/R-18 已关闭（CI 4 键齐；实验特性 v1 无键）
 
 #### AC-OPS-08 · 设置校验与生效范围（即时/重启）逐键（v0.2.1：38 键全覆盖）
@@ -2934,10 +2937,10 @@ AC-<域>-<NN>[.<子字母>]
 #### AC-OPS-17 · 错误码表核对：稳定、可读文案、UI 展示错误码+文案
 - **覆盖 FR**：FR-OPS-09
 - **测试层级/依赖**：UT + IT
-- **Given**：附录 D 示例错误码 16 个 + M0 补全后的全表（前缀 `CFG/SYNC/SCAN/STATE/OP/FS/NET/GIT/SEC`）。
+- **Given**：附录 D 的 srsCode 表 + D.2 Host 映射表（v0.4 冻结）。
 - **When**：① 逐码触发或单测注入；② 修改某码的用户文案。
-- **Then**：① 每个错误码均有：码值、用户可读文案、可重试性、日志级别（M0 需冻结四列，见 §4.2 R-06）；② UI 展示格式固定为“错误码 + 文案”（`data-error-code` + 文案节点）；③ 文案变化后码值不变（回归断言）；④ 未知错误兜底码存在且前缀合法；⑤ 任务中心/日志/诊断包三处引用同一码表。
-- **关联 NFR/OQ**：FR-OPS-09、附录 D；〔SRS 需修订 R-06〕
+- **Then**：① 每个错误码均有：码值、用户可读文案、可重试性、日志级别（四列已冻结：码值/文案/可重试性/日志级别，见 D.2）；② UI 展示格式固定为“错误码 + 文案”（`data-error-code` + 文案节点）；③ 文案变化后码值不变（回归断言）；④ 未知错误兜底码存在且前缀合法；⑤ 任务中心/日志/诊断包三处引用同一码表。
+- **关联 NFR/OQ**：FR-OPS-09、附录 D；R-06 已关闭。
 
 ### 2.11 CI 预留（FR-CI，v1 只占位）
 
@@ -3264,7 +3267,7 @@ M0 = 骨架与冻结（SRS §3.3）。以下 AC 的 Given/When/Then/预期值/�
 - [ ] 10. **Tag/TAG_DRIFT**：无“基线模式”，无条件计算有 AC（AC-STA-11、AC-OP-11/12/13/14）。
 - [ ] 11. **CI 预留**：10 锚点/契约/DDL/底色不变/无裸 TODO/新鲜度均有 AC（AC-CI-01…AC-CI-11）。
 - [ ] 12. **性能**：两档数据集、测量方法（§13.3）、门禁（BENCH）写入 AC（AC-BOARD-03/05/14、AC-SCAN-08/09、AC-SYNC-12）。
-- [ ] 13. **SRS 修订闭环**：§4.2 R-01…R-38 已逐条标状态（37 已关闭 / 仅 R-06 仍开放：**M0 出口条件**，附录 D 错误码全表冻结时回写 AC）；§4.1 OQ-21/OQ-22 已关闭，OQ-23/OQ-24 仍为 M0/版本归属决策。
+- [ ] 13. **SRS 修订闭环**：§4.2 R-01…R-38 已逐条标状态（38 已关闭：**M0 出口条件**，附录 D 错误码全表冻结时回写 AC）；§4.1 OQ-21/OQ-22 已关闭，OQ-23/OQ-24 仍为 M0/版本归属决策。
 - [ ] 14. **版本外项**：v1.1 项（FR-CFG-06/DETAIL-05/REPO-04/OPS-07）的 AC 只冻结“入口不存在”，完整行为移入 §2.12 v1.1 AC（不冻结），不阻塞 M0。
 - [ ] 15. **编号与映射**：新编号规则生效、旧 AC-01…27 映射表存在（§1.2/§1.4），无重复/空缺编号。
 - [ ] 16. **签收**：产品/QA/架构三方确认；冻结记录（版本号、日期、文件哈希）写入本文件末尾。
