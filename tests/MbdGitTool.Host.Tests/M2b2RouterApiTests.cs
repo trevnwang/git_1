@@ -106,6 +106,26 @@ public sealed class M2b2RouterApiTests
     }
 
     [Fact]
+    public async Task ExportOperationLog_HonorsActionAndResultFilters()
+    {
+        using var fixture = GitRemoteFixture.Create();
+        var config = TestAudit.NewConfig(fixture.Root);
+        var audit = new OperationAuditService(config);
+        audit.Record("FETCH", "CF100A_Demo", "IMPL", "SYNCED", "a", "a", ok: true, errorCode: null, durationMs: 1);
+        audit.Record("PUSH", "CF100A_Demo", "IMPL", "AHEAD", "b", "b", ok: false, errorCode: "E_PUSH_REJECTED", durationMs: 1);
+
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        var exported = await DispatchAsync(router, "exportOperationLog", new { format = "csv", result = "OK" });
+        Assert.True(exported.Ok, exported.Error?.Code);
+        var data = Assert.IsType<OperationLogExportDto>(exported.Data);
+        Assert.Equal(1, data.Count);
+        var text = File.ReadAllText(data.Path);
+        Assert.Contains("FETCH", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("PUSH", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetBackupRefsAndRestore_AuditsRestoreBackup_AndRequiresConfirm()
     {
         using var fixture = GitRemoteFixture.Create();

@@ -333,7 +333,42 @@ public sealed partial class BatchOperationService
                 credentialFailure.Error?.Message ?? "CLONE 凭据配置校验失败");
         }
 
+        // AC-OP-02：Clone 预检必须逐项阻断（长路径/磁盘空间/凭据/远端存在），全部在网络 clone 前完成。
+        if (targetPath.Length > 230)
+        {
+            return Failed(
+                BridgeErrorCodes.PathTooLong,
+                $"CLONE 目标路径过长（{targetPath.Length} 字符，Windows 安全阈值 230）：{repoName}");
+        }
+
+        try
+        {
+            var root = Path.GetPathRoot(Path.GetFullPath(targetPath));
+            if (!string.IsNullOrEmpty(root))
+            {
+                var free = new DriveInfo(root).AvailableFreeSpace;
+                if (free < 256L * 1024 * 1024)
+                {
+                    return Failed(
+                        BridgeErrorCodes.DiskFull,
+                        $"CLONE 目标磁盘可用空间不足 256MB（剩余 {free / 1024 / 1024}MB）：{repoName}");
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            HostLog.Warn($"CLONE 磁盘预检失败（{ex.GetType().Name}），继续由 clone 自身报错");
+        }
+
         var url = baseUrl + "/" + org + "/" + repoName + ".git";
+        var remoteCheck = await _git
+            .RunAsync(_paths.Root, new[] { "ls-remote", "--heads", "--", url }, cancellationToken, NetworkTimeout, credentialEnvironment)
+            .ConfigureAwait(false);
+        if (!remoteCheck.Success)
+        {
+            return ClassifyCloneFailure(remoteCheck, repoName);
+        }
+
         var clone = await _git
             .RunAsync(_paths.Root, new[] { "clone", "--", url, targetPath }, cancellationToken, NetworkTimeout, credentialEnvironment)
             .ConfigureAwait(false);
@@ -991,6 +1026,25 @@ public sealed partial class BatchOperationService
             null);
     }
 
+    /// <summary>AC-OP-04：Clone 错误分类（401/403 不重试、404 不重试、网络错误可重试）。</summary>
+    private static BatchItemResult ClassifyCloneFailure(GitResult failure, string repoName)
+    {
+        var text = (failure.Stderr + "\n" + failure.Stdout).ToLowerInvariant();
+        var code = text switch
+        {
+            var s when s.Contains("authentication failed") || s.Contains("401") || s.Contains("403")
+                || s.Contains("permission denied") || s.Contains("access denied") => BridgeErrorCodes.AuthFailed,
+            var s when s.Contains("not found") || s.Contains("404") || s.Contains("does not exist")
+                || s.Contains("repository not found") => BridgeErrorCodes.RemoteNotFound,
+            var s when s.Contains("could not resolve host") || s.Contains("connection") || s.Contains("timed out")
+                || s.Contains("timeout") || s.Contains("failed to connect") || s.Contains("network") => BridgeErrorCodes.Network,
+            _ => BridgeErrorCodes.GitFailed
+        };
+        var retryable = code == BridgeErrorCodes.Network;
+        return Failed(
+            code,
+            $"CLONE 远端预检失败（{code}）：{repoName}；{(retryable ? "网络类错误可重试" : "凭据/仓库不存在不自动重试")}");
+    }
     // ---------------------------------------------------------------- .trash 保留期清理
 
     /// <summary>

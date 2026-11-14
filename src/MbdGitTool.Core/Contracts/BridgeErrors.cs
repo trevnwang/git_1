@@ -51,6 +51,11 @@ public static class BridgeErrorCodes
     /// 无法证明写操作未应用）；不猜测成功，需人工核对。
     /// </summary>
     public const string ReconcileUnknown = "E_RECONCILE_UNKNOWN";
+    public const string AuthFailed = "E_AUTH_FAILED";
+    public const string RemoteNotFound = "E_REMOTE_NOT_FOUND";
+    public const string Network = "E_NETWORK";
+    public const string DiskFull = "E_DISK_FULL";
+    public const string PathTooLong = "E_PATH_TOO_LONG";
 }
 
 /// <summary>桥错误：<c>code</c> 稳定错误码 + 人类可读 <c>message</c> + 可选 <c>details</c>（诊断/确认流程）。</summary>

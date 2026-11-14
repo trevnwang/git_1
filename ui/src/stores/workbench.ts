@@ -2747,7 +2747,10 @@ async function exportAudit(format: 'csv' | 'json'): Promise<void> {
   try {
     const result = isMockMode()
       ? mock.mockExportOperationLog(format)
-      : await api.exportOperationLog(format)
+      : await api.exportOperationLog(format, {
+          action: state.audit.filters.action || undefined,
+          result: state.audit.filters.result || undefined,
+        })
     state.audit.lastExport = { path: result.path, format, count: result.count }
     notifyAction(
       `已导出操作审计 ${format.toUpperCase()}：${result.path}（${result.count} 条）`,
