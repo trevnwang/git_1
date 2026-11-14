@@ -41,7 +41,9 @@ public sealed record JobItemDto(
     string? PreHead,
     string? PostHead,
     string? BackupRef,
-    bool Preview = false);
+    bool Preview = false,
+  string? ExpectHead = null,
+  string? BaselineRef = null);
 
 /// <summary><c>getJobs</c> 响应：<c>{ jobs: JobDto[] }</c>（按创建时间倒序，最多 <c>limit</c> 条）。</summary>
 public sealed record JobsDto(IReadOnlyList<JobDto> Jobs);

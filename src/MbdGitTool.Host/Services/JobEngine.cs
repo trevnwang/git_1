@@ -671,6 +671,7 @@ public sealed class JobEngine : IDisposable
             item.PreHead = result.PreHead;
             item.PostHead = result.PostHead;
             item.BackupRef = Truncate(result.BackupRef, 256);
+            item.BaselineRef = Truncate(result.BaselineRef, 256);
             item.Preview = result.State == JobItemStates.Preview;
             item.RepoState = repoState;
             if (result.State == JobItemStates.Canceled)
@@ -736,6 +737,7 @@ public sealed class JobEngine : IDisposable
         if (repo is not null)
         {
             item.RepoName = BatchOperationService.RepoNameFor(repo, item.ComponentId, item.RepoType);
+            item.ExpectHead ??= repo.Repo.HeadSha;
         }
         else if (job.Kind is "CLONE" or "RESTORE")
         {
@@ -1987,6 +1989,8 @@ public sealed class JobEngine : IDisposable
                 PreHead = item.PreHead,
                 PostHead = item.PostHead,
                 BackupRef = item.BackupRef,
+                ExpectHead = item.ExpectHead,
+                BaselineRef = item.BaselineRef,
                 Preview = item.Preview || string.Equals(item.State, JobItemStates.Preview, StringComparison.Ordinal)
             });
         }
@@ -2009,7 +2013,9 @@ public sealed class JobEngine : IDisposable
                 item.PreHead,
                 item.PostHead,
                 item.BackupRef,
-                item.Preview || string.Equals(item.State, JobItemStates.Preview, StringComparison.Ordinal)))
+                item.Preview || string.Equals(item.State, JobItemStates.Preview, StringComparison.Ordinal),
+                item.ExpectHead,
+                item.BaselineRef))
             .ToList();
 
         return new JobDto(
@@ -2226,6 +2232,12 @@ public sealed class JobEngine : IDisposable
         public string? PostHead { get; set; }
 
         public string? BackupRef { get; set; }
+
+  /// <summary>写前 CAS 期望 HEAD（AC-SAFE-08）；来自快照。</summary>
+  public string? ExpectHead { get; set; }
+
+  /// <summary>CREATE 基线 ref（AC-OP-25，可审计/撤销依据）。</summary>
+  public string? BaselineRef { get; set; }
 
         /// <summary>dryRun 预检 item 标记（state=PREVIEW 时为 true）。</summary>
         public bool Preview { get; set; }

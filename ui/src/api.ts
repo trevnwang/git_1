@@ -555,6 +555,8 @@ export type RequestMethod =
   | 'unbindComponent'
   | 'getComponentManagement'
   | 'undoCreate'
+  | 'getDeletePending'
+  | 'cancelDeletePending'
 
 export const TIMEOUTS: Record<RequestMethod, number> = {
   getSnapshot: 45_000,
@@ -585,6 +587,8 @@ export const TIMEOUTS: Record<RequestMethod, number> = {
   unbindComponent: 120_000,
   getComponentManagement: 5_000,
   undoCreate: 60_000,
+  getDeletePending: 5_000,
+  cancelDeletePending: 10_000,
 }
 
 /** 旧入口默认超时（与 M1 保持一致）。 */

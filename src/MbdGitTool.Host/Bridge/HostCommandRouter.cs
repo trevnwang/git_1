@@ -34,6 +34,8 @@ public sealed class HostCommandRouter : IDisposable
     ["bindComponent"] = TimeSpan.FromSeconds(45),
     ["unbindComponent"] = TimeSpan.FromSeconds(10),
     ["getComponentManagement"] = TimeSpan.FromSeconds(5),
+    ["getDeletePending"] = TimeSpan.FromSeconds(5),
+    ["cancelDeletePending"] = TimeSpan.FromSeconds(10),
     ["undoCreate"] = TimeSpan.FromSeconds(60),
             ["refresh"] = TimeSpan.FromSeconds(120),
             ["getComponentDetail"] = TimeSpan.FromSeconds(45),
@@ -77,6 +79,7 @@ public sealed class HostCommandRouter : IDisposable
     private readonly RetentionService _retention;
     private readonly ComponentManagementService _management;
     private readonly JobStore _jobStore;
+    private readonly DeletePendingService _deletePending;
     private readonly RemoteRefsService _remoteRefs;
     private readonly ComponentDetailService _componentDetail;
     private readonly RepoDetailService _repoDetail;
@@ -118,6 +121,7 @@ public sealed class HostCommandRouter : IDisposable
         _retention = new RetentionService(_snapshots.Config, _audit, _backup);
         _management = new ComponentManagementService(_snapshots.Config);
         _jobStore = new JobStore(_snapshots.Config);
+        _deletePending = new DeletePendingService(_snapshots.Config);
 
         // 启动保留清理：后台执行，避免阻塞 Host 首屏（命令 cleanupRetention 可同步触发）。
         StartupRetention = Task.Run(async () =>
@@ -358,6 +362,8 @@ public sealed class HostCommandRouter : IDisposable
                 var display = parsedBind.DisplayName;
                 var (ok, error, missing, displayName) = await _management.BindAsync(ids, display, cancellationToken).ConfigureAwait(false);
                 if (!ok) return CommandResult.Failure(error!);
+                _audit.Record("COMPONENT_BIND", ids, null, null, null, null, true, null, 0,
+                    actor: Environment.UserName, requestId: Guid.NewGuid().ToString("N"), result: "OK");
                 return CommandResult.Success(new
                 {
                     componentId = ids,
@@ -422,6 +428,8 @@ public sealed class HostCommandRouter : IDisposable
                     return CommandResult.Failure(BridgeErrorCodes.InvalidArgument, "mode 必须是 STOP_MANAGE 或 LOCAL_DELETE");
                 var (ok, error) = _management.StopManage(componentId);
                 if (!ok) return CommandResult.Failure(error!);
+                _audit.Record("COMPONENT_UNBIND", componentId, null, null, null, null, true, null, 0,
+                    actor: Environment.UserName, requestId: Guid.NewGuid().ToString("N"), result: "STOP_MANAGE");
                 return CommandResult.Success(new { componentId, mode = "STOP_MANAGE", isManaged = false, isDeleted = false });
             }
 
@@ -441,12 +449,20 @@ public sealed class HostCommandRouter : IDisposable
                 var results = new List<object>();
                 foreach (var item in storedJob.Items)
                 {
-                    var match = System.Text.RegularExpressions.Regex.Match(item.Message ?? string.Empty, @"基线\s+(refs/baseline/create/\S+)");
-                    if (!match.Success) { results.Add(new { item.ComponentId, item.RepoType, state = "SKIPPED", message = "缺少基线 ref，无法撤销" }); continue; }
+                    var baselineRef = item.BaselineRef;
+                    if (string.IsNullOrWhiteSpace(baselineRef))
+                    {
+                        var match = System.Text.RegularExpressions.Regex.Match(item.Message ?? string.Empty, @"基线\s+(refs/baseline/create/\S+)");
+                        baselineRef = match.Success ? match.Groups[1].Value : null;
+                    }
+                    if (string.IsNullOrWhiteSpace(baselineRef)) { results.Add(new { item.ComponentId, item.RepoType, state = "SKIPPED", message = "缺少基线 ref，无法撤销" }); continue; }
                     var undoPath = Path.Combine(_snapshots.Config.WorkspaceRoot ?? string.Empty, item.ComponentId + "_" + item.RepoType);
                     if (!Directory.Exists(undoPath))
                     { results.Add(new { item.ComponentId, item.RepoType, state = "SKIPPED", message = "本地仓库不存在" }); continue; }
-                    var result = await batch.UndoCreateAsync(undoPath, branch!, match.Groups[1].Value, cancellationToken).ConfigureAwait(false);
+                    var journalEntry = _journal?.Begin("CREATE_UNDO", item.ComponentId, item.RepoType, null, undoPath, jobId, null);
+                    var result = await batch.UndoCreateAsync(undoPath, branch!, baselineRef, cancellationToken).ConfigureAwait(false);
+                    if (result.State == JobItemStates.Ok) _journal?.Complete(journalEntry, result.PostHead);
+                    else _journal?.Fail(journalEntry, result.ErrorCode);
                     _audit.Record("CREATE_UNDO", item.ComponentId, item.RepoType, null, null,
                         result.PostHead, ok: result.State == JobItemStates.Ok, result.ErrorCode, 0,
                         actor: Environment.UserName, requestId: Guid.NewGuid().ToString("N"), jobId: jobId,
@@ -457,6 +473,18 @@ public sealed class HostCommandRouter : IDisposable
             }
             case "getComponentManagement":
                 return CommandResult.Success(new { items = _management.List() });
+            case "getDeletePending":
+                return CommandResult.Success(new { items = _deletePending.List() });
+
+            case "cancelDeletePending":
+            {
+                var cancelParams = ParseParams<GetComponentDetailParams>(parameters);
+                var cancelId = cancelParams.ComponentId?.Trim();
+                if (string.IsNullOrWhiteSpace(cancelId))
+                    return CommandResult.Failure(BridgeErrorCodes.InvalidArgument, "缺少 componentId");
+                var removed = _deletePending.Cancel(cancelId, null);
+                return CommandResult.Success(new { componentId = cancelId, removed });
+            }
             case "getHostInfo":
                 return CommandResult.Success(_hostInfo.Get());
 

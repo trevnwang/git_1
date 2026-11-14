@@ -48,6 +48,7 @@ public sealed class RetentionService
         var stopwatch = Stopwatch.StartNew();
 
         var trashRemoved = CleanupTrash();
+        var deletePendingRemoved = new DeletePendingService(_config).CleanupExpired(TrashRetentionDays);
         var backupRefsRemoved = 0;
         try
         {
@@ -78,7 +79,7 @@ public sealed class RetentionService
             WorkspaceAvailable: _config.HasWorkspace);
 
         HostLog.Info(
-            $"保留清理完成：trash={trashRemoved}（{TrashRetentionDays} 天）backupRefs={backupRefsRemoved}"
+            $"保留清理完成：trash={trashRemoved}/pending={deletePendingRemoved}（{TrashRetentionDays} 天）backupRefs={backupRefsRemoved}"
             + $"（{_config.EffectiveBackupRetentionDays} 天）auditDb={auditRowsRemoved}/jsonl={auditJsonlRowsRemoved}"
             + $"（{_config.EffectiveAuditRetentionDays} 天）ms={stopwatch.ElapsedMilliseconds}");
 

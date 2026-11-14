@@ -19,7 +19,8 @@ public sealed record BatchItemResult(
     string? Message = null,
     string? PreHead = null,
     string? PostHead = null,
-    string? BackupRef = null);
+    string? BackupRef = null,
+    string? BaselineRef = null);
 
 /// <summary>
 /// M2b 批量“自定义 kind”执行器（SRS §9.7 FR-OP-01…07/11）：SYNC / CLONE / DELETE / RESTORE / CREATE / TAG。
@@ -1232,7 +1233,8 @@ public sealed partial class BatchOperationService
             $"已从当前 HEAD 创建分支 {branch}（未切换）" + baselineNote,
             preHead,
             preHead,
-            null);
+            null,
+            baseline.Success ? baselineRef : null);
     }
 
     /// <summary>

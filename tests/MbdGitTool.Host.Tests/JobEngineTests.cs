@@ -33,6 +33,32 @@ public sealed class JobEngineTests
     // ------------------------------------------------------------------ job 成功 / 查询 / 事件 / 审计
 
     [Fact]
+    public async Task RunBatch_Item_ExposesExpectHead()
+    {
+        using var fixture = BatchWorkspace.Create("CF216A_Expect_IMPL");
+        var config = TestAudit.NewConfig(fixture.Root);
+        using var snapshots = new SnapshotService(config);
+        using var router = new HostCommandRouter(config, snapshots, new RecordingLauncher());
+        await DispatchAsync(router, "getSnapshot", null);
+        var head = TestGit.Capture(fixture.Clones["CF216A_Expect_IMPL"], "rev-parse", "HEAD");
+
+        var batch = await DispatchAsync(router, "runBatch", new
+        {
+            kind = "FETCH",
+            componentIds = new[] { "CF216A_Expect" },
+            repoTypes = new[] { "IMPL" }
+        });
+        var accepted = Assert.IsType<RunBatchResultDto>(Assert.IsType<CommandResult>(batch).Data);
+        var job = await WaitJobAsync(router, accepted.JobId);
+        var item = Assert.Single(job.Items);
+        Assert.Equal(head, item.ExpectHead);
+        Assert.Equal(item.PreHead, item.ExpectHead);
+
+        var loaded = await DispatchAsync(router, "getJob", new { jobId = accepted.JobId });
+        var loadedJob = Assert.IsType<JobDto>(Assert.IsType<CommandResult>(loaded).Data);
+        Assert.Equal(head, Assert.Single(loadedJob.Items).ExpectHead);
+    }
+    [Fact]
     public async Task RunBatch_Fetch_Succeeds_EmitsEventsAndAuditsOneRowPerItem()
     {
         using var fixture = BatchWorkspace.Create("CF100A_Demo_Impl", "CF100A_Demo_SIL");
@@ -1446,6 +1472,7 @@ public sealed class JobEngineTests
         var job = await WaitJobAsync(router, accepted.JobId);
         Assert.Equal("SUCCESS", job.State);
         Assert.All(fixture.Clones.Values, clone => Assert.Equal("release/undo", TestGit.Capture(clone, "rev-parse", "--abbrev-ref", "refs/heads/release/undo")));
+        Assert.All(job.Items, item => Assert.False(string.IsNullOrWhiteSpace(item.BaselineRef)));
 
         var undo = await DispatchAsync(router, "undoCreate", new { jobId = accepted.JobId });
         Assert.True(undo.Ok, undo.Error?.Code);

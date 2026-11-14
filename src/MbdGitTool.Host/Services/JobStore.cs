@@ -200,7 +200,9 @@ public sealed record StoredJobItem(
     string? PreHead,
     string? PostHead,
     string? BackupRef,
-    bool Preview = false);
+    bool Preview = false,
+    string? ExpectHead = null,
+    string? BaselineRef = null);
 
 /// <summary>批量作业参数（runBatch.args 的解析结果；持久化以便重启后“仅重试失败项”仍可执行）。</summary>
 public sealed record StoredJobArguments(
