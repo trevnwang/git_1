@@ -1,4 +1,4 @@
-# MBD 组件全生命周期 Git 工具 — 规格说明书（Specification v0.4-draft）
+# MBD 组件全生命周期 Git 工具 — 规格说明书（Specification v0.4（frozen））
 
 > **单一需求源。** 本文件合并原 SRS 与 AC Catalog；所有实现、测试、评审、验收引用本文件。`reqs/adr/*` 是阶段性决策记录，不是需求源。
 > 评审规则：每次需求评审**只评审本文件**；评审通过并冻结后才进入开发。M2b 增量已作为本文件 §16（M2b Delta）待评审；通过后冻结，不另建需求文件。
@@ -10,9 +10,9 @@
 | 项目 | 内容 |
 |---|---|
 | 文档 ID | MBD-GIT-SRS |
-| 版本 | **v0.4-draft（合并 SRS + AC Catalog，待评审/冻结）** |
+| 版本 | **v0.4（frozen，2026-11-15）** |
 | 日期 | 2026-11-14 |
-| 状态 | **v0.4-draft：合并稿待评审**。M2 拆分（D-025）继续有效：M2a 已独立签收，M2b 未完成；M2 总出口 = M2a ∧ M2b。评审通过并冻结后进入 M2b 增量开发 |
+| 状态 | **v0.4 已冻结**（三路需求评审 PASS，2026-11-15）。M2 拆分（D-025）继续有效：M2a 已独立签收，M2b 未完成；M2 总出口 = M2a ∧ M2b。评审通过并冻结后进入 M2b 增量开发 |
 | 替代 | v0.3.1-r2；历史原稿已删除 |
 | 权威级别 | **本文件 > 任何口头/聊天记录 > ADR 阶段说明**；**UI 视觉冲突时：用户参考图 > 本文件 §11** |
 
@@ -32,7 +32,7 @@
 | v0.3 | 2026-11-14 | **UI 以用户参考图为准重构**：重写 §11 主界面为工作台（菜单栏 / 标题区 / 左侧组件卡片列表 / 中间 2×2 四仓文件树 / 右侧选中仓信息面板 / 底部 PULL·FETCH·CHKOUT·COMMIT·PUSH 按钮条 / 状态栏），新增 §11.5 文件夹视图、§11.6 批量入口、§11.0.1 冲突裁决；旧看板表格 + 侧栏 + App Shell 左侧导航**废弃**，表格视图降级 v1.1（v1 入口不存在）；新增 §9.13–9.17 六组 32 条 FR 与 §13.1.1 的 AC-UI-01…AC-UI-14；10 个 CI 锚点全部给出新落点（10/10，CI 仍不参与聚合/卡片底色）；更新 §3 范围与 M0/M1/M2/M3 里程碑、§13 追溯矩阵、§10 性能/离线措辞、附录 D 设置键 | 用户参考图 `docs/images/reference/main-ui-reference.png` + `docs/ui-redesign-plan.md` + ADR D-022…D-024 |
 | v0.3.1 | 2026-11-14 | **M2 拆分为 M2a 单仓安全交付 / M2b 批量·作业·审计（D-025）**：§3.3 M2 行拆为 M2a/M2b（出口标准与依赖）；§9.16/§9.17 标注 M2a 范围（取消/job/任务中心/仅重试失败项归 M2b）；§7.6 冻结按钮语义（DIVERGED Pull=❌、`—` 按禁用断言、EMPTY 首推归 M2b）；§13.1.1 修订 AC-UI-08/09/10 并新增 AC-UI-10a（COMMIT 确认条）/AC-UI-10b（PUSH 确认条）/AC-UI-10c（取消·job，M2b）/AC-UI-15（M2b 边界提示）；新增 §13.1.2 AC-SAFE-14（凭据作用域）/15（CAS）/16（ignored）/17（ref 校验）与 AC-OP-33（审计-lite）；§13.4 追溯矩阵与门禁更新。**当前状态：M2a 待复评，不写“已通过”** | `reqs/adr/D-025-m2a-m2b.md` + `docs/review-m2-req.md`（RQ-01…RQ-08/P0 清单）+ `docs/review-m2-code.md`（P0-1/P1-1/2/3）+ `docs/review-m2-ux-fixcheck.md`（NP0-1） |
 | v0.3.1-r2 | 2026-11-14 | **M2a 出口 AC 定义与证据物补齐（Gate G-P0-4 回写；不放宽任何安全要求）**：新增 **§13.1.2**——AC-UI-10a/10b/10c/15、AC-SAFE-14…17、AC-OP-33 的完整 Given/When/Then 与可测断言、M2a 出口 13 条口径、单源矩阵夹具 `reqs/fixtures/m2-matrix.json`（**Host 单测 + CDP 共用，禁止第三份手写期望**）、tooltip 冻结格式改 `原因 [E_*] → 替代动作`、COMMIT「对话框→确认条→执行」两步口径；§13.1.1 修正 AC-UI-08/09/10 拆分引用；§13.4 补 FR-ACT/FR-SAFE/FR-OPS 追溯行与 M2a 门禁注；新增 `docs/m2a-ac-report.md`（证据模板）与 `ui/scripts/cdp-m2a-selfcheck.mjs`（旧 `cdp-m2-selfcheck.mjs` 作废）。**状态仍为 M2a 待复评（修复中），不写“已通过”** | `docs/review-m2-gate-ux.md` §4.2/§4.4/G-P0-4 + `docs/review-m2-gate-security.md`（N-1/N-2）+ `reqs/adr/D-025-m2a-m2b.md` §2.2/§3/§5 |
-| v0.4-draft | 2026-11-15 | **需求单源化**：SRS + AC Catalog + 追溯/错误码附录合并为 specification.md；删除历史 review/archive/_tools/v0.2/docx/drawio；新增 §16 M2b 增量（组件管理/DELETE_PENDING/Repair/Re-clone/baseline/CREATE 撤销/故障注入/测试门禁/DoD）；按三路评审 P0 修订 | 用户要求：单文件评审；docs/review-spec-*.md |
+| v0.4（frozen） | 2026-11-15 | **需求单源化**：SRS + AC Catalog + 追溯/错误码附录合并为 specification.md；删除历史 review/archive/_tools/v0.2/docx/drawio；新增 §16 M2b 增量（组件管理/DELETE_PENDING/Repair/Re-clone/baseline/CREATE 撤销/故障注入/测试门禁/DoD）；按三路评审 P0 修订 | 用户要求：单文件评审；docs/review-spec-*.md |
 
 **已确认决策（ADR）**
 
@@ -1442,7 +1442,7 @@ interface ICiProvider {
 
 ---
 
-## 16. M2b 增量与完成定义（v0.4-draft，待评审）
+## 16. M2b 增量与完成定义（v0.4 冻结）
 
 > 本章只补充实现 M2b 时发现的规格缺口，**不降低**第 1–15 章与 Annex A 的任何安全/验收要求。评审通过并冻结后才可开发；实现中发现新歧义须走本文件修订，不得直接改代码。
 > 本章与正文冲突时，安全/范围硬约束以正文为准。新增行为必须映射到 Annex A 的 AC；无法映射的，在冻结前新增同域下一个未占用 AC 编号（禁止改已冻结 AC 的 Then）。
@@ -3272,18 +3272,18 @@ M0 = 骨架与冻结（SRS §3.3）。以下 AC 的 Given/When/Then/预期值/�
 - [ ] 15. **编号与映射**：新编号规则生效、旧 AC-01…27 映射表存在（§1.2/§1.4），无重复/空缺编号。
 - [ ] 16. **签收**：产品/QA/架构三方确认；冻结记录（版本号、日期、文件哈希）写入本文件末尾。
 
-### 5.4 冻结记录（待填）
+### 5.4 冻结记录（v0.4）
 
 | 项 | 内容 |
 |---|---|
-| 冻结版本 | 本文件 v0.4-draft（待评审复评通过后写哈希/日期/签收人） |
-| 文件哈希（SHA256） | 待填（冻结时由 CI 计算并登记） |
-| 冻结日期 | 待填 |
-| 签收人 | 产品：____　QA：____　架构：____ |
-| 结论 | ☐ 通过　☐ 有条件通过（列条件）　☐ 不通过 |
+| 冻结版本 | **本文件 v0.4**（M2b 增量需求冻结） |
+| 文件哈希（SHA256） | `C15E4944D88A95687F9128EAF616610E57E730ECF1B2BE41A99109967C19E68B`（评审基线 commit `cc86f52`） |
+| 冻结日期 | 2026-11-15 |
+| 签收人 | 需求评审：`review-spec-r5-complete` PASS；可测试性：`review-spec-r4-testability` PASS；架构/安全：`review-spec-r4-arch` PASS；产品/QA 由用户按本文件确认 |
+| 结论 | ☑ 通过（v0.4 冻结，允许进入 M2b 开发） |
 | 变更规则 | 冻结后只增不改语义；改 Then 期望值/枚举/错误码 → 先改 SRS（修订记录 + ADR）→ 再改 AC 并升版本号 |
 
-> v0.4 起不再使用外部 freeze-checklist；本文件 §5.3 + Annex A 即冻结门禁，签收记录写在本节。
+> v0.4 起不再使用外部 freeze-checklist；本文件 §5.3 + Annex A 即冻结门禁。冻结后只增不改语义；变更须新 ADR + 升版本。
 
 
 ---
