@@ -73,6 +73,29 @@ try {
 } catch {
   commit = 'unknown'
 }
+// AC-OP-34：每个 result.json 补齐 target/url/reachable/skipped/commit/timestamp/checks。
+for (const suite of suites) {
+  if (!suite.artifact) continue
+  try {
+    const absolute = join(here, '..', '..', suite.artifact)
+    const existing = existsSync(absolute) ? JSON.parse(readFileSync(absolute, 'utf8')) : {}
+    const augmented = {
+      target: suite.name,
+      url: giteaProbeUrl(),
+      reachable: probe.reachable,
+      skipped: suite.result === 'SKIP',
+      commit,
+      timestamp: new Date().toISOString(),
+      checks: existing.checks ?? [],
+      total: existing.total ?? null,
+      passed: existing.passed ?? null,
+      failed: existing.failed ?? [],
+    }
+    writeFileSync(absolute, JSON.stringify(augmented, null, 2))
+  } catch {
+    /* ignore */
+  }
+}
 const manifest = {
   commit,
   generatedAt: new Date().toISOString(),

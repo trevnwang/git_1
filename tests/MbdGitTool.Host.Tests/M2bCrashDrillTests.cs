@@ -14,8 +14,7 @@ public sealed class M2bCrashDrillTests
     public async Task RealProcessCrashAfterWrite_ReconcileMarksUnknownApplied()
     {
         var repoRoot = FindRepoRoot();
-        var workerDll = Path.Combine(repoRoot, "tests", "MbdGitTool.CrashDrillWorker", "bin", "Debug", "net10.0-windows", "MbdGitTool.CrashDrillWorker.dll");
-        Assert.True(File.Exists(workerDll), $"worker 不存在：{workerDll}");
+        var workerDll = EnsureWorker(repoRoot);
 
         using var workspace = new TempWorkspace();
         var repo = Path.Combine(workspace.Root, "repo");
@@ -83,7 +82,7 @@ public sealed class M2bCrashDrillTests
     public async Task RealProcessCrashBeforeWrite_ReconcileMarksNotApplied()
     {
         var repoRoot = FindRepoRoot();
-        var workerDll = Path.Combine(repoRoot, "tests", "MbdGitTool.CrashDrillWorker", "bin", "Debug", "net10.0-windows", "MbdGitTool.CrashDrillWorker.dll");
+        var workerDll = EnsureWorker(repoRoot);
         using var workspace = new TempWorkspace();
         var repo = Path.Combine(workspace.Root, "repo");
         Directory.CreateDirectory(repo);
@@ -119,6 +118,23 @@ public sealed class M2bCrashDrillTests
         Assert.Equal(0, report.UnknownApplied);
         Assert.Equal(JournalReconciler.NotApplied, report.Items[0].Status);
         Assert.Equal(0, journal.CountUnresolved());
+    }
+    private static string EnsureWorker(string repoRoot)
+    {
+        var project = Path.Combine(repoRoot, "tests", "MbdGitTool.CrashDrillWorker", "MbdGitTool.CrashDrillWorker.csproj");
+        var dll = Path.Combine(repoRoot, "tests", "MbdGitTool.CrashDrillWorker", "bin", "Debug", "net10.0-windows", "MbdGitTool.CrashDrillWorker.dll");
+        if (File.Exists(dll)) return dll;
+        var build = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = repoRoot };
+        build.ArgumentList.Add("build");
+        build.ArgumentList.Add(project);
+        build.ArgumentList.Add("-c");
+        build.ArgumentList.Add("Debug");
+        build.ArgumentList.Add("-v");
+        build.ArgumentList.Add("q");
+        using var process = Process.Start(build)!;
+        process.WaitForExit(120_000);
+        Assert.True(File.Exists(dll), $"worker 构建失败：{dll}");
+        return dll;
     }
     private static string FindRepoRoot()
     {
