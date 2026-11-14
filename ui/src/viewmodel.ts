@@ -3,9 +3,11 @@
  * 组件模板禁止散落状态映射，统一走这里。
  */
 import type {
+  BackupRefDto,
   ComponentDto,
   CommitDto,
   JobDto,
+  OperationLogItemDto,
   RepoActionAvailabilityDto,
   RepoDto,
   TreeNodeDto,
@@ -14,6 +16,7 @@ import type {
 import { HostError, toErrorMessage } from './api'
 import type {
   ActionAvailability,
+  BackupRefVm,
   BatchKind,
   CommitVm,
   ComponentVm,
@@ -23,6 +26,7 @@ import type {
   JobKind,
   JobState,
   JobVm,
+  OperationLogItemVm,
   RepoAction,
   RepoDetailVm,
   RepoType,
@@ -534,10 +538,7 @@ function reasonHint(
   reasonCode: string | undefined,
   action: RepoAction,
 ): { code: string; alt: string } {
-  // M2a 冻结覆盖：EMPTY.PUSH 禁用，首推需先有提交（按后端能力开放）。
-  if (action === 'PUSH' && /EMPTY|无首个提交|空仓/.test(reason)) {
-    return { code: 'E_ACTION_NOT_ALLOWED', alt: '空仓无首个提交：请先创建首个提交后再推送' }
-  }
+  // M2b-2：EMPTY 首推建 upstream 已由 Host 矩阵恢复（enabled 单源），UI 不再本地冻结。
   for (const hint of REASON_HINTS) {
     if (hint.match.test(reason)) return { code: hint.code, alt: hint.alt }
   }
@@ -1096,6 +1097,77 @@ export function jobProgressPercent(job: JobVm): number {
 export function jobRetryableCount(job: JobVm): number {
   return job.items.filter((item) => item.state === 'FAILED' || item.state === 'CANCELED' || item.state === 'INTERRUPTED')
     .length
+}
+
+// ───────────────────────────── M2b-2 操作审计 / 备份 ref ─────────────────────────────
+
+/** 审计 result → tone/中文标签（Host 值 OK/FAILED/SKIPPED/CANCELED/INTERRUPTED；未知保留原样）。 */
+export const AUDIT_RESULT_META: Record<string, { tone: Tone; label: string }> = {
+  OK: { tone: 'success', label: '成功' },
+  SUCCESS: { tone: 'success', label: '成功' },
+  FAILED: { tone: 'danger', label: '失败' },
+  SKIPPED: { tone: 'warning', label: '跳过' },
+  CANCELED: { tone: 'neutral', label: '已取消' },
+  CANCELLED: { tone: 'neutral', label: '已取消' },
+  INTERRUPTED: { tone: 'danger', label: '已中断' },
+  PREVIEW: { tone: 'info', label: '预览' },
+}
+
+export function auditResultMeta(result: string): { tone: Tone; label: string } {
+  const key = (result || '').toUpperCase()
+  return AUDIT_RESULT_META[key] ?? { tone: 'neutral', label: result || '—' }
+}
+
+/** 审计动作中文标签（与 job.kind 同集；未知动作保留原样大写）。 */
+export const AUDIT_ACTION_LABEL: Record<string, string> = {
+  SYNC: 'SYNC 受控同步',
+  CREATE: 'CREATE 建分支',
+  CLONE: 'Clone',
+  DELETE: 'Delete 软删',
+  RESTORE: 'Restore 恢复',
+  TAG: 'Tag',
+  PULL: 'PULL',
+  FETCH: 'FETCH',
+  CHKOUT: 'CHKOUT',
+  COMMIT: 'COMMIT',
+  PUSH: 'PUSH',
+  OPEN: '打开文件',
+  REVEAL: '打开目录',
+}
+
+export function auditActionLabel(action: string): string {
+  const key = (action || '').toUpperCase()
+  return AUDIT_ACTION_LABEL[key] ?? (key || '—')
+}
+
+/** DTO → 审计 VM（字段缺失保持空串/null，不伪造行）。 */
+export function mapOperationLogItem(dto: OperationLogItemDto): OperationLogItemVm {
+  return {
+    id: dto.id,
+    ts: dto.ts,
+    actor: dto.actor,
+    action: (dto.action || '').toUpperCase(),
+    componentId: dto.componentId ?? '',
+    repoType: (dto.repoType ?? '').toUpperCase(),
+    result: (dto.result || '').toUpperCase(),
+    errorCode: dto.errorCode,
+    requestId: dto.requestId,
+    jobId: dto.jobId,
+    jobItemId: dto.jobItemId,
+    backupRef: dto.backupRef,
+    beforeHead: dto.beforeHead,
+    afterHead: dto.afterHead,
+  }
+}
+
+/** DTO → 备份 ref VM（sha 短显示由组件截取；此处保留完整 sha）。 */
+export function mapBackupRef(dto: BackupRefDto): BackupRefVm {
+  return {
+    ref: dto.ref,
+    sha: dto.sha,
+    createdAt: dto.createdAt,
+    repoType: (dto.repoType || '').toUpperCase(),
+  }
 }
 
 export function formatDurationMs(startAt: string | null, endAt: string | null): string {

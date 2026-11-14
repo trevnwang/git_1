@@ -32,10 +32,12 @@ import {
   jobIsDryRun,
   jobKindLabel,
   jobStateMeta,
+  mapBackupRef,
   mapComponent,
   mapDetail,
   mapHostActions,
   mapJob,
+  mapOperationLogItem,
   mapTreeNodes,
   mapWorkspaceEntries,
   pickDefaultRepo,
@@ -50,6 +52,8 @@ import type {
   ActionDialogRefsStatus,
   ActionDialogRefVm,
   ActionDialogVm,
+  AuditFiltersVm,
+  BackupRefVm,
   BatchDialogVm,
   BatchKind,
   CommitVm,
@@ -66,6 +70,8 @@ import type {
   InfoTab,
   JobVm,
   ModalKind,
+  OfflineStateVm,
+  OperationLogItemVm,
   OperationVm,
   RepoAction,
   RepoDetailVm,
@@ -168,6 +174,35 @@ interface WorkbenchState {
   expandedJobIds: string[]
   /** 批量提交进行中（防重复提交；不锁定单仓五键）。 */
   batchPending: boolean
+  // ── M2b-2 操作审计（Host operation_log） ──
+  audit: {
+    status: 'idle' | 'loading' | 'ready' | 'error' | 'unavailable'
+    source: HostActionsSource
+    items: OperationLogItemVm[]
+    total: number
+    error: string
+    at: number
+    filters: AuditFiltersVm
+    limit: number
+    offset: number
+    loading: boolean
+    exporting: 'csv' | 'json' | null
+    lastExport: { path: string; format: 'csv' | 'json'; count: number } | null
+    exportError: string
+  }
+  // ── M2b-2 备份 ref 恢复 ──
+  backupRefs: {
+    status: 'idle' | 'loading' | 'ready' | 'error' | 'unavailable'
+    componentId: string
+    repoType: string
+    refs: BackupRefVm[]
+    error: string
+    source: HostActionsSource
+    at: number
+  }
+  backupRestore: { pending: string | null; error: string }
+  /** M2b-2 离线判定（source=local 且远程错误/离线标记时 offline=true；不伪造在线）。 */
+  remoteOffline: OfflineStateVm
   online: boolean
   ignoreIgnored: boolean
   compact: boolean
@@ -252,6 +287,8 @@ let snapshotRetryTimer: ReturnType<typeof setTimeout> | undefined
 let checkoutRefsSeq = 0
 /** Host actions 加载序号：组件切换后丢弃过期响应（避免旧组件矩阵串台）。 */
 let hostActionsSeq = 0
+/** 备份 ref 加载序号：抽屉内切组件/切仓后丢弃过期响应（避免旧组件的 ref 串台）。 */
+let backupRefsSeq = 0
 /** 任务中心轮询定时器（Mock 推进作业 / Host 事件兜底轮询）。 */
 let jobsClockTimer: ReturnType<typeof setInterval> | undefined
 /** Job 事件订阅取消函数（真实 Host 推送）。 */
@@ -363,6 +400,32 @@ const state = reactive<WorkbenchState>({
   tasksUnreadActive: 0,
   expandedJobIds: [],
   batchPending: false,
+  audit: {
+    status: 'idle',
+    source: 'host',
+    items: [],
+    total: 0,
+    error: '',
+    at: 0,
+    filters: { action: '', result: '' },
+    limit: 20,
+    offset: 0,
+    loading: false,
+    exporting: null,
+    lastExport: null,
+    exportError: '',
+  },
+  backupRefs: {
+    status: 'idle',
+    componentId: '',
+    repoType: '',
+    refs: [],
+    error: '',
+    source: 'host',
+    at: 0,
+  },
+  backupRestore: { pending: null, error: '' },
+  remoteOffline: { offline: false, reason: '' },
   online: true,
   ignoreIgnored: false,
   compact: false,
@@ -418,7 +481,7 @@ function blockedAvailability(
  * 3) Host actions 未就绪 → 五键禁用并提示「正在读取 Host 能力」；
  * 4) 仅在 Host actions 未就绪时保留 M1 只读能力门禁（features.repoActions=false 的旧 Host）。
  */
-function availability(): Record<RepoAction, ActionAvailability> {
+function baseAvailability(): Record<RepoAction, ActionAvailability> {
   const repo = focusedRepo()
   if (!repo) {
     return blockedAvailability(() => NO_REPO_REASON, 'E_ACTION_NOT_ALLOWED', '先在文件树/卡片中选择仓库')
@@ -454,6 +517,25 @@ function availability(): Record<RepoAction, ActionAvailability> {
     'E_BUSY',
     '等待 Host 能力读取完成后重试',
   )
+}
+
+/**
+ * M2b-2 离线降级（轻量）：快照 source=local 且存在远程错误/离线标记时，
+ * FETCH 为网络操作，必须禁用并在 tooltip 说明“离线/远程不可达”；其余五键仍由 Host 矩阵单源决定。
+ * 不伪造在线：离线判定来自快照/远程错误标记，不是本地假设。
+ */
+function availability(): Record<RepoAction, ActionAvailability> {
+  const result = baseAvailability()
+  const repo = focusedRepo()
+  if (!repo || state.action.pending || !state.remoteOffline.offline) return result
+  result.FETCH = {
+    enabled: false,
+    reason: `离线/远程不可达${state.remoteOffline.reason ? `：${state.remoteOffline.reason}` : ''}`,
+    confirm: result.FETCH.confirm,
+    code: 'E_OFFLINE',
+    alt: '恢复网络 / Gitea 连接后点击刷新；离线期间不能执行 FETCH',
+  }
+  return result
 }
 
 function unread(): number {
@@ -521,6 +603,28 @@ function notify(text: string, tone: ToastVm['tone'] = 'info', ttl = 2400): void 
   window.setTimeout(() => dismissToast(toast.id), ttl)
 }
 
+/** 带操作按钮的 Toast（M2b-2：审计导出后「打开所在目录」）；按钮点击后先关闭再执行回调。 */
+function notifyAction(
+  text: string,
+  tone: ToastVm['tone'],
+  ttl: number,
+  actionLabel: string,
+  onAction: () => void,
+): void {
+  const toast: ToastVm = { id: ++toastSeq, text, tone, ttl, actionLabel, onAction }
+  state.toasts.push(toast)
+  if (state.toasts.length > 3) state.toasts.splice(0, state.toasts.length - 3)
+  window.setTimeout(() => dismissToast(toast.id), ttl)
+}
+
+function runToastAction(id: number): void {
+  const toast = state.toasts.find((item) => item.id === id)
+  if (!toast) return
+  const action = toast.onAction
+  dismissToast(id)
+  action?.()
+}
+
 function dismissToast(id: number): void {
   const at = state.toasts.findIndex((toast) => toast.id === id)
   if (at >= 0) state.toasts.splice(at, 1)
@@ -557,6 +661,8 @@ function closeDrawer(): void {
 function openModal(kind: ModalKind): void {
   state.overlays.modal = kind
   if (kind === 'ci' && state.hostLinked && !state.mockFallback) void refreshCi()
+  // 「日志与诊断」内嵌操作审计：打开时按当前过滤条件重新拉取（Host 未实现时显示不可用态，不伪造数据）。
+  if (kind === 'logs') void refreshOperationLog(true)
 }
 
 function closeModal(): void {
@@ -630,6 +736,10 @@ function openComponentDrawer(componentId: string): void {
   closeConfirm()
   state.overlays.componentDrawer = componentId
   void loadComponentDetail(componentId)
+  // M2b-2：抽屉内「备份 ref」区按当前组件默认聚焦仓加载（用户可在区内切换 D/I/M/S）。
+  const component = state.components.find((item) => item.id === componentId)
+  const repoType = component ? pickDefaultRepo(component) : state.focusedRepoType
+  void loadBackupRefs(componentId, repoType)
 }
 
 function closeComponentDrawer(): void {
@@ -764,6 +874,41 @@ function toggleTheme(): void {
 
 // ───────────────────────────── 快照 / 初始化 ─────────────────────────────
 
+/** 离线判定用的错误码前缀/flag 关键词（Host 远程阶段失败时写入；不匹配路径/仓库名）。 */
+const REMOTE_OFFLINE_ERROR = /^E_(OFFLINE|NETWORK|REMOTE|GITEA)/i
+const REMOTE_OFFLINE_FLAG = /offline|remote_unreach|remote_fail|remote_error|remote_gone|remote_stale/i
+
+/**
+ * M2b-2 离线判定（轻量）：
+ * - 只有 `source=local`（远程阶段不可用/未就绪）才进入候选；
+ * - 远程错误/离线标记来源：Host 显式 `offline/remoteError`、snapshot.error、远程数据过期（remoteStale）、
+ *   逐仓 E_OFFLINE/E_NETWORK/E_REMOTE* 或 remote_* flag；
+ * - 命中即在顶部显示「离线/远程不可达」并禁用 FETCH；不命中时绝不显示为在线/离线任何一方之外的状态。
+ */
+function detectRemoteOffline(snapshot: SnapshotDto): OfflineStateVm {
+  if (snapshot.source !== 'local') return { offline: false, reason: '' }
+  const markers: string[] = []
+  if (snapshot.offline === true) markers.push('Host 标记远程离线')
+  if (snapshot.remoteError) markers.push(snapshot.remoteError)
+  if (snapshot.error) markers.push(snapshot.error)
+  if (snapshot.freshness?.remoteStale) markers.push('远程数据过期/未就绪（当前仅有本地扫描）')
+  for (const component of snapshot.components) {
+    for (const repo of component.repos) {
+      if (repo.errorCode && REMOTE_OFFLINE_ERROR.test(repo.errorCode)) {
+        markers.push(`${component.componentId}/${repo.repoType}：${repo.errorCode}`)
+        break
+      }
+      const flag = repo.flags.find((item) => REMOTE_OFFLINE_FLAG.test(item))
+      if (flag) {
+        markers.push(`${component.componentId}/${repo.repoType}：${flag}`)
+        break
+      }
+    }
+    if (markers.length > 0) break
+  }
+  return { offline: markers.length > 0, reason: markers[0] ?? '' }
+}
+
 /** 仅应用快照数据（不动选中/不触发 loadActive）；供动作后定向刷新复用。 */
 function applySnapshotHeader(snapshot: SnapshotDto, options: { mockFallback: boolean; reason?: string }): void {
   state.hostLinked = !options.mockFallback && hasHostBridge()
@@ -797,6 +942,8 @@ function applySnapshotHeader(snapshot: SnapshotDto, options: { mockFallback: boo
   state.capabilities = {
     repoActions: snapshot.capabilities?.repoActions ?? null,
   }
+  state.remoteOffline = detectRemoteOffline(snapshot)
+  state.online = !state.remoteOffline.offline
   state.snapshotEmpty = components.length === 0
   state.hostFailed = false
   snapshotRetryIndex = 0
@@ -1391,24 +1538,34 @@ function openCommitConfirmBar(target: ActionTarget, repo: RepoVm, message: strin
   })
 }
 
-/** PUSH 的 F 区确认条：文案固定「将推送 N 个提交（分支 → upstream）」；NO_UPSTREAM 走发布分支 + setUpstream。 */
+/**
+ * PUSH 的 F 区确认条：常规「将推送 N 个提交（分支 → upstream）」；
+ * NO_UPSTREAM 走「发布分支并建立 upstream」；M2b-2 EMPTY 首推同样走发布分支 + setUpstream=true
+ * （Host 矩阵恢复后按钮才可用；UI 不做本地可用性冻结）。
+ */
 function openPushConfirmBar(target: ActionTarget, repo: RepoVm): void {
   const stateCode = repo.state.toUpperCase()
   const noUpstream = stateCode === 'NO_UPSTREAM'
+  const empty = stateCode === 'EMPTY'
+  const releaseBranch = noUpstream || empty
   const label = repo.branch && repo.branch !== '—' ? repo.branch : 'HEAD'
   const upstreamRaw = (repo.compareRef ?? '').replace(/^refs\/remotes\//, '').trim()
   const upstream = upstreamRaw && upstreamRaw !== label ? upstreamRaw : `origin/${label}`
   const commits = Math.max(0, repo.ahead)
   openConfirmBar({
     action: 'PUSH',
-    text: `将推送 ${commits} 个提交（${label} → ${upstream}）`,
-    detail: noUpstream
-      ? `发布分支：${label} → ${upstream}；首次推送将建立 upstream（setUpstream=true）`
-      : undefined,
+    text: empty
+      ? `发布分支并建立 upstream（${label} → ${upstream}）`
+      : `将推送 ${commits} 个提交（${label} → ${upstream}）`,
+    detail: empty
+      ? `空仓首推：首次推送将建立 upstream（setUpstream=true）；${label} → ${upstream}`
+      : noUpstream
+        ? `发布分支：${label} → ${upstream}；首次推送将建立 upstream（setUpstream=true）`
+        : undefined,
     confirmLabel: '确认推送',
     danger: true,
     onAccept: () => {
-      const args: RepoActionArgs = noUpstream ? { setUpstream: true, confirm: true } : { confirm: true }
+      const args: RepoActionArgs = releaseBranch ? { setUpstream: true, confirm: true } : { confirm: true }
       void executeRepoAction('PUSH', args, true, target)
     },
   })
@@ -2467,6 +2624,326 @@ function openRestoreConfirm(componentIds: string[]): void {
   })
 }
 
+// ───────────────────────────── M2b-2 操作审计 ─────────────────────────────
+
+/** 审计页数（total/limit；至少 1 页便于显示“第 x 页”）。 */
+function auditPageCount(): number {
+  return Math.max(1, Math.ceil(state.audit.total / Math.max(1, state.audit.limit)))
+}
+
+function auditPageIndex(): number {
+  return Math.floor(state.audit.offset / Math.max(1, state.audit.limit))
+}
+
+function auditHasPrev(): boolean {
+  return state.audit.offset > 0
+}
+
+function auditHasNext(): boolean {
+  return state.audit.offset + state.audit.limit < state.audit.total
+}
+
+function auditRangeText(): string {
+  if (state.audit.total === 0) return '0 条'
+  const start = state.audit.offset + 1
+  const end = Math.min(state.audit.total, state.audit.offset + state.audit.limit)
+  return `第 ${start}–${end} / 共 ${state.audit.total} 条`
+}
+
+/**
+ * 拉取操作审计（M2b-2）：
+ * - Host：`getOperationLog`（只读）；未实现/失败时进入 unavailable/error 空态，**不展示伪造行**；
+ * - Mock：内置演示审计（页面标注 Mock）。
+ */
+async function refreshOperationLog(reset = false): Promise<void> {
+  if (state.audit.loading) return
+  if (reset) state.audit.offset = 0
+  state.audit.loading = true
+  state.audit.status = 'loading'
+  state.audit.error = ''
+  try {
+    const params = {
+      limit: state.audit.limit,
+      offset: state.audit.offset,
+      action: state.audit.filters.action.trim() || undefined,
+      result: state.audit.filters.result.trim() || undefined,
+    }
+    if (isMockMode()) {
+      const page = mock.mockOperationLog(params)
+      state.audit.items = page.items.map(mapOperationLogItem)
+      state.audit.total = page.total
+      state.audit.source = 'mock'
+      state.audit.status = 'ready'
+    } else {
+      const page = await api.getOperationLog(params)
+      state.audit.items = page.items.map(mapOperationLogItem)
+      state.audit.total = page.total
+      state.audit.source = 'host'
+      state.audit.status = 'ready'
+    }
+    state.audit.at = Date.now()
+  } catch (error) {
+    state.audit.items = []
+    state.audit.total = 0
+    state.audit.source = isMockMode() ? 'mock' : 'host'
+    state.audit.status = isMethodUnavailable(error) ? 'unavailable' : 'error'
+    state.audit.error = isMethodUnavailable(error)
+      ? `Host 未实现 getOperationLog（M2b-2 后端未就绪）：${toErrorMessage(error)}`
+      : toErrorMessage(error)
+  } finally {
+    state.audit.loading = false
+  }
+}
+
+function ensureOperationLogLoaded(force = false): void {
+  if (!force && (state.audit.status === 'loading' || state.audit.status === 'ready')) return
+  void refreshOperationLog(!force)
+}
+
+function setAuditActionFilter(value: string): void {
+  state.audit.filters.action = value
+}
+
+function setAuditResultFilter(value: string): void {
+  state.audit.filters.result = value
+}
+
+/** 过滤条件变更（输入框 change / 下拉 change）：回到第 1 页并重新查询。 */
+function applyAuditFilters(): void {
+  void refreshOperationLog(true)
+}
+
+function setAuditPage(pageIndex: number): void {
+  const clamped = Math.max(0, Math.min(auditPageCount() - 1, pageIndex))
+  const offset = clamped * state.audit.limit
+  if (offset === state.audit.offset) return
+  state.audit.offset = offset
+  void refreshOperationLog()
+}
+
+function auditPrevPage(): void {
+  if (auditHasPrev()) setAuditPage(auditPageIndex() - 1)
+}
+
+function auditNextPage(): void {
+  if (auditHasNext()) setAuditPage(auditPageIndex() + 1)
+}
+
+/** 导出审计（csv/json）：成功后 Toast 显示真实 path 并提供「打开所在目录」；失败不伪造成功。 */
+async function exportAudit(format: 'csv' | 'json'): Promise<void> {
+  if (state.audit.exporting) return
+  state.audit.exporting = format
+  state.audit.exportError = ''
+  try {
+    const result = isMockMode()
+      ? mock.mockExportOperationLog(format)
+      : await api.exportOperationLog(format)
+    state.audit.lastExport = { path: result.path, format, count: result.count }
+    notifyAction(
+      `已导出操作审计 ${format.toUpperCase()}：${result.path}（${result.count} 条）`,
+      'success',
+      10_000,
+      '打开所在目录',
+      () => {
+        void openAuditExportDir()
+      },
+    )
+    pushNotification('操作审计已导出', `${format.toUpperCase()} · ${result.path}（${result.count} 条）`, 'info')
+  } catch (error) {
+    state.audit.exportError = isMethodUnavailable(error)
+      ? `Host 未实现 exportOperationLog（M2b-2 后端未就绪）：${toErrorMessage(error)}`
+      : toErrorMessage(error)
+    if (isMethodUnavailable(error)) {
+      notify(`导出失败：Host 未实现 exportOperationLog（M2b-2 后端未就绪）`, 'warning', 6_000)
+    } else {
+      notify(`导出操作审计失败：${toErrorMessage(error)}`, 'error', 6_500)
+    }
+  } finally {
+    state.audit.exporting = null
+  }
+}
+
+/** 「打开所在目录」：用 Host openPath(reveal)；绝对路径被策略拒绝时明确告知（不假装成功）。 */
+async function openAuditExportDir(): Promise<void> {
+  const last = state.audit.lastExport
+  if (!last?.path) {
+    notify('尚未导出操作审计，没有可打开的目录', 'info', 3_200)
+    return
+  }
+  if (isMockMode()) {
+    mock.mockOpenPath(last.path, 'reveal')
+    notify(`已打开所在目录（Mock）：${last.path}`, 'info', 4_000)
+    return
+  }
+  try {
+    const result = await api.openPath({ path: last.path, mode: 'reveal' })
+    if (result.opened) notify(`已在资源管理器中打开：${last.path}`, 'success', 4_200)
+    else notify(`无法打开所在目录：${result.errorCode ?? 'E_LAUNCH_FAILED'} ${result.message ?? ''}`, 'error', 6_000)
+  } catch (error) {
+    if (error instanceof HostError && error.code === 'E_CONFIRM_REQUIRED') {
+      try {
+        const retry = await api.openPath({ path: last.path, mode: 'reveal', confirm: true })
+        if (retry.opened) {
+          notify(`已在资源管理器中打开：${last.path}`, 'success', 4_200)
+          return
+        }
+      } catch (retryError) {
+        await fallbackCopyExportPath(last.path, toErrorMessage(retryError))
+        return
+      }
+    }
+    // Host openPath 仅允许工作区根内路径（导出在 %LOCALAPPDATA% 时会被拒）：明确原因并复制路径，
+    // 绝不假装“已打开”。
+    const code = error instanceof HostError ? error.code : ''
+    if (code === 'E_PATH_OUTSIDE_ROOT' || code === 'E_PATH_INVALID' || code === 'E_INVALID_ARGUMENT') {
+      await fallbackCopyExportPath(last.path, toErrorMessage(error))
+      return
+    }
+    notify(`无法打开所在目录：${toErrorMessage(error)}（路径：${last.path}）`, 'error', 7_000)
+  }
+}
+
+/** 导出目录无法被 openPath 打开时的兜底：复制绝对路径并说明原因（不伪造打开成功）。 */
+async function fallbackCopyExportPath(path: string, reason: string): Promise<void> {
+  try {
+    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(path)
+  } catch {
+    /* 剪贴板不可用时仍给出路径 */
+  }
+  notify(`无法直接打开所在目录（${reason}）：导出路径已复制 · ${path}`, 'warning', 8_000)
+  pushNotification('导出目录未打开', `${reason} · 路径：${path}`, 'warn')
+}
+
+// ───────────────────────────── M2b-2 备份 ref 恢复 ─────────────────────────────
+
+/**
+ * 按组件 + 仓类型加载可恢复备份 ref（Host `getBackupRefs`）。
+ * 无备份为空态；接口不可用/失败为 unavailable/error 空态，绝不伪造 ref。
+ */
+async function loadBackupRefs(componentId: string, repoType?: RepoType): Promise<void> {
+  if (!componentId) {
+    backupRefsSeq += 1
+    state.backupRefs = { status: 'idle', componentId: '', repoType: '', refs: [], error: '', source: 'host', at: 0 }
+    return
+  }
+  const token = ++backupRefsSeq
+  const type = repoType ?? state.focusedRepoType
+  state.backupRefs = {
+    status: 'loading',
+    componentId,
+    repoType: type,
+    refs: [],
+    error: '',
+    source: isMockMode() ? 'mock' : 'host',
+    at: 0,
+  }
+  try {
+    if (isMockMode()) {
+      const dto = mock.mockBackupRefs(componentId, type)
+      if (token !== backupRefsSeq) return
+      state.backupRefs.refs = dto.refs.map(mapBackupRef)
+      state.backupRefs.source = 'mock'
+      state.backupRefs.status = 'ready'
+    } else {
+      const dto = await api.getBackupRefs({ componentId, repoType: type })
+      if (token !== backupRefsSeq) return
+      state.backupRefs.refs = dto.refs.map(mapBackupRef)
+      state.backupRefs.source = 'host'
+      state.backupRefs.status = 'ready'
+    }
+    state.backupRefs.at = Date.now()
+  } catch (error) {
+    if (token !== backupRefsSeq) return
+    state.backupRefs.refs = []
+    state.backupRefs.status = isMethodUnavailable(error) ? 'unavailable' : 'error'
+    state.backupRefs.error = isMethodUnavailable(error)
+      ? `Host 未实现 getBackupRefs（M2b-2 后端未就绪）：${toErrorMessage(error)}`
+      : toErrorMessage(error)
+  }
+}
+
+/** 选择备份 ref 后先弹确认（显示将覆盖当前状态），确认后才调用 Host 恢复。 */
+function requestRestoreBackupRef(ref: BackupRefVm): void {
+  const componentId = state.backupRefs.componentId
+  const repoType = state.backupRefs.repoType
+  if (!componentId || !repoType || !ref.ref) return
+  if (state.backupRestore.pending) {
+    notify('已有备份恢复进行中，请稍候', 'warning')
+    return
+  }
+  const component = state.components.find((item) => item.id === componentId)
+  const repo = component ? repoOf(component, repoType as RepoType) : null
+  const repoLabel = repoType
+  openConfirm({
+    title: '从备份 ref 恢复？',
+    body: `将把 ${componentId}/${repoLabel} 从当前状态恢复到备份 ref ${ref.ref}（${shortSha(ref.sha)}）。这会覆盖当前分支状态：恢复后本地 HEAD 指向备份 SHA，未包含在该备份中的未推送改动可能丢失。`,
+    detail: `备份 ref：${ref.ref}\n备份 SHA：${ref.sha}\n本次操作会真实写入本地仓库（不写远端）。`,
+    confirmLabel: '确认恢复',
+    danger: true,
+    onConfirm: () => {
+      closeConfirm()
+      void executeRestoreBackupRef(componentId, repoType, ref.ref, repo?.headSha ?? null)
+    },
+  })
+}
+
+/** 真正的恢复写入口：仅在确认对话框 onConfirm 后调用；Host 拒绝（ok=false/异常）不得显示成功。 */
+async function executeRestoreBackupRef(
+  componentId: string,
+  repoType: string,
+  ref: string,
+  currentHead: string | null,
+): Promise<void> {
+  if (state.backupRestore.pending) return
+  state.backupRestore.pending = ref
+  state.backupRestore.error = ''
+  try {
+    const result = isMockMode()
+      ? mock.mockRestoreBackupRef(componentId, repoType, ref)
+      : await api.restoreBackupRef({ componentId, repoType, ref, confirm: true })
+    if (!result.ok) {
+      // Host 明确拒绝：不刷新为成功态，给出错误并保留当前状态。
+      state.backupRestore.error = 'Host 拒绝 restoreBackupRef（ok=false），仓库未被修改或恢复失败'
+      notify(`✕ 恢复失败：Host 拒绝恢复 ${componentId}/${repoType}（未显示成功）`, 'error', 7_000)
+      pushNotification('备份恢复被拒绝', `${componentId}/${repoType} · ${ref}：Host 返回 ok=false`, 'err')
+      return
+    }
+    const pre = result.preHead ?? currentHead
+    const post = result.postHead
+    const safety = result.safetyRef ? ` · 恢复前 HEAD 已备份：${result.safetyRef}` : ''
+    notify(
+      `✓ 已从备份 ref 恢复 ${componentId}/${repoType}：${shortSha(pre)} → ${shortSha(post)}（${result.backupRef ?? ref}）${safety}`,
+      'success',
+      8_000,
+    )
+    pushNotification(
+      '备份 ref 已恢复',
+      `${componentId}/${repoType} · ${ref} · HEAD ${shortSha(pre)} → ${shortSha(post)}${safety}`,
+      'info',
+    )
+    // 成功后刷新快照 / 详情 / 备份 ref 列表（真实回写 ≤2s 口径）。
+    await refreshSnapshot()
+    await loadActive()
+    if (state.overlays.componentDrawer === componentId) await loadComponentDetail(componentId)
+    await loadBackupRefs(componentId, repoType as RepoType)
+  } catch (error) {
+    state.backupRestore.error = toErrorMessage(error)
+    if (isMethodUnavailable(error)) {
+      notify('恢复未执行：Host 未实现 restoreBackupRef（M2b-2 后端未就绪）', 'warning', 6_000)
+    } else {
+      const info = actionErrorInfo(error)
+      notify(
+        `✕ 恢复失败 · ${info.code}：${info.message}${info.detail ? ` · ${info.detail}` : ''}${info.hint ? `。${info.hint}` : ''}`,
+        'error',
+        7_500,
+      )
+      pushNotification('备份恢复失败', `${info.code}：${info.message}`, 'err')
+    }
+  } finally {
+    state.backupRestore.pending = null
+  }
+}
+
 // ───────────────────────────── 右键菜单 ─────────────────────────────
 
 function cardContextMenu(event: MouseEvent, componentId: string): void {
@@ -3108,6 +3585,27 @@ export interface WorkbenchStore {
   openTaskCenter: typeof openTaskCenter
   cancelJob: typeof cancelJob
   retryFailed: typeof retryFailed
+  // M2b-2 操作审计 / 备份 ref 恢复 / Toast 操作
+  refreshOperationLog: typeof refreshOperationLog
+  ensureOperationLogLoaded: typeof ensureOperationLogLoaded
+  setAuditActionFilter: typeof setAuditActionFilter
+  setAuditResultFilter: typeof setAuditResultFilter
+  applyAuditFilters: typeof applyAuditFilters
+  setAuditPage: typeof setAuditPage
+  auditPrevPage: typeof auditPrevPage
+  auditNextPage: typeof auditNextPage
+  auditPageCount: typeof auditPageCount
+  auditPageIndex: typeof auditPageIndex
+  auditHasPrev: typeof auditHasPrev
+  auditHasNext: typeof auditHasNext
+  auditRangeText: typeof auditRangeText
+  exportAudit: typeof exportAudit
+  openAuditExportDir: typeof openAuditExportDir
+  loadBackupRefs: typeof loadBackupRefs
+  requestRestoreBackupRef: typeof requestRestoreBackupRef
+  executeRestoreBackupRef: typeof executeRestoreBackupRef
+  notifyAction: typeof notifyAction
+  runToastAction: typeof runToastAction
   requestBatch: typeof requestBatch
   submitBatch: typeof submitBatch
   batchActionState: typeof batchActionState
@@ -3211,6 +3709,26 @@ export const workbench: WorkbenchStore = {
   openTaskCenter,
   cancelJob,
   retryFailed,
+  refreshOperationLog,
+  ensureOperationLogLoaded,
+  setAuditActionFilter,
+  setAuditResultFilter,
+  applyAuditFilters,
+  setAuditPage,
+  auditPrevPage,
+  auditNextPage,
+  auditPageCount,
+  auditPageIndex,
+  auditHasPrev,
+  auditHasNext,
+  auditRangeText,
+  exportAudit,
+  openAuditExportDir,
+  loadBackupRefs,
+  requestRestoreBackupRef,
+  executeRestoreBackupRef,
+  notifyAction,
+  runToastAction,
   requestBatch,
   submitBatch,
   batchActionState,

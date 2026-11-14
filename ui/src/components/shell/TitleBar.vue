@@ -50,6 +50,13 @@ function clearSearch(): void {
     </span>
     <span v-if="state.mockFallback && state.hostFailed" class="pill src-warn" :title="state.fallbackReason">Mock 回退</span>
     <span v-if="state.snapshotError && state.source !== 'mock'" class="pill src-warn" :title="state.snapshotError">快照告警</span>
+    <!-- M2b-2 离线提示（轻量）：仅当快照 source=local 且存在远程错误/离线标记；不伪造在线 -->
+    <span
+      v-if="state.remoteOffline.offline"
+      class="pill offline-pill"
+      data-testid="offline-banner"
+      :title="`离线 / 远程不可达：${state.remoteOffline.reason} · FETCH 已禁用`"
+    >⏻ 离线/远程不可达</span>
 
     <span class="spacer" />
 
@@ -163,6 +170,12 @@ function clearSearch(): void {
 .src-local { color: var(--st-info-fg); background: var(--st-info-bg); border-color: var(--st-info-bd); }
 .src-gitea { color: var(--st-success-fg); background: var(--st-success-bg); border-color: var(--st-success-bd); }
 .src-warn { color: var(--st-warning-fg); background: var(--st-warning-bg); border-color: var(--st-warning-bd); }
+.offline-pill {
+  color: var(--st-warning-fg);
+  background: var(--st-warning-bg);
+  border-color: var(--st-warning-bd);
+  font-weight: 600;
+}
 .meta { color: var(--text-2); font-size: 12px; white-space: nowrap; }
 .scope { font-variant-numeric: tabular-nums; }
 .org { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }

@@ -131,6 +131,13 @@ export interface SnapshotDto {
   giteaBaseUrl?: string | null
   /** Host 能力开关（M2：repoActions=true）；UI 能力门禁的兜底来源（HostInfo 缺失时）。 */
   capabilities?: CapabilitiesDto | null
+  /**
+   * 远程阶段离线/不可达标记（M2b-2 Host 可选字段）。
+   * 缺省时由 `source=local` + `error` / `freshness.remoteStale` 保守推断，绝不伪造“在线”。
+   */
+  offline?: boolean | null
+  /** 远程阶段错误摘要（离线原因；服务端可选，不含 token）。 */
+  remoteError?: string | null
 }
 
 export interface TreeNodeDto {
@@ -377,6 +384,108 @@ export interface JobsDto {
   jobs: JobDto[]
 }
 
+// ───────────────────────────── M2b-2 操作审计 / 备份 ref ─────────────────────────────
+
+/**
+ * `getOperationLog` 审计行（契约）：
+ * `{id,ts,actor,action,componentId,repoType,result,errorCode,requestId,jobId,jobItemId,backupRef,beforeHead,afterHead}`
+ * 成功与失败各 1 行；`result` 取值 OK/FAILED/SKIPPED/CANCELED/INTERRUPTED（Host 追加时冻结）。
+ */
+export interface OperationLogItemDto {
+  /** 行主键（Host 可能回 number 或 string，UI 统一转 string）。 */
+  id: string
+  ts: string
+  actor: string
+  action: string
+  componentId: string | null
+  repoType: string | null
+  result: string
+  errorCode: string | null
+  requestId: string | null
+  jobId: string | null
+  jobItemId: string | null
+  backupRef: string | null
+  beforeHead: string | null
+  afterHead: string | null
+}
+
+/** `getOperationLog` 参数（全部可选；分页 + 时间/动作/组件/结果过滤）。 */
+export interface OperationLogParams {
+  limit?: number
+  offset?: number
+  /** 时间下界（ISO-8601，含）。 */
+  from?: string
+  /** 时间上界（ISO-8601，含）。 */
+  to?: string
+  /** 动作过滤（如 PUSH/SYNC；Host 大小写不敏感）。 */
+  action?: string
+  componentId?: string
+  /** 结果过滤（OK/FAILED/SKIPPED/CANCELED/INTERRUPTED）。 */
+  result?: string
+}
+
+/** `getOperationLog` 响应（契约：{items,total}）。 */
+export interface OperationLogPageDto {
+  items: OperationLogItemDto[]
+  total: number
+}
+
+/** `exportOperationLog` 参数（契约：{format:'csv'|'json'}）。 */
+export interface ExportOperationLogParams {
+  format: 'csv' | 'json'
+}
+
+/** `exportOperationLog` 响应（契约：{path,count}）。 */
+export interface ExportOperationLogResultDto {
+  path: string
+  count: number
+}
+
+/** `getBackupRefs` 的单个备份 ref（契约：{ref,sha,createdAt,repoType}）。 */
+export interface BackupRefDto {
+  ref: string
+  sha: string
+  createdAt: string
+  repoType: string
+}
+
+/** `getBackupRefs` 参数（契约：{componentId,repoType?}）。 */
+export interface BackupRefsParams {
+  componentId: string
+  repoType?: string
+}
+
+/** `getBackupRefs` 响应（契约：{refs:[…]}）。 */
+export interface BackupRefsDto {
+  refs: BackupRefDto[]
+}
+
+/** `restoreBackupRef` 参数（契约：{componentId,repoType,ref,confirm:true}）。 */
+export interface RestoreBackupRefParams {
+  componentId: string
+  repoType: string
+  ref: string
+  confirm: true
+}
+
+/** `restoreBackupRef` 响应（契约 `{ok|restored,preHead,postHead,backupRef|ref}`；兼容 Host `{restored,ref,safetyRef,message}`）。 */
+export interface RestoreBackupRefResultDto {
+  ok: boolean
+  preHead: string | null
+  postHead: string | null
+  backupRef: string | null
+  /** 恢复前 HEAD 的安全备份 ref（Host M2b-2 `safetyRef`；空仓可空）。 */
+  safetyRef?: string | null
+  /** Host 返回的说明（可空）。 */
+  message?: string | null
+}
+
+/** `cleanupRetention` 响应（可选能力：清理超过保留期的审计/备份记录）。 */
+export interface CleanupRetentionResultDto {
+  /** 被清理/回收的记录数（Host 未返回时 0）。 */
+  removed: number
+}
+
 /** ref 种类（getRemoteRefs，M2 P0-7）。 */
 export type RemoteRefKind = 'LOCAL_BRANCH' | 'REMOTE_BRANCH' | 'TAG'
 
@@ -431,6 +540,11 @@ export type RequestMethod =
   | 'getJob'
   | 'cancelJob'
   | 'retryFailed'
+  | 'getOperationLog'
+  | 'exportOperationLog'
+  | 'getBackupRefs'
+  | 'restoreBackupRef'
+  | 'cleanupRetention'
 
 export const TIMEOUTS: Record<RequestMethod, number> = {
   getSnapshot: 45_000,
@@ -451,6 +565,12 @@ export const TIMEOUTS: Record<RequestMethod, number> = {
   getJob: 5_000,
   cancelJob: 10_000,
   retryFailed: 15_000,
+  // M2b-2：审计查询/导出为只读 DB/文件操作；备份 ref 恢复是 git 写（备份 sha 读回）。
+  getOperationLog: 15_000,
+  exportOperationLog: 30_000,
+  getBackupRefs: 10_000,
+  restoreBackupRef: 120_000,
+  cleanupRetention: 60_000,
 }
 
 /** 旧入口默认超时（与 M1 保持一致）。 */
@@ -919,6 +1039,9 @@ export function normalizeSnapshot(value: unknown): SnapshotDto | null {
           ci: prop(capabilitiesRecord, 'ci') === undefined ? undefined : readBoolean(capabilitiesRecord, 'ci'),
         }
       : null,
+    // M2b-2（可选字段）：Host 未返回时为 null，由 store 结合 source/error/freshness 保守推断。
+    offline: prop(record, 'offline') === undefined ? null : readBoolean(record, 'offline'),
+    remoteError: readNullableString(record, 'remoteError') ?? readNullableString(record, 'remoteErrorCode'),
     counts: countsRecord
       ? {
           components: readNumber(countsRecord, 'components'),
@@ -1341,6 +1464,134 @@ export function normalizeRunBatchResult(value: unknown): RunBatchResultDto {
   }
 }
 
+// ── M2b-2 操作审计 / 备份 ref 规范化（容忍 PascalCase、id 类型漂移与包装层） ──
+
+function readIdString(record: Record<string, unknown>, key: string): string {
+  const value = prop(record, key)
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return ''
+}
+
+/** normalize `getOperationLog` 单行（契约 13 字段；兼容 Host M2b-2 的 target/before/after JSON 投影）。 */
+export function normalizeOperationLogItem(value: unknown): OperationLogItemDto | null {
+  const record = asRecord(parseMaybeJson(value))
+  if (!record) return null
+  const id = readIdString(record, 'id')
+  const ts = readString(record, 'ts') ?? ''
+  if (!id && !ts) return null
+  const target = asRecord(parseMaybeJson(prop(record, 'target')))
+  const before = asRecord(parseMaybeJson(prop(record, 'before')))
+  const after = asRecord(parseMaybeJson(prop(record, 'after')))
+  return {
+    id: id || ts,
+    ts,
+    actor: readString(record, 'actor') ?? '',
+    action: (readString(record, 'action') ?? '').toUpperCase(),
+    componentId: readNullableString(record, 'componentId') ?? (target ? readNullableString(target, 'componentId') : null),
+    repoType:
+      readString(record, 'repoType')?.toUpperCase() ?? (target ? readString(target, 'repoType')?.toUpperCase() : null) ?? null,
+    result: (readString(record, 'result') ?? (readBoolean(record, 'ok') ? 'OK' : 'FAILED')).toUpperCase(),
+    errorCode: readNullableString(record, 'errorCode'),
+    requestId: readNullableString(record, 'requestId'),
+    jobId: readNullableString(record, 'jobId'),
+    jobItemId: readNullableString(record, 'jobItemId'),
+    backupRef: readNullableString(record, 'backupRef'),
+    beforeHead:
+      readNullableString(record, 'beforeHead') ??
+      readNullableString(record, 'preHead') ??
+      (before ? readNullableString(before, 'head') : null),
+    afterHead:
+      readNullableString(record, 'afterHead') ??
+      readNullableString(record, 'postHead') ??
+      (after ? readNullableString(after, 'head') : null),
+  }
+}
+
+/** normalize `getOperationLog` 响应（契约 `{items,total}`；兼容裸数组/数据包装）。 */
+export function normalizeOperationLogPage(value: unknown): OperationLogPageDto {
+  let record = asRecord(parseMaybeJson(value))
+  if (!record) throw new HostError('E_INVALID_RESPONSE', 'getOperationLog 响应不是对象')
+  if (!Array.isArray(record['items']) && !Array.isArray(record)) {
+    const nested = asRecord(pickPayload(record))
+    if (nested && Array.isArray(nested['items'])) record = nested
+  }
+  const raw = Array.isArray(record) ? record : readArray(record, 'items')
+  if (!raw) throw new HostError('E_INVALID_RESPONSE', 'getOperationLog 响应缺少 items')
+  const items: OperationLogItemDto[] = []
+  for (const entry of raw) {
+    const item = normalizeOperationLogItem(entry)
+    if (item) items.push(item)
+  }
+  return {
+    items,
+    total: Math.max(0, readNumber(record as Record<string, unknown>, 'total', items.length)),
+  }
+}
+
+/** normalize `exportOperationLog` 响应（契约 `{path,count}`；缺 path 视为失败，不伪造成功路径）。 */
+export function normalizeExportOperationLogResult(value: unknown): ExportOperationLogResultDto {
+  const record = asRecord(parseMaybeJson(value)) ?? {}
+  const path = readString(record, 'path') ?? ''
+  if (!path) throw new HostError('E_INVALID_RESPONSE', 'exportOperationLog 响应缺少 path')
+  return { path, count: Math.max(0, readNumber(record, 'count')) }
+}
+
+/** normalize `getBackupRefs` 响应（契约 `{refs:[{ref,sha,createdAt,repoType}]}`）。 */
+export function normalizeBackupRefs(value: unknown): BackupRefsDto {
+  const record = asRecord(parseMaybeJson(value))
+  if (!record) throw new HostError('E_INVALID_RESPONSE', 'getBackupRefs 响应不是对象')
+  const rawRefs = readArray(record, 'refs') ?? readArray(record, 'items')
+  if (!rawRefs) throw new HostError('E_INVALID_RESPONSE', 'getBackupRefs 响应缺少 refs')
+  const refs: BackupRefDto[] = []
+  for (const entry of rawRefs) {
+    const refRecord = asRecord(entry)
+    if (!refRecord) continue
+    const ref = readString(refRecord, 'ref') ?? readString(refRecord, 'refName') ?? readString(refRecord, 'name')
+    const sha = readString(refRecord, 'sha') ?? readString(refRecord, 'objectSha') ?? ''
+    if (!ref || !sha) continue
+    refs.push({
+      ref,
+      sha,
+      createdAt: readString(refRecord, 'createdAt') ?? readString(refRecord, 'at') ?? '',
+      repoType: (readString(refRecord, 'repoType') ?? '').toUpperCase(),
+    })
+  }
+  return { refs }
+}
+
+/**
+ * normalize `restoreBackupRef` 响应。
+ * <para>兼容两代契约：任务书 `{ok,preHead,postHead,backupRef}` 与 Host M2b-2 实现
+ * `{restored,ref,safetyRef,preHead,postHead,message}`（`ok` 只取明确 true/restored=true）。</para>
+ */
+export function normalizeRestoreBackupRefResult(value: unknown): RestoreBackupRefResultDto {
+  const record = asRecord(parseMaybeJson(value)) ?? {}
+  const okRaw = prop(record, 'ok')
+  const restoredRaw = prop(record, 'restored')
+  const ok = okRaw === undefined && restoredRaw === undefined ? false : readBoolean(record, 'ok') || readBoolean(record, 'restored')
+  return {
+    ok,
+    preHead: readNullableString(record, 'preHead'),
+    postHead: readNullableString(record, 'postHead'),
+    backupRef: readNullableString(record, 'backupRef') ?? readNullableString(record, 'ref'),
+    safetyRef: readNullableString(record, 'safetyRef'),
+    message: readNullableString(record, 'message'),
+  }
+}
+
+/** normalize `cleanupRetention` 响应（M2b-2 Host 返回分项计数；兼容 removed/deleted 简写）。 */
+export function normalizeCleanupRetentionResult(value: unknown): CleanupRetentionResultDto {
+  const record = asRecord(parseMaybeJson(value)) ?? {}
+  const sum =
+    readNumber(record, 'trashRemoved') +
+    readNumber(record, 'backupRefsRemoved') +
+    readNumber(record, 'auditRowsRemoved') +
+    readNumber(record, 'auditJsonlRowsRemoved')
+  const removed = sum > 0 ? sum : readNumber(record, 'removed', readNumber(record, 'deleted', readNumber(record, 'cleanupCount')))
+  return { removed: Math.max(0, removed) }
+}
+
 const REMOTE_REF_KINDS: readonly RemoteRefKind[] = ['LOCAL_BRANCH', 'REMOTE_BRANCH', 'TAG']
 
 /** 由 refName 前缀推断 kind（Host 字段缺失/大小写漂移时兜底）。 */
@@ -1579,6 +1830,47 @@ export const api = {
   /** 仅重试失败/取消项；返回新 jobId 与计数。 */
   async retryFailed(jobId: string): Promise<RunBatchResultDto> {
     return normalizeRunBatchResult(await request<unknown>('retryFailed', { jobId }))
+  },
+  // ── M2b-2 操作审计（Host operation_log；只读查询/导出，绝不伪造审计行） ──
+  /** 分页查询操作审计（契约 `{limit?,offset?,from?,to?,action?,componentId?,result?}` → `{items,total}`）。 */
+  async getOperationLog(params: OperationLogParams = {}): Promise<OperationLogPageDto> {
+    const payload: Record<string, unknown> = {
+      limit: params.limit ?? 20,
+      offset: params.offset ?? 0,
+    }
+    if (params.from) payload.from = params.from
+    if (params.to) payload.to = params.to
+    // Host operation_log 以大写存储 action/result 并做等值过滤：统一大写后再传（避免整词大小写失配）。
+    if (params.action) payload.action = params.action.trim().toUpperCase()
+    if (params.componentId) payload.componentId = params.componentId
+    if (params.result) payload.result = params.result.trim().toUpperCase()
+    return normalizeOperationLogPage(await request<unknown>('getOperationLog', payload))
+  },
+  /** 导出操作审计（契约 `{format:'csv'|'json'}` → `{path,count}`；path 必填，否则视为失败）。 */
+  async exportOperationLog(format: 'csv' | 'json'): Promise<ExportOperationLogResultDto> {
+    return normalizeExportOperationLogResult(await request<unknown>('exportOperationLog', { format }))
+  },
+  // ── M2b-2 备份 ref 恢复（按组件/仓列出 SYNC 备份 ref，确认后恢复） ──
+  /** 按组件（可选仓类型）读取可恢复的备份 ref（契约 `{componentId,repoType?}` → `{refs}`）。 */
+  async getBackupRefs(params: BackupRefsParams): Promise<BackupRefsDto> {
+    const payload: Record<string, unknown> = { componentId: params.componentId }
+    if (params.repoType) payload.repoType = params.repoType
+    return normalizeBackupRefs(await request<unknown>('getBackupRefs', payload))
+  },
+  /** 恢复到指定备份 ref（契约 `{componentId,repoType,ref,confirm:true}` → `{ok,preHead,postHead,backupRef}`）。 */
+  async restoreBackupRef(params: RestoreBackupRefParams): Promise<RestoreBackupRefResultDto> {
+    return normalizeRestoreBackupRefResult(
+      await request<unknown>('restoreBackupRef', {
+        componentId: params.componentId,
+        repoType: params.repoType,
+        ref: params.ref,
+        confirm: true,
+      }),
+    )
+  },
+  /** 可选能力：按保留期清理审计/备份记录（Host 未实现时由调用方降级提示）。 */
+  async cleanupRetention(): Promise<CleanupRetentionResultDto> {
+    return normalizeCleanupRetentionResult(await request<unknown>('cleanupRetention', {}))
   },
 }
 

@@ -82,3 +82,43 @@ public sealed record GetJobParams(string? JobId = null);
 public sealed record CancelJobParams(string? JobId = null);
 
 public sealed record RetryFailedParams(string? JobId = null);
+
+/// <summary>
+/// M2b-2 <c>getOperationLog</c> 参数：<c>{ limit?, offset?, from?, to?, action?, componentId?, result? }</c>。
+/// <para><c>from/to</c> 支持 UTC ISO-8601 日期或时间（日期粒度按整天闭区间）；<c>limit</c> 默认 100 / 上限 1000。</para>
+/// </summary>
+public sealed record GetOperationLogParams(
+    int? Limit = null,
+    int? Offset = null,
+    string? From = null,
+    string? To = null,
+    string? Action = null,
+    string? ComponentId = null,
+    string? Result = null);
+
+/// <summary>
+/// M2b-2 <c>exportOperationLog</c> 参数：<c>{ format:'csv'|'json', from?, to? }</c>；
+/// 导出文件固定写 <c>%LOCALAPPDATA%\MbdGitTool\exports\</c>（不接受调用方路径）。
+/// </summary>
+public sealed record ExportOperationLogParams(
+    string? Format = null,
+    string? From = null,
+    string? To = null);
+
+/// <summary>M2b-2 <c>getBackupRefs</c> 参数：按组件 + 可选仓类型列出本地 <c>refs/backup/sync/*</c>。</summary>
+public sealed record GetBackupRefsParams(string? ComponentId = null, string? RepoType = null);
+
+/// <summary>
+/// M2b-2 <c>restoreBackupRef</c> 参数：<c>{ componentId, repoType, ref, confirm:true }</c>。
+/// <para>强写门禁：必须 <c>confirm=true</c>（Host 侧 E_CONFIRM_REQUIRED 双保险）；<c>ref</c> 必须属于
+/// <c>refs/backup/sync/</c> 且存在。</para>
+/// </summary>
+public sealed record RestoreBackupRefParams(
+    string? ComponentId = null,
+    string? RepoType = null,
+    string? Ref = null,
+    bool? Confirm = null);
+
+/// <summary>M2b-2 <c>cleanupRetention</c> 参数（可空：按配置保留期清理本地 .trash / 备份 ref / 超期审计行）。</summary>
+public sealed record CleanupRetentionParams();
+

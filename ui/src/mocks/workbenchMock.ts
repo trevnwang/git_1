@@ -6,17 +6,23 @@
  */
 import { HostError } from '../api'
 import type {
+  BackupRefsDto,
   BatchArgs,
   CiStatusDto,
   CommitDto,
   ComponentDto,
+  ExportOperationLogResultDto,
   HostInfoDto,
   JobDto,
   JobItemDto,
   OpenPathResultDto,
+  OperationLogItemDto,
+  OperationLogPageDto,
+  OperationLogParams,
   RepoDetailDto,
   RepoDto,
   RepoTreeDto,
+  RestoreBackupRefResultDto,
   SnapshotDto,
   TreeNodeDto,
   WorkspaceNodeDto,
@@ -56,6 +62,16 @@ const HEAD_A = '3f2a9c1d4b5e6f7a8b9c0d1e2f3a4b5c6d7e8f90'
 const HEAD_B = '7c2e9c1a5d8f3b0e6a4c2d9f1b7e3a5c8d0f2b46'
 const HEAD_C = 'b41d08e7a2c5f9d3e6b0a8c4f1d7e9b5a3c6f024'
 const HEAD_D = '9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d'
+
+/**
+ * Mock 备份 ref 恢复后的 HEAD 覆盖（仅 Mock 演示：让恢复成功后刷新快照能看到新 HEAD）。
+ * 真实 Host 由 Host 落库/重扫，UI 不做本地状态伪造。
+ */
+const mockRestoredHeads = new Map<string, string>()
+
+function mockHeadOf(componentId: string, type: RepoType, fallback: string | undefined): string | undefined {
+  return mockRestoredHeads.get(`${componentId}:${type}`) ?? fallback
+}
 
 const MOCK_COMPONENTS: MockComponent[] = [
   {
@@ -160,6 +176,7 @@ function nowIso(): string {
 
 function buildRepo(dto: MockRepositoryComponent, repo: MockRepo): RepoDto {
   const local = repo.state !== 'MISSING'
+  const headSha = mockHeadOf(dto.id, repo.type, repo.head) ?? null
   return {
     repoType: repo.type,
     repoName: repoName(dto.id, repo.type),
@@ -167,7 +184,7 @@ function buildRepo(dto: MockRepositoryComponent, repo: MockRepo): RepoDto {
     subType: null,
     branch: repo.branch === '—' ? null : repo.branch,
     tag: repo.tag ?? null,
-    headSha: repo.head ?? null,
+    headSha,
     upstreamRef: repo.branch === '—' ? null : `refs/remotes/origin/${repo.branch}`,
     compareRef: repo.branch === '—' ? null : `refs/remotes/origin/${repo.branch}`,
     ahead: repo.ahead ?? 0,
@@ -640,7 +657,7 @@ export function mockHostInfo(): HostInfoDto {
 /**
  * 与单源夹具 `reqs/v0.2/fixtures/m2-matrix.json`（M2a 构建）同构的 14 态 × 5 键编码
  * （PULL/FETCH/CHKOUT/COMMIT/PUSH）：Y=允许 / C=允许但需确认 / N=禁止。
- * M2a 冻结覆盖：EMPTY.PUSH 禁用（空仓无提交，首推归 M2b）。
+ * M2b-2：EMPTY.PUSH 按 SRS §7.6 恢复（空仓首推建 upstream；仍由 Host 强制 confirm）。
  * 仅在无 Host（浏览器 dev / CDP）时由 store 载入 `state.hostActions`，**不得**被运行逻辑直接引用。
  */
 const MOCK_HOST_ACTIONS_FIXTURE: Record<string, string> = {
@@ -652,7 +669,7 @@ const MOCK_HOST_ACTIONS_FIXTURE: Record<string, string> = {
   DETACHED_TAG: 'NYCNN',
   DETACHED_COMMIT: 'NYCNN',
   NO_UPSTREAM: 'NYNNY',
-  EMPTY: 'NYCYN',
+  EMPTY: 'NYCYY',
   UNMERGED: 'NYNNN',
   IN_PROGRESS: 'NNNNN',
   INVALID: 'NNNNN',
@@ -773,6 +790,11 @@ function isoAgo(ms: number): string {
   return new Date(Date.now() - ms).toISOString()
 }
 
+/** 备份 ref 的时间戳段：UTC `yyyyMMddHHmmss`（与 Host `refs/backup/sync/<UTC>/<TYPE>` 同形）。 */
+function backupStamp(iso: string): string {
+  return iso.replace(/\D/g, '').slice(0, 14)
+}
+
 function cloneJobs(): JobDto[] {
   return JSON.parse(JSON.stringify(mockJobsCache ?? [])) as JobDto[]
 }
@@ -855,7 +877,7 @@ function seedMockJobs(): JobDto[] {
 
   const syncStarted = isoAgo(8 * 60_000)
   const syncFinished = isoAgo(7.5 * 60_000)
-  const backupAt = new Date(Date.now() - 8 * 60_000).toISOString().replace(/[:.]/g, '').slice(0, 15)
+  const backupAt = backupStamp(new Date(Date.now() - 8 * 60_000).toISOString())
   const partial: JobDto = {
     id: 'job-mock-9002',
     kind: 'SYNC',
@@ -1099,4 +1121,119 @@ export function mockRetryFailed(jobId: string): MockBatchResult | null {
   }
   mockJobsCache = [job, ...ensureMockJobs()]
   return { jobId: id, accepted: true, total: job.total, skipped: 0 }
+}
+
+// ───────────────────────────── M2b-2 Mock 操作审计 / 备份 ref ─────────────────────────────
+
+const MOCK_AUDIT_ACTIONS = ['PUSH', 'COMMIT', 'FETCH', 'SYNC', 'CLONE', 'RESTORE', 'DELETE', 'PULL', 'CHKOUT', 'TAG', 'CREATE']
+
+/** 生成 57 行 Mock 审计（覆盖成功/失败/跳过/取消、job 关联与备份 ref；仅 Mock 演示，非真实数据）。 */
+function seedMockAudit(): OperationLogItemDto[] {
+  const rows: OperationLogItemDto[] = []
+  const componentIds = MOCK_COMPONENTS.map((component) => component.id)
+  const heads = [HEAD_A, HEAD_B, HEAD_C, HEAD_D]
+  for (let index = 0; index < 57; index += 1) {
+    const action = MOCK_AUDIT_ACTIONS[index % MOCK_AUDIT_ACTIONS.length]
+    const result =
+      index % 7 === 0 ? 'FAILED' : index % 11 === 0 ? 'SKIPPED' : index % 13 === 0 ? 'CANCELED' : 'OK'
+    const componentId = componentIds[index % componentIds.length]
+    const repoType = REPO_TYPES[index % REPO_TYPES.length]
+    const ts = isoAgo(index * 37 * 60_000)
+    const stamp = backupStamp(ts)
+    const withBackup = action === 'SYNC' && result === 'OK'
+    rows.push({
+      id: `op-mock-${String(57 - index).padStart(4, '0')}`,
+      ts,
+      actor: 'Mock\\local-user',
+      action,
+      componentId,
+      repoType,
+      result,
+      errorCode: result === 'FAILED' ? (index % 2 === 0 ? 'E_OFFLINE' : 'E_DIRTY_WORKTREE') : null,
+      requestId: `req-mock-${1000 + index}`,
+      jobId: index % 3 === 0 ? `job-mock-${9000 + (index % 5)}` : null,
+      jobItemId: index % 3 === 0 ? `item-mock-${index}` : null,
+      backupRef: withBackup ? `refs/backup/sync/${stamp}/${repoType}/main` : null,
+      beforeHead: heads[index % heads.length],
+      afterHead: result === 'FAILED' ? null : heads[(index + 1) % heads.length],
+    })
+  }
+  return rows
+}
+
+/** getOperationLog 的 Mock 实现（过滤/分页语义与 Host 契约一致）。 */
+export function mockOperationLog(params: OperationLogParams = {}): OperationLogPageDto {
+  let rows = seedMockAudit()
+  const action = (params.action ?? '').trim().toUpperCase()
+  const result = (params.result ?? '').trim().toUpperCase()
+  if (action) rows = rows.filter((row) => row.action.includes(action))
+  if (result) rows = rows.filter((row) => row.result === result)
+  if (params.componentId) rows = rows.filter((row) => row.componentId === params.componentId)
+  if (params.from) rows = rows.filter((row) => row.ts >= params.from!)
+  if (params.to) rows = rows.filter((row) => row.ts <= params.to!)
+  const offset = Math.max(0, params.offset ?? 0)
+  const limit = Math.max(1, params.limit ?? 20)
+  return { items: rows.slice(offset, offset + limit), total: rows.length }
+}
+
+/** exportOperationLog 的 Mock 实现：返回演示路径（真实写文件由 Host 完成）。 */
+export function mockExportOperationLog(format: 'csv' | 'json'): ExportOperationLogResultDto {
+  const stamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)
+  return {
+    path: `${MOCK_WORKSPACE_ROOT}\\.audit\\operations-${stamp}.${format}`,
+    count: seedMockAudit().length,
+  }
+}
+
+/** getBackupRefs 的 Mock 实现：从 Mock SYNC 作业的 backupRef 派生 + 额外演示 ref。 */
+export function mockBackupRefs(componentId: string, repoType?: string): BackupRefsDto {
+  const wanted = repoType ? [repoType.toUpperCase()] : [...REPO_TYPES]
+  const refs = []
+  for (const job of mockJobs()) {
+    for (const item of job.items) {
+      if (item.componentId !== componentId || !item.backupRef) continue
+      refs.push({
+        ref: item.backupRef,
+        sha: item.preHead ?? HEAD_A,
+        createdAt: job.finishedAt ?? job.createdAt,
+        repoType: (item.repoType || '').toUpperCase(),
+      })
+    }
+  }
+  // 额外演示 ref：仅对已有 Mock SYNC 备份的组件追加（其它组件保持真实空态）。
+  const hasJobRefs = refs.length > 0
+  if (hasJobRefs) {
+    for (const type of wanted) {
+      if (!refs.some((ref) => ref.repoType === type)) {
+        const stamp = backupStamp(isoAgo(26 * 60 * 60_000))
+        refs.push({
+          ref: `refs/backup/sync/${stamp}/${type}/main`,
+          sha: type === 'IMPL' ? HEAD_C : HEAD_D,
+          createdAt: isoAgo(26 * 60 * 60_000),
+          repoType: type,
+        })
+      }
+    }
+  }
+  return {
+    refs: refs
+      .filter((ref) => wanted.includes(ref.repoType))
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')),
+  }
+}
+
+/** restoreBackupRef 的 Mock 实现：命中则覆盖演示 HEAD（刷新快照可见），未命中返回明确错误。 */
+export function mockRestoreBackupRef(componentId: string, repoType: string, ref: string): RestoreBackupRefResultDto {
+  const type = (repoType || '').toUpperCase() as RepoType
+  const target = mockBackupRefs(componentId, type).refs.find((item) => item.ref === ref)
+  if (!target) {
+    throw new HostError('E_REF_NOT_FOUND', `Mock：未找到备份 ref ${ref}（可能已过保留期）`)
+  }
+  const { repo } = resolveMockRepo(componentId, type)
+  const preHead = repo.head ?? null
+  if (!target.sha) {
+    throw new HostError('E_BACKUP_REF_INVALID', `Mock：备份 ref ${ref} 指向无效 commit`)
+  }
+  mockRestoredHeads.set(`${componentId}:${type}`, target.sha)
+  return { ok: true, preHead, postHead: target.sha, backupRef: ref }
 }

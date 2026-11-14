@@ -27,7 +27,7 @@ public sealed class RepoActionServiceTests
             ["DETACHED_TAG"] = "NYCNN",
             ["DETACHED_COMMIT"] = "NYCNN",
             ["NO_UPSTREAM"] = "NYNNY",
-            ["EMPTY"] = "NYCYN",
+            ["EMPTY"] = "NYCYY", // M2b（FR-REPO-05 / D-025 §2.5④）：EMPTY 首推恢复 PUSH=Y
             ["UNMERGED"] = "NYNNN",
             ["IN_PROGRESS"] = "NNNNN",
             ["INVALID"] = "NNNNN",

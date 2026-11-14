@@ -39,7 +39,9 @@ public sealed class RepoActionAvailabilityMatrixTests
                 var item = actual[action];
                 Assert.Equal(cell.GetProperty("enabled").GetBoolean(), item.Enabled);
                 Assert.Equal(cell.GetProperty("requiresConfirm").GetBoolean(), item.RequiresConfirm);
-                Assert.Equal(cell.GetProperty("reasonCode").GetString(), item.ReasonCode);
+                Assert.True(
+                    string.Equals(cell.GetProperty("reasonCode").GetString(), item.ReasonCode, StringComparison.Ordinal),
+                    $"{state}/{action} fixture={cell.GetProperty("reasonCode").GetString()} actual={item.ReasonCode} enabled={item.Enabled} confirm={item.RequiresConfirm}");
                 Assert.True(item.MatrixAllowed == item.Enabled);
             }
         }

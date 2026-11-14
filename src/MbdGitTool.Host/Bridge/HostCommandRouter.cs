@@ -48,7 +48,14 @@ public sealed class HostCommandRouter : IDisposable
             ["getJobs"] = TimeSpan.FromSeconds(5),
             ["getJob"] = TimeSpan.FromSeconds(5),
             ["cancelJob"] = TimeSpan.FromSeconds(5),
-            ["retryFailed"] = TimeSpan.FromSeconds(5)
+            ["retryFailed"] = TimeSpan.FromSeconds(5),
+
+            // M2b-2：审计查询/导出、备份 ref 列表/恢复、保留清理。
+            ["getOperationLog"] = TimeSpan.FromSeconds(10),
+            ["exportOperationLog"] = TimeSpan.FromSeconds(30),
+            ["getBackupRefs"] = TimeSpan.FromSeconds(20),
+            ["restoreBackupRef"] = TimeSpan.FromSeconds(120),
+            ["cleanupRetention"] = TimeSpan.FromSeconds(120)
         };
 
     private readonly SnapshotService _snapshots;
@@ -60,6 +67,8 @@ public sealed class HostCommandRouter : IDisposable
     private readonly RepoActionService _actions;
     private readonly OperationAuditService _audit;
     private readonly JobEngine _jobs;
+    private readonly BackupRefService _backup;
+    private readonly RetentionService _retention;
     private readonly RemoteRefsService _remoteRefs;
     private readonly ComponentDetailService _componentDetail;
     private readonly RepoDetailService _repoDetail;
@@ -89,7 +98,28 @@ public sealed class HostCommandRouter : IDisposable
         _actions = new RepoActionService(config: _snapshots.Config);
 
         // G-P0-2 / AC-OP-33：审计-lite（每次 runRepoAction 成功/失败写 1 行 JSONL；不含 token/output）。
+        // M2b-2：同一 OperationAuditService 双写 SQLite operation_log（初始化失败自动降级 JSONL-only）。
         _audit = new OperationAuditService(_snapshots.Config);
+
+        // M2b-2：备份 ref 列表/恢复（refs/backup/sync/*；恢复前写 refs/backup/restore/* 安全备份）。
+        _backup = new BackupRefService(_snapshots.Config);
+
+        // M2b-2：本地保留清理（.trash 30 天 / 备份 ref backup.retentionDays / 审计 auditRetentionDays）。
+        _retention = new RetentionService(_snapshots.Config, _audit, _backup);
+
+        // 启动保留清理：后台执行，避免阻塞 Host 首屏（命令 cleanupRetention 可同步触发）。
+        StartupRetention = Task.Run(async () =>
+        {
+            try
+            {
+                await _retention.RunAsync(writeAudit: false).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                HostLog.Warn($"启动保留清理失败（{ex.GetType().Name}）");
+            }
+        });
+
         _remoteRefs = new RemoteRefsService();
 
         // M2b 作业内核：后台单 worker 串行 job；事件经 EventSink（WebViewBridge 设置）推送 JOB_UPDATED。
@@ -139,6 +169,12 @@ public sealed class HostCommandRouter : IDisposable
 
     /// <summary>是否配置并解析出合法工作区根（openPath/getRepoTree/getWorkspaceTree 前置）。</summary>
     public bool IsWorkspaceAvailable => _paths is not null;
+
+    /// <summary>
+    /// M2b-2 启动保留清理任务（构造时后台执行；诊断/测试可 await 其完成，
+    /// 结果与 <c>cleanupRetention</c> 命令一致，失败只记日志不抛异常）。
+    /// </summary>
+    public Task StartupRetention { get; }
 
     /// <summary>
     /// M2b 作业事件出口（由 <c>WebViewBridge</c> 在初始化后设置）：参数固定为
@@ -401,6 +437,122 @@ public sealed class HostCommandRouter : IDisposable
                 return _jobs.RetryFailed(parsed);
             }
 
+            case "getOperationLog":
+            {
+                // FR-OP-09：operation_log 查询（SQLite；无 token；降级时返回 E_INTERNAL）。
+                var parsed = ParseParams<GetOperationLogParams>(parameters);
+                return _audit.GetOperationLog(parsed);
+            }
+
+            case "exportOperationLog":
+            {
+                // FR-OP-09：导出 CSV/JSON 到 %LOCALAPPDATA%\MbdGitTool\exports\（返回路径给 UI）。
+                var parsed = ParseParams<ExportOperationLogParams>(parameters);
+                return await RunIoAsync(
+                        () => _audit.ExportOperationLog(parsed),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            case "getBackupRefs":
+            {
+                // FR-OP-11：列出本地 refs/backup/sync/*（componentId + 可选 repoType；缺省 = 四仓全部）。
+                await EnsureSnapshotAsync(cancellationToken).ConfigureAwait(false);
+                var parsed = ParseParams<GetBackupRefsParams>(parameters);
+                return await RunIoAsync(
+                        () => GetBackupRefsAsync(parsed, cancellationToken),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            case "restoreBackupRef":
+            {
+                // FR-OP-11/AC-OP-30：预检 → 当前 HEAD 备份到 refs/backup/restore/<ts>/<TYPE> → reset --hard <ref>。
+                var parsed = ParseParams<RestoreBackupRefParams>(parameters);
+                if (parsed.Confirm != true)
+                {
+                    return CommandResult.Failure(
+                        BridgeErrorCodes.ConfirmRequired,
+                        "restoreBackupRef 会改写本地 HEAD，需 args.confirm=true 二次确认",
+                        new Dictionary<string, object?>
+                        {
+                            ["action"] = "RESTORE_BACKUP",
+                            ["requiresConfirm"] = true
+                        });
+                }
+
+                var requestId = Guid.NewGuid().ToString("N");
+                var actor = Environment.UserName;
+                await _snapshots.RefreshAsync(cancellationToken).ConfigureAwait(false);
+
+                var resolveError = TryGetLocalRepoPath(
+                    _snapshots.Index,
+                    parsed.ComponentId,
+                    parsed.RepoType,
+                    out var localPath,
+                    out var repoRef);
+                if (resolveError is not null)
+                {
+                    return resolveError;
+                }
+
+                var repoType = repoRef.Repo.RepoType;
+
+                var stopwatch = Stopwatch.StartNew();
+                var (restored, restoreError) = await _backup
+                    .RestoreAsync(localPath, repoType, parsed.Ref, cancellationToken)
+                    .ConfigureAwait(false);
+                stopwatch.Stop();
+
+                if (restoreError is not null || restored is null)
+                {
+                    _audit.Record(
+                        action: "RESTORE_BACKUP",
+                        componentId: parsed.ComponentId,
+                        repoType: repoType,
+                        state: repoRef.Repo.State,
+                        preHead: null,
+                        postHead: null,
+                        ok: false,
+                        errorCode: restoreError?.Code ?? BridgeErrorCodes.GitFailed,
+                        durationMs: stopwatch.ElapsedMilliseconds,
+                        actor: actor,
+                        requestId: requestId,
+                        backupRef: parsed.Ref);
+                    return CommandResult.Failure(restoreError ?? new BridgeError(
+                        BridgeErrorCodes.GitFailed,
+                        "restoreBackupRef 失败（可重试）"));
+                }
+
+                _audit.Record(
+                    action: "RESTORE_BACKUP",
+                    componentId: parsed.ComponentId,
+                    repoType: repoType,
+                    state: repoRef.Repo.State,
+                    preHead: restored.PreHead,
+                    postHead: restored.PostHead,
+                    ok: true,
+                    errorCode: null,
+                    durationMs: stopwatch.ElapsedMilliseconds,
+                    actor: actor,
+                    requestId: requestId,
+                    backupRef: restored.Ref);
+
+                InvalidateCaches();
+                await _snapshots.RefreshAsync(cancellationToken).ConfigureAwait(false);
+                _deliveredIndex = _snapshots.Index;
+                HostLog.Info($"api restoreBackupRef ok ref={restored.Ref} ms={stopwatch.ElapsedMilliseconds}");
+                return CommandResult.Success(restored);
+            }
+
+            case "cleanupRetention":
+            {
+                // M2b-2：本地保留清理（.trash 30 天 / 备份 ref 30 天 / 审计 90 天；只删本地，不触远端）。
+                var parsed = ParseParams<CleanupRetentionParams>(parameters);
+                var summary = await _retention.RunAsync(parsed, writeAudit: true, cancellationToken).ConfigureAwait(false);
+                return CommandResult.Success(summary);
+            }
+
             case "getRemoteRefs":
             {
                 await EnsureSnapshotAsync(cancellationToken).ConfigureAwait(false);
@@ -582,6 +734,95 @@ public sealed class HostCommandRouter : IDisposable
 
         localPath = repo.Repo.LocalPath;
         return null;
+    }
+
+    /// <summary>
+    /// <c>getBackupRefs</c> 实现：componentId 必填；repoType 缺省 = 该组件全部已克隆仓，
+    /// 逐仓 <c>git for-each-ref refs/backup/sync</c> 后合并（单仓 git 失败不吞掉错误：全失败才返回错误）。
+    /// </summary>
+    private async Task<CommandResult> GetBackupRefsAsync(
+        GetBackupRefsParams parsed,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(parsed.ComponentId))
+        {
+            return CommandResult.Failure(
+                BridgeErrorCodes.InvalidArgument,
+                "缺少必填参数 componentId",
+                new Dictionary<string, object?> { ["field"] = "componentId" });
+        }
+
+        var index = _snapshots.Index;
+        if (!index.TryGetComponent(parsed.ComponentId, out var component))
+        {
+            return CommandResult.Failure(
+                BridgeErrorCodes.NotFound,
+                "未找到组件：" + parsed.ComponentId.Trim(),
+                new Dictionary<string, object?> { ["componentId"] = parsed.ComponentId });
+        }
+
+        var targets = new List<RepoRef>();
+        if (!string.IsNullOrWhiteSpace(parsed.RepoType))
+        {
+            var resolveError = TryGetLocalRepoPath(
+                index,
+                parsed.ComponentId,
+                parsed.RepoType,
+                out _,
+                out var single);
+            if (resolveError is not null)
+            {
+                return resolveError;
+            }
+
+            targets.Add(single);
+        }
+        else
+        {
+            foreach (var repo in component.Repos)
+            {
+                if (!repo.IsLocal || string.IsNullOrWhiteSpace(repo.LocalPath))
+                {
+                    continue;
+                }
+
+                targets.Add(new RepoRef(component.ComponentId, component, repo));
+            }
+
+            if (targets.Count == 0)
+            {
+                return CommandResult.Failure(
+                    BridgeErrorCodes.RepoNotLocal,
+                    "组件没有已克隆的本地仓，无法列出备份 ref",
+                    new Dictionary<string, object?> { ["componentId"] = parsed.ComponentId });
+            }
+        }
+
+        var refs = new List<BackupRefDto>();
+        BridgeError? firstError = null;
+        foreach (var target in targets)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await _backup
+                .GetBackupRefsAsync(target.Repo.LocalPath, target.Repo.RepoType, cancellationToken)
+                .ConfigureAwait(false);
+            if (result.Ok && result.Data is BackupRefsDto page)
+            {
+                refs.AddRange(page.Refs);
+            }
+            else
+            {
+                firstError ??= result.Error;
+            }
+        }
+
+        if (refs.Count == 0 && firstError is not null)
+        {
+            return CommandResult.Failure(firstError);
+        }
+
+        refs.Sort((left, right) => string.CompareOrdinal(right.Ref, left.Ref));
+        return CommandResult.Success(new BackupRefsDto(refs));
     }
 
     private static T ParseParams<T>(JsonElement? parameters)

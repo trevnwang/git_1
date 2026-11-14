@@ -220,6 +220,8 @@ export interface ToastVm {
   tone: 'info' | 'success' | 'warning' | 'error'
   ttl: number
   actionLabel?: string
+  /** 操作按钮回调（如审计导出后的「打开所在目录」）。 */
+  onAction?: () => void
 }
 
 export interface MenuItemVm {
@@ -474,3 +476,45 @@ export interface FreshnessVm {
   localStale: boolean
   remoteStale: boolean
 }
+
+// ───────────────────────────── M2b-2 操作审计 / 备份 ref / 离线 ─────────────────────────────
+
+/** 审计行（GET operationLog 的 UI 视图模型；字段与 Host 契约一一对应）。 */
+export interface OperationLogItemVm {
+  id: string
+  ts: string
+  actor: string
+  action: string
+  componentId: string
+  repoType: string
+  result: string
+  errorCode: string | null
+  requestId: string | null
+  jobId: string | null
+  jobItemId: string | null
+  backupRef: string | null
+  beforeHead: string | null
+  afterHead: string | null
+}
+
+/** 审计查询过滤条件（UI 只暴露 action/result；时间/组件由调用方可选传入）。 */
+export interface AuditFiltersVm {
+  action: string
+  result: string
+}
+
+/** 可恢复备份 ref（getBackupRefs 的 UI 视图模型）。 */
+export interface BackupRefVm {
+  ref: string
+  sha: string
+  createdAt: string
+  repoType: string
+}
+
+/** 离线判定结果（source=local 且存在远程错误/离线标记时 offline=true）。 */
+export interface OfflineStateVm {
+  offline: boolean
+  /** 离线原因（Host error/远程错误/远程数据过期；用于顶部提示与 tooltip）。 */
+  reason: string
+}
+

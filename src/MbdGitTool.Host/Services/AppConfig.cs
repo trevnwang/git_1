@@ -42,8 +42,44 @@ public sealed record AppConfig
     /// </summary>
     public string? JobsRoot { get; init; }
 
+    /// <summary>
+    /// M2b-2 SQLite 审计库文件；为空时使用默认 <c>%LOCALAPPDATA%\MbdGitTool\db\mbd.db</c>。
+    /// <para>仅供测试注入临时路径（避免单测污染真实用户数据）。</para>
+    /// </summary>
+    public string? DatabasePath { get; init; }
+
+    /// <summary>
+    /// M2b-2 审计导出目录；为空时使用默认 <c>%LOCALAPPDATA%\MbdGitTool\exports</c>。
+    /// <para>仅供测试注入临时目录（避免单测污染真实用户数据）。</para>
+    /// </summary>
+    public string? ExportsRoot { get; init; }
+
+    /// <summary>
+    /// 审计保留天数（<c>audit.keepDays</c> / config.json <c>auditRetentionDays</c>，默认 90，范围 1–3650）：
+    /// <c>operation_log</c> / JSONL 中早于该天数的行由保留清理任务删除（SRS FR-OP-09 要求 ≥90 天）。
+    /// </summary>
+    public int AuditRetentionDays { get; init; } = DefaultAuditRetentionDays;
+
+    /// <summary>
+    /// 备份 ref 保留天数（<c>backup.retentionDays</c>，默认 30，SRS 附录 D 范围 7–90）：
+    /// <c>refs/backup/sync/*</c> 超期由本地保留清理任务回收（仅本地 ref，不触碰远端；D-017/H-05）。
+    /// </summary>
+    public int BackupRetentionDays { get; init; } = DefaultBackupRetentionDays;
+
+    /// <summary>审计保留天数默认值（SRS FR-OP-09：≥90 天）。</summary>
+    public const int DefaultAuditRetentionDays = 90;
+
+    /// <summary>备份 ref 保留天数默认值（SRS 附录 D / D-017：30 天）。</summary>
+    public const int DefaultBackupRetentionDays = 30;
+
     /// <summary>配置加载问题（文件缺失/JSON 非法等）；不影响环境变量覆盖后的可用配置。</summary>
     public string? LoadError { get; init; }
+
+    /// <summary>规范化审计保留天数（缺省/越界回落到默认；读取方也应按范围夹取）。</summary>
+    public int EffectiveAuditRetentionDays => ClampDays(AuditRetentionDays, DefaultAuditRetentionDays, min: 1, max: 3650);
+
+    /// <summary>规范化备份 ref 保留天数（附录 D：7–90；缺省/越界回落到默认）。</summary>
+    public int EffectiveBackupRetentionDays => ClampDays(BackupRetentionDays, DefaultBackupRetentionDays, min: 7, max: 90);
 
     /// <summary>Gitea 只读同步是否可用（baseUrl + org 均非空）。</summary>
     [JsonIgnore]
@@ -99,6 +135,12 @@ public sealed record AppConfig
         var allowInsecure = ParseBool(Environment.GetEnvironmentVariable("MBD_GITEA_ALLOW_INSECURE_HTTP"))
             ?? file.Gitea?.AllowInsecureHttp
             ?? false;
+        var auditRetention = ParseInt(Environment.GetEnvironmentVariable("MBD_AUDIT_RETENTION_DAYS"))
+            ?? file.AuditRetentionDays
+            ?? DefaultAuditRetentionDays;
+        var backupRetention = ParseInt(Environment.GetEnvironmentVariable("MBD_BACKUP_RETENTION_DAYS"))
+            ?? file.BackupRetentionDays
+            ?? DefaultBackupRetentionDays;
 
         return new AppConfig
         {
@@ -107,6 +149,8 @@ public sealed record AppConfig
             GiteaOrg = Normalize(org),
             GiteaToken = string.IsNullOrWhiteSpace(token) ? null : token.Trim(),
             AllowInsecureHttp = allowInsecure,
+            AuditRetentionDays = ClampDays(auditRetention, DefaultAuditRetentionDays, min: 1, max: 3650),
+            BackupRetentionDays = ClampDays(backupRetention, DefaultBackupRetentionDays, min: 7, max: 90),
             LoadError = loadError
         };
     }
@@ -135,6 +179,29 @@ public sealed record AppConfig
         };
     }
 
+    private static int? ParseInt(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return int.TryParse(value.Trim(), System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static int ClampDays(int value, int fallback, int min, int max)
+    {
+        if (value <= 0)
+        {
+            value = fallback;
+        }
+
+        return Math.Clamp(value, min, max);
+    }
+
     private static string? Override(string environmentVariable, string? currentValue)
     {
         var value = Environment.GetEnvironmentVariable(environmentVariable);
@@ -149,6 +216,12 @@ public sealed record AppConfig
         public string? WorkspaceRoot { get; set; }
 
         public GiteaConfig? Gitea { get; set; }
+
+        /// <summary>审计保留天数（SRS <c>audit.keepDays</c>；默认 90）。</summary>
+        public int? AuditRetentionDays { get; set; }
+
+        /// <summary>备份 ref 保留天数（SRS <c>backup.retentionDays</c>；默认 30）。</summary>
+        public int? BackupRetentionDays { get; set; }
     }
 
     private sealed class GiteaConfig

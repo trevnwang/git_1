@@ -71,7 +71,7 @@ public sealed class RepoActionService
             ["DETACHED_TAG"] = "NYCNN",
             ["DETACHED_COMMIT"] = "NYCNN",
             ["NO_UPSTREAM"] = "NYNNY",
-            ["EMPTY"] = "NYCYN", // D-025 M2a：EMPTY 首推建 upstream 归 M2b，PUSH 禁用
+            ["EMPTY"] = "NYCYY", // M2b（FR-REPO-05 / D-025 §2.5④）：恢复 EMPTY.PUSH=Y（首次推送建 upstream）
             ["UNMERGED"] = "NYNNN",
             ["IN_PROGRESS"] = "NNNNN",
             ["INVALID"] = "NNNNN",
@@ -433,7 +433,7 @@ public sealed class RepoActionService
                 outcome = await CommitAsync(localPath, arguments, cancellationToken).ConfigureAwait(false);
                 break;
             case "PUSH":
-                outcome = await PushAsync(localPath, arguments, credentialEnvironment, cancellationToken)
+                outcome = await PushAsync(localPath, repo, arguments, credentialEnvironment, cancellationToken)
                     .ConfigureAwait(false);
                 break;
             default:
@@ -765,13 +765,46 @@ public sealed class RepoActionService
 
     private async Task<ActionOutcome> PushAsync(
         string localPath,
+        RepoRef repo,
         ActionArguments arguments,
         IReadOnlyDictionary<string, string>? credentialEnvironment,
         CancellationToken cancellationToken)
     {
-        // 禁止 force：只允许 origin HEAD（setUpstream=true 时附加 -u）。
+        var state = NormalizeState(repo.Repo.State);
+
+        // FR-REPO-05 / D-025 §2.5④：EMPTY 首推 + NO_UPSTREAM 发布分支都必须建立 upstream
+        // （git push -u origin HEAD）；UI 确认条传入 setUpstream=true，后端对这两态再兜底一次。
+        var firstPush = state == "EMPTY";
+        var setUpstream = arguments.SetUpstream || firstPush || state == "NO_UPSTREAM";
+
+        if (firstPush)
+        {
+            // E7 已证明 unborn HEAD 直接 push 必失败（src refspec HEAD does not match any）：
+            // 在启动网络 git 前给出可读错误码，避免“假成功/难懂 stderr”。
+            var headCheck = await _git
+                .RunAsync(localPath, new[] { "rev-parse", "--verify", "--quiet", "HEAD" }, cancellationToken)
+                .ConfigureAwait(false);
+            if (!headCheck.Success || headCheck.TrimmedStdout.Length == 0)
+            {
+                return new ActionOutcome(
+                    CommandResult.Failure(
+                        BridgeErrorCodes.RefNotFound,
+                        "EMPTY 空仓还没有首个提交（unborn HEAD），无法首推；请先在按钮条 COMMIT 生成首个提交后重试"
+                        + "（E7：unborn HEAD 直接 push 必失败）",
+                        new Dictionary<string, object?>
+                        {
+                            ["action"] = "PUSH",
+                            ["state"] = "EMPTY",
+                            ["requiresCommit"] = true
+                        }),
+                    string.Empty,
+                    string.Empty);
+            }
+        }
+
+        // 禁止 force：只允许 origin HEAD（首次推送/发布分支附加 -u 建立 upstream）。
         var pushArguments = new List<string> { "push" };
-        if (arguments.SetUpstream)
+        if (setUpstream)
         {
             pushArguments.Add("-u");
         }
@@ -810,7 +843,10 @@ public sealed class RepoActionService
             return new ActionOutcome(MapGitFailure("PUSH", result, cancellationToken), string.Empty, string.Empty);
         }
 
-        return new ActionOutcome(null, FormatOutput(result), "PUSH 完成");
+        return new ActionOutcome(
+            null,
+            FormatOutput(result),
+            setUpstream ? "PUSH 完成（已建立 upstream；首次推送/发布分支）" : "PUSH 完成");
     }
 
     /// <summary>M2 P0-1：凭据注入前的 fail-closed 作用域校验（锁内执行，只读、不注凭据）。</summary>

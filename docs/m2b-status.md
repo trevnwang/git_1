@@ -44,3 +44,19 @@
 4. **EMPTY 首推建 upstream**、离线 FETCH 降级、写前 journal/崩溃 reconcile、备份保留清理任务。
 5. **AC 覆盖**：AC-OP-01…32、AC-REPO、AC-UI-10c 的逐条证据与故障注入报告。
 6. 批量 SYNC 的 dryRun/preview 实际确认条、批量任务取消 UI 全链路复验。
+
+---
+
+## 6. M2b-2a（2026-11-14 18:15）
+
+| 能力 | 实现/实测 |
+|---|---|
+| operation_log SQLite | `%LOCALAPPDATA%\MbdGitTool\db\mbd.db`（WAL）；JSONL 双写兼容；521 行真实可查 |
+| 查询/导出 | `getOperationLog`（过滤/分页）；`exportOperationLog` CSV/JSON → `%LOCALAPPDATA%\MbdGitTool\exports\`；真实 521 行导出成功 |
+| 备份 ref | `getBackupRefs` 列出 `refs/backup/sync/*`（sha/createdAt）；组件抽屉可查看 |
+| 恢复 | `restoreBackupRef`（confirm；当前 HEAD 先备份到 `refs/backup/restore/<ts>`；reset --hard；审计 RESTORE_BACKUP）— 单测覆盖，UI 确认弹窗已接 |
+| EMPTY 首推 | 矩阵恢复 `EMPTY.PUSH=Y`；`git push -u origin HEAD` 建 upstream；unborn 拒绝且零远端写 |
+| 保留清理 | 启动后台 + `cleanupRetention`：`.trash` 30 天 / backup refs 30 天 / 审计 90 天；实测计数 0（无超期） |
+| 测试 | 337/337；Debug/Release 0 warning |
+
+> 待 M2b-2b：journal/reconcile、离线降级完整行为、备份恢复 UI 全链路 CDP 证据、审计测试隔离清理、AC-OP 全量证据。

@@ -19,6 +19,13 @@ const state = w.state
       >
         <span class="toast-icon" aria-hidden="true">{{ toast.tone === 'success' ? '✓' : toast.tone === 'warning' ? '!' : toast.tone === 'error' ? '✕' : 'i' }}</span>
         <span class="toast-text">{{ toast.text }}</span>
+        <button
+          v-if="toast.actionLabel && toast.onAction"
+          type="button"
+          class="toast-action"
+          data-testid="toast-action"
+          @click.stop="w.runToastAction(toast.id)"
+        >{{ toast.actionLabel }}</button>
       </div>
     </transition-group>
   </div>
@@ -58,6 +65,19 @@ const state = w.state
 .toast-item.tone-error { background: var(--st-danger-bg); color: var(--st-danger-fg); border: 1px solid var(--st-danger-bd); }
 .toast-icon { font-weight: 700; }
 .toast-text { overflow: hidden; text-overflow: ellipsis; }
+.toast-action {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--r-btn);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.toast-action:hover { background: rgb(255 255 255 / 18%); }
 .toast-enter-active, .toast-leave-active { transition: opacity 160ms var(--ease), transform 160ms var(--ease); }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(6px); }
 @media (prefers-reduced-motion: reduce) {

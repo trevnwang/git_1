@@ -334,6 +334,16 @@ internal static class TestAudit
         WorkspaceRoot = workspaceRoot,
         GiteaToken = giteaToken,
         AuditRoot = NewRoot(),
-        JobsRoot = NewJobsRoot()
+        JobsRoot = NewJobsRoot(),
+        DatabasePath = NewDatabasePath(),
+        ExportsRoot = NewExportsRoot()
     };
+
+    /// <summary>隔离的 SQLite 审计库路径（M2b-2；避免单测写真实 <c>%LOCALAPPDATA%\MbdGitTool\db</c>）。</summary>
+    public static string NewDatabasePath() =>
+        Path.Combine(Path.GetTempPath(), "MbdGitToolTests", "db", Guid.NewGuid().ToString("N"), "mbd.db");
+
+    /// <summary>隔离的审计导出目录（M2b-2；避免单测写真实 <c>%LOCALAPPDATA%\MbdGitTool\exports</c>）。</summary>
+    public static string NewExportsRoot() =>
+        Path.Combine(Path.GetTempPath(), "MbdGitToolTests", "exports", Guid.NewGuid().ToString("N"));
 }

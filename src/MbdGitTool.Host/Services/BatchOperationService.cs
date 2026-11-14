@@ -994,20 +994,28 @@ public sealed partial class BatchOperationService
     /// 仅删除 <c>&lt;workspace&gt;/.trash</c> 下的 14 位时间戳目录，失败仅告警。
     /// </summary>
     /// <returns>清理的目录数。</returns>
-    public int CleanupTrash()
+    public int CleanupTrash() => CleanupTrash(RetentionDays);
+
+    /// <summary>
+    /// 按指定保留天数清理 <c>.trash/&lt;stamp&gt;</c> 目录（M2b-2 <c>cleanupRetention</c> 复用；
+    /// 只删工作区内 <c>.trash</c> 时间戳目录，不触碰其它目录/远端）。
+    /// </summary>
+    /// <returns>清理的目录数。</returns>
+    public int CleanupTrash(int retentionDays)
     {
         if (_paths is null)
         {
             return 0;
         }
 
+        var days = Math.Clamp(retentionDays, 1, 365);
         var trashRoot = Path.Combine(_paths.Root, TrashDirectoryName);
         if (!Directory.Exists(trashRoot))
         {
             return 0;
         }
 
-        var cutoff = DateTime.UtcNow.AddDays(-RetentionDays);
+        var cutoff = DateTime.UtcNow.AddDays(-days);
         var removed = 0;
         foreach (var directory in EnumerateTrashStamps())
         {
@@ -1045,7 +1053,7 @@ public sealed partial class BatchOperationService
 
         if (removed > 0)
         {
-            HostLog.Info($"已清理过期 .trash 目录 {removed} 个（保留 {RetentionDays} 天）");
+            HostLog.Info($"已清理过期 .trash 目录 {removed} 个（保留 {days} 天）");
         }
 
         return removed;

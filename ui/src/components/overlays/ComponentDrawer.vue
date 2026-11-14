@@ -2,11 +2,14 @@
 /**
  * 组件详情抽屉（FR-DETAIL-01 / FR-CARD-02）：双击组件卡片或右键「查看组件详情」打开。
  * 数据优先 api.getComponentDetail（Host 已实现），失败回退当前快照；来源在抽屉内明示。
+ * M2b-2：新增「备份 ref」区，按组件/仓加载 refs（getBackupRefs），确认后 restoreBackupRef。
  * 关闭：右上 ✕ / 点击遮罩 / Esc（App 全局 closeTopOverlay）。
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import { useWorkbench } from '../../stores/workbench'
 import { formatAgo, formatStamp, REPO_LABEL, shortSha } from '../../viewmodel'
+import { REPO_TYPES } from '../../types/workbench'
+import type { BackupRefVm, RepoType } from '../../types/workbench'
 import CiBadge from '../common/CiBadge.vue'
 import StateChip from '../common/StateChip.vue'
 import EmptyState from '../common/EmptyState.vue'
@@ -27,6 +30,29 @@ const sourceTone = computed(() => (detail.value.source === 'host' ? 'success' : 
 const focusedRepoLabel = computed(() => REPO_LABEL[state.focusedRepoType])
 const recentCommits = computed(() => state.detail?.commits.slice(0, 5) ?? [])
 const ciState = computed(() => component.value?.ci ?? 'NONE')
+
+// ── M2b-2 备份 ref（按组件/仓） ──
+const backup = computed(() => state.backupRefs)
+const backupRepoType = computed<RepoType>(() => {
+  const value = (backup.value.componentId === openId.value ? backup.value.repoType : state.focusedRepoType) as RepoType
+  return (REPO_TYPES as readonly string[]).includes(value) ? value : 'IMPL'
+})
+const backupStatus = computed(() => backup.value.status)
+const backupError = computed(() => backup.value.error)
+
+function selectBackupRepo(type: RepoType): void {
+  if (!openId.value) return
+  void w.loadBackupRefs(openId.value, type)
+}
+
+function refreshBackupRefs(): void {
+  if (!openId.value) return
+  void w.loadBackupRefs(openId.value, backupRepoType.value)
+}
+
+function restoreBackupRef(ref: BackupRefVm): void {
+  w.requestRestoreBackupRef(ref)
+}
 
 watch(open, (value) => {
   if (value) {
@@ -178,6 +204,77 @@ function trapTab(event: KeyboardEvent): void {
 
           <section class="section">
             <div class="section-title">
+              备份 ref
+              <span class="hint">（SYNC 备份，可恢复到此处；保留 30 天）</span>
+            </div>
+            <div class="backup-toolbar">
+              <div class="repo-tabs" role="tablist" aria-label="备份 ref 仓类型">
+                <button
+                  v-for="type in REPO_TYPES"
+                  :key="type"
+                  type="button"
+                  role="tab"
+                  class="repo-tab"
+                  :class="{ active: backupRepoType === type }"
+                  :aria-selected="backupRepoType === type"
+                  :data-repo-type="type"
+                  data-testid="backup-repo-tab"
+                  @click="selectBackupRepo(type)"
+                >{{ REPO_LABEL[type] }}</button>
+              </div>
+              <span class="spacer" />
+              <button
+                type="button"
+                class="drawer-btn"
+                data-testid="backup-refresh"
+                :aria-busy="backupStatus === 'loading'"
+                title="重新读取该仓的备份 ref（Host getBackupRefs）"
+                @click="refreshBackupRefs"
+              >{{ backupStatus === 'loading' ? '读取中…' : '刷新' }}</button>
+            </div>
+
+            <div v-if="backupStatus === 'loading' && backup.refs.length === 0" class="muted small" data-testid="backup-loading">
+              正在读取备份 ref…
+            </div>
+            <div v-else-if="backupStatus === 'unavailable' || backupStatus === 'error'" class="backup-error" data-testid="backup-error" role="alert">
+              <span>{{ backupError }}</span>
+              <button type="button" class="drawer-btn" @click="refreshBackupRefs">重试</button>
+            </div>
+            <div v-else-if="backup.refs.length === 0" class="backup-empty" data-testid="backup-empty">
+              该仓暂无可恢复的备份 ref（SYNC 成功后会产生 <span class="mono">refs/backup/sync/*</span> 备份）。
+            </div>
+            <ul v-else class="backup-list" data-testid="backup-list">
+              <li
+                v-for="item in backup.refs"
+                :key="`${item.repoType}:${item.ref}`"
+                class="backup-row"
+                data-testid="backup-ref"
+                :data-ref="item.ref"
+                :data-repo-type="item.repoType"
+              >
+                <span class="mono truncate backup-ref-name" :title="item.ref">{{ item.ref }}</span>
+                <span class="mono backup-sha" :title="item.sha">{{ shortSha(item.sha) }}</span>
+                <span class="muted backup-at" :title="item.createdAt">{{ formatStamp(item.createdAt) }}</span>
+                <button
+                  type="button"
+                  class="drawer-btn backup-restore"
+                  data-testid="backup-restore"
+                  :disabled="Boolean(state.backupRestore.pending)"
+                  :title="`从 ${item.ref} 恢复（会覆盖当前分支状态，需确认）`"
+                  @click="restoreBackupRef(item)"
+                >{{ state.backupRestore.pending === item.ref ? '恢复中…' : '恢复…' }}</button>
+              </li>
+            </ul>
+            <p v-if="state.backupRestore.error" class="backup-error" data-testid="backup-restore-error" role="alert">
+              {{ state.backupRestore.error }}
+            </p>
+            <p class="hint backup-note">
+              恢复属覆盖性写操作：确认后由 Host 执行 <span class="mono">restoreBackupRef</span>，成功后刷新快照与详情；Host 拒绝时不显示为成功。
+            </p>
+          </section>
+
+          <section class="section">
+            <div class="section-title">
               最近提交
               <span class="hint">（聚焦仓 {{ focusedRepoLabel }}）</span>
             </div>
@@ -324,6 +421,62 @@ function trapTab(event: KeyboardEvent): void {
 .repo-state { display: inline-flex; }
 .warning { color: var(--st-warning-fg); }
 .ci-cell { display: inline-flex; }
+/* ── M2b-2 备份 ref ── */
+.backup-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.repo-tabs { display: inline-flex; border: 1px solid var(--border); border-radius: var(--r-btn); overflow: hidden; }
+.repo-tab {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 10px;
+  cursor: pointer;
+}
+.repo-tab:last-child { border-right: 0; }
+.repo-tab.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
+.backup-empty {
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-panel);
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.6;
+  text-align: center;
+}
+.backup-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 4px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--st-danger-bd);
+  border-radius: var(--r-panel);
+  background: var(--st-danger-bg);
+  color: var(--st-danger-fg);
+  font-size: 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.backup-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--r-panel); overflow: hidden; }
+.backup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 54px 68px auto;
+  gap: 6px;
+  align-items: center;
+  min-height: 28px;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+}
+.backup-row:last-child { border-bottom: 0; }
+.backup-ref-name { color: var(--text-2); }
+.backup-sha { color: var(--focus); }
+.backup-at { white-space: nowrap; }
+.backup-restore { height: 22px; padding: 0 6px; font-size: 10px; }
+.backup-note { margin: 6px 0 0; }
 .commit-list { display: flex; flex-direction: column; gap: 2px; }
 .commit-row {
   display: grid;

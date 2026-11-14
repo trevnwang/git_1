@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useWorkbench } from '../../stores/workbench'
 import { mockHostInfo } from '../../mocks/workbenchMock'
+import { auditActionLabel, auditResultMeta, formatAgo, formatStamp, REPO_LABEL, shortSha } from '../../viewmodel'
 
 const w = useWorkbench()
 const state = w.state
@@ -10,6 +11,51 @@ const logLevel = ref('全部')
 
 const kind = computed(() => state.overlays.modal)
 const hostInfo = computed(() => state.hostInfo ?? mockHostInfo())
+
+// ── M2b-2 操作审计（「日志与诊断」内嵌） ──
+const audit = computed(() => state.audit)
+const auditSourceLabel = computed(() => (audit.value.source === 'mock' ? 'Mock 审计' : 'Host 审计'))
+const auditStatusLabel = computed(() => {
+  switch (audit.value.status) {
+    case 'loading':
+      return '正在读取 operation_log…'
+    case 'ready':
+      return `更新于 ${audit.value.at > 0 ? formatAgo(new Date(audit.value.at).toISOString(), state.now) : '—'}`
+    case 'unavailable':
+      return 'Host 未实现审计查询'
+    case 'error':
+      return '审计查询失败'
+    default:
+      return '尚未加载'
+  }
+})
+const AUDIT_RESULT_OPTIONS = ['OK', 'FAILED', 'SKIPPED', 'CANCELED', 'INTERRUPTED'] as const
+
+function repoTypeLabel(repoType: string): string {
+  return ((REPO_LABEL as Record<string, string>)[repoType] ?? repoType) || '—'
+}
+
+function auditResult(result: string): { tone: string; label: string } {
+  return auditResultMeta(result)
+}
+
+function onAuditActionInput(event: Event): void {
+  w.setAuditActionFilter((event.target as HTMLInputElement).value)
+}
+
+function onAuditActionApply(event: Event): void {
+  w.setAuditActionFilter((event.target as HTMLInputElement).value)
+  w.applyAuditFilters()
+}
+
+function onAuditResultChange(event: Event): void {
+  w.setAuditResultFilter((event.target as HTMLSelectElement).value)
+  w.applyAuditFilters()
+}
+
+function exportAudit(format: 'csv' | 'json'): void {
+  void w.exportAudit(format)
+}
 const title = computed(() => {
   switch (kind.value) {
     case 'ci':
@@ -204,8 +250,8 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_U
         </div>
       </div>
 
-      <!-- 日志与诊断 -->
-      <div v-else-if="kind === 'logs'" class="modal-body">
+      <!-- 日志与诊断（含 M2b-2 操作审计） -->
+      <div v-else-if="kind === 'logs'" class="modal-body" data-testid="logs-modal">
         <div class="toolbar">
           <select v-model="logLevel" aria-label="日志级别过滤">
             <option>全部</option><option>INFO</option><option>WARN</option><option>ERROR</option><option>DEBUG</option>
@@ -220,6 +266,128 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_U
             <span class="log-msg">{{ line.msg }}</span>
           </div>
         </div>
+
+        <!-- 操作审计（M2b-2：Host operation_log 查询/过滤/分页/导出；不伪造数据） -->
+        <section class="audit-section" data-testid="audit-section" aria-label="操作审计">
+          <div class="audit-head">
+            <h4 class="section">操作审计 <span class="hint">（谁 / 何时 / 组件 / 仓 / 前后 HEAD / 结果 / 错误码 / job）</span></h4>
+            <span class="spacer" />
+            <span class="audit-source" data-testid="audit-source">{{ auditSourceLabel }}</span>
+            <span class="audit-status" data-testid="audit-status">{{ auditStatusLabel }}</span>
+          </div>
+          <div class="audit-toolbar">
+            <input
+              class="audit-input"
+              data-testid="audit-filter-action"
+              type="text"
+              placeholder="动作过滤（如 PUSH / SYNC）"
+              aria-label="按动作过滤审计"
+              :value="audit.filters.action"
+              @input="onAuditActionInput"
+              @change="onAuditActionApply"
+              @keydown.enter="onAuditActionApply"
+            />
+            <select
+              class="audit-select"
+              data-testid="audit-filter-result"
+              aria-label="按结果过滤审计"
+              :value="audit.filters.result"
+              @change="onAuditResultChange"
+            >
+              <option value="">全部结果</option>
+              <option v-for="option in AUDIT_RESULT_OPTIONS" :key="option" :value="option">{{ option }}</option>
+            </select>
+            <button type="button" class="drawer-btn" data-testid="audit-refresh" :aria-busy="audit.loading" @click="w.refreshOperationLog(true)">
+              {{ audit.loading ? '刷新中…' : '刷新' }}
+            </button>
+            <span class="spacer" />
+            <button
+              type="button"
+              class="drawer-btn"
+              data-testid="audit-export-csv"
+              :disabled="Boolean(audit.exporting)"
+              :aria-busy="audit.exporting === 'csv'"
+              title="导出 CSV（Host exportOperationLog）"
+              @click="exportAudit('csv')"
+            >{{ audit.exporting === 'csv' ? '导出中…' : '导出 CSV' }}</button>
+            <button
+              type="button"
+              class="drawer-btn"
+              data-testid="audit-export-json"
+              :disabled="Boolean(audit.exporting)"
+              :aria-busy="audit.exporting === 'json'"
+              title="导出 JSON（Host exportOperationLog）"
+              @click="exportAudit('json')"
+            >{{ audit.exporting === 'json' ? '导出中…' : '导出 JSON' }}</button>
+          </div>
+
+          <p v-if="audit.lastExport" class="audit-export-note" data-testid="audit-export-note">
+            已导出 {{ audit.lastExport.format.toUpperCase() }}：
+            <span class="mono" data-testid="audit-export-path">{{ audit.lastExport.path }}</span>
+            （{{ audit.lastExport.count }} 条）
+            <button type="button" class="drawer-btn" data-testid="audit-open-dir" @click="w.openAuditExportDir()">打开所在目录</button>
+          </p>
+          <p v-if="audit.exportError" class="audit-error" data-testid="audit-export-error" role="alert">{{ audit.exportError }}</p>
+
+          <div v-if="audit.status === 'loading' && audit.items.length === 0" class="audit-state" data-testid="audit-loading">
+            正在读取操作审计…
+          </div>
+          <div v-else-if="audit.status === 'unavailable' || audit.status === 'error'" class="audit-error-box" data-testid="audit-error" role="alert">
+            <div class="audit-error-title">{{ audit.status === 'unavailable' ? '审计查询不可用' : '审计查询失败' }}</div>
+            <div class="audit-error-detail">{{ audit.error }}</div>
+            <button type="button" class="drawer-btn" @click="w.refreshOperationLog(true)">重试</button>
+          </div>
+          <div v-else-if="audit.items.length === 0" class="audit-state" data-testid="audit-empty">
+            没有匹配的操作审计记录（成功/失败动作各写 1 行；可清空过滤条件或调整时间范围后刷新）。
+          </div>
+          <div v-else class="audit-table-wrap">
+            <table class="audit-table" data-testid="audit-table">
+              <thead>
+                <tr>
+                  <th>时间</th><th>actor</th><th>动作</th><th>组件</th><th>仓</th><th>结果</th><th>错误码</th><th>HEAD（前→后）</th><th>job</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="item in audit.items"
+                  :key="item.id"
+                  data-testid="audit-row"
+                  :data-action="item.action"
+                  :data-result="item.result"
+                  :data-component-id="item.componentId"
+                  :data-error-code="item.errorCode ?? ''"
+                  :data-job-id="item.jobId ?? ''"
+                >
+                  <td class="mono nowrap" data-testid="audit-ts" :title="item.ts">{{ formatStamp(item.ts) }}</td>
+                  <td class="truncate" :title="item.actor">{{ item.actor || '—' }}</td>
+                  <td class="nowrap" data-testid="audit-action" :title="auditActionLabel(item.action)">{{ item.action || '—' }}</td>
+                  <td class="mono truncate" :title="item.componentId">{{ item.componentId || '—' }}</td>
+                  <td class="nowrap">{{ item.repoType ? repoTypeLabel(item.repoType) : '—' }}</td>
+                  <td class="nowrap">
+                    <span class="audit-result" :class="`tone-${auditResult(item.result).tone}`" data-testid="audit-result">
+                      {{ auditResult(item.result).tone === 'success' ? '✓' : auditResult(item.result).tone === 'danger' ? '✕' : '•' }}
+                      {{ auditResult(item.result).label }}
+                    </span>
+                  </td>
+                  <td class="mono nowrap" data-testid="audit-error-code">{{ item.errorCode ?? '—' }}</td>
+                  <td class="mono nowrap" data-testid="audit-heads" :title="`${item.beforeHead ?? '—'} → ${item.afterHead ?? '—'}`">
+                    {{ shortSha(item.beforeHead) }} → {{ shortSha(item.afterHead) }}
+                  </td>
+                  <td class="mono truncate" :title="item.jobId ?? ''" data-testid="audit-job">{{ item.jobId || '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="audit-pager">
+            <span class="audit-range" data-testid="audit-range">{{ w.auditRangeText() }}</span>
+            <span class="spacer" />
+            <button type="button" class="drawer-btn" data-testid="audit-prev" :disabled="!w.auditHasPrev() || audit.loading" @click="w.auditPrevPage()">上一页</button>
+            <span class="audit-page" data-testid="audit-page">第 {{ w.auditPageIndex() + 1 }} / {{ w.auditPageCount() }} 页</span>
+            <button type="button" class="drawer-btn" data-testid="audit-next" :disabled="!w.auditHasNext() || audit.loading" @click="w.auditNextPage()">下一页</button>
+          </div>
+          <p class="hint">数据来源：Host <span class="mono">operation_log</span>（成功与失败各 1 行；批量作业行含 jobId/jobItemId/backupRef）。Host 未就绪时显示不可用态，不展示伪造审计。</p>
+        </section>
       </div>
 
       <!-- 未绑定仓库 -->
@@ -408,4 +576,98 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_U
 .about-brand { font-size: 18px; font-weight: 650; margin-bottom: 2px; }
 .muted { color: var(--text-2); }
 .mono { font-family: ui-monospace, Consolas, monospace; }
+/* ── M2b-2 操作审计 ── */
+.audit-section {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.audit-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.audit-head .section { margin: 0; }
+.audit-source {
+  font-size: 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 6px;
+  color: var(--text-2);
+}
+.audit-status { font-size: 10px; color: var(--text-2); }
+.audit-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.audit-input {
+  width: 200px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+.audit-select {
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+}
+.audit-export-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0 8px;
+  padding: 5px 8px;
+  border: 1px dashed var(--st-info-bd);
+  border-radius: var(--r-panel);
+  background: var(--st-info-bg);
+  color: var(--st-info-fg);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.audit-error { color: var(--st-danger-fg); font-size: 10px; margin: 4px 0; }
+.audit-state {
+  min-height: 76px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 4px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-panel);
+  color: var(--text-2);
+  font-size: 11px;
+  padding: 12px;
+  text-align: center;
+}
+.audit-error-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--st-danger-bd);
+  border-radius: var(--r-panel);
+  background: var(--st-danger-bg);
+  color: var(--st-danger-fg);
+  font-size: 11px;
+}
+.audit-error-title { font-weight: 650; }
+.audit-error-detail { overflow-wrap: anywhere; }
+.audit-table-wrap { border: 1px solid var(--border); border-radius: var(--r-panel); overflow: auto; max-height: 260px; }
+.audit-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+.audit-table th, .audit-table td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.audit-table th { position: sticky; top: 0; background: var(--surface-2); color: var(--text-2); font-weight: 600; z-index: 1; }
+.audit-table tbody tr:last-child td { border-bottom: 0; }
+.audit-table .nowrap { white-space: nowrap; }
+.audit-table .truncate { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audit-result { white-space: nowrap; font-weight: 600; }
+.audit-result.tone-success { color: var(--st-success-fg); }
+.audit-result.tone-danger { color: var(--st-danger-fg); }
+.audit-result.tone-warning { color: var(--st-warning-fg); }
+.audit-result.tone-info { color: var(--st-info-fg); }
+.audit-result.tone-neutral { color: var(--st-neutral-fg); }
+.audit-pager { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.audit-range { font-size: 10px; color: var(--text-2); }
+.audit-page { font-size: 10px; color: var(--text-2); }
 </style>
