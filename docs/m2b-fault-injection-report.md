@@ -10,7 +10,7 @@
 |---|---|---|---|
 | `DIR_MOVE_BUSY` | Debug 构建 + `MBD_FAULT_INJECT` | `Delete_FileLocked_WritesPendingAndRetrySucceeds`：pending 生成、目录不变、重试成功 | PASS |
 | `INDEX_LOCK`（外部 git 占用） | JobEngine 预检 `.git/index.lock` | `RunBatch_ExternalIndexLock_ReturnsBusyWithoutWriteOrDeletingLock` | PASS |
-| `CRASH_AT_ITEM_2` | 单测模拟 journal STARTED 无 DONE + 重启 reconcile | `M2b2bAuditJournalTests`（NOT_APPLIED/UNKNOWN_APPLIED，仓库零改动） | PARTIAL（未做真实杀进程） |
+| `CRASH_AT_ITEM_2` / `CRASH_AFTER_WRITE` | 单测模拟 journal STARTED 无 DONE + HEAD 变化 | `Reconcile_HeadUnchanged...` / `Reconcile_HeadChanged...`：NOT_APPLIED/UNKNOWN_APPLIED，仓库零改动 | PARTIAL（未做真实杀进程） |
 | 真机 reconcile（NOT_APPLIED） | 追加 STARTED 无 DONE → 重启 Host | 审计 `RECONCILE result=NOT_APPLIED`（历史 id=452，actor=journal-reconciler） | PASS（历史演练） |
 | 真机 reconcile（AFTER_WRITE/UNKNOWN_APPLIED） | 未演练 | — | GAP |
 | `GIT_NET_AUTH_401` | Debug 注入 GitCli 网络命令 | `Clone_NetAuth401Injection_ReturnsAuthFailed`：E_AUTH_FAILED | PASS |
@@ -35,9 +35,9 @@
 
 ## 3. 结论
 
-**故障注入报告尚未通过 M2b final DoD**。剩余阻断：
+**故障注入报告尚未通过 M2b final DoD**（但 G-WIRE 与 GIT_NET 注入已补齐）。剩余阻断：
 
 1. 补 `GIT_NET_404/TIMEOUT`、`GIT_SLOW` 专项用例，实现 `CRASH_AFTER_WRITE` 注入；
 2. 实现 `G-WIRE-REST`/`G-WIRE-GIT` 并生成安全证据三件套；
-3. 真机演练 `CRASH_AFTER_WRITE` → `UNKNOWN_APPLIED`（只读、不猜成功）；
+3. 真机演练 `CRASH_AFTER_WRITE` → `UNKNOWN_APPLIED`（当前仅单测覆盖）；
 4. 按 AC-SAFE-01…13 逐条补期望/实测/证据，更新本报告为 PASS 后才可作为 Gate 材料。
