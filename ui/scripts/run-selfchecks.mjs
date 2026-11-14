@@ -42,7 +42,7 @@ function run(script, required) {
   const startedAt = new Date().toISOString()
   const result = spawnSync(process.execPath, [join(here, script)], { stdio: 'inherit' })
   const status = result.status === 0 ? 'PASS' : 'FAIL'
-  suites.push({ name: script, command: `node ui/scripts/${script}`, startedAt, finishedAt: new Date().toISOString(), result: status })
+  suites.push({ name: script, command: `node ui/scripts/${script}`, startedAt, finishedAt: new Date().toISOString(), result: status, artifact: artifactMap[script] })
   if (result.status !== 0 && required) failures.push(script)
 }
 
@@ -100,12 +100,23 @@ const manifest = {
   commit,
   generatedAt: new Date().toISOString(),
   suite: suites,
-  checks: suites.flatMap((suite) => (acMap[suite.name] ?? []).map((ac) => ({
-    ac,
-    status: suite.result,
-    suite: suite.name,
-    evidence: suite.artifact,
-  }))),  note: 'SKIP 不计入 COVERED；AC 逐条证据见 docs/m2b-ac-op-gap.md',
+  checks: suites.flatMap((suite) => {
+    let detail = null
+    try {
+      const absolute = join(here, '..', '..', suite.artifact ?? '')
+      if (suite.artifact && existsSync(absolute)) detail = JSON.parse(readFileSync(absolute, 'utf8'))
+    } catch {
+      /* ignore */
+    }
+    const checks = Array.isArray(detail?.checks) ? detail.checks : []
+    if (checks.length === 0) return [{ suite: suite.name, status: suite.result, evidence: suite.artifact }]
+    return checks.map((check) => ({
+      suite: suite.name,
+      check: check.id,
+      status: check.ok === true ? 'PASS' : 'FAIL',
+      evidence: suite.artifact,
+    }))
+  }),  note: 'SKIP 不计入 COVERED；AC 逐条证据见 docs/m2b-ac-op-gap.md',
 }
 const evidenceDir = join(here, '..', '..', 'docs', 'evidence')
 mkdirSync(evidenceDir, { recursive: true })

@@ -1,206 +1,946 @@
 {
-  "commit": "83477c1",
-  "generatedAt": "2026-11-14T23:28:45.055Z",
+  "commit": "ec01cb9",
+  "generatedAt": "2026-11-14T23:37:16.482Z",
   "suite": [
     {
       "name": "cdp-m2a-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2a-selfcheck.mjs",
-      "startedAt": "2026-11-14T23:27:25.618Z",
-      "finishedAt": "2026-11-14T23:27:29.324Z",
-      "result": "PASS"
+      "startedAt": "2026-11-14T23:35:55.818Z",
+      "finishedAt": "2026-11-14T23:35:59.507Z",
+      "result": "PASS",
+      "artifact": "artifacts/m2a-selfcheck/result.json"
     },
     {
       "name": "cdp-m2b1-fix-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2b1-fix-selfcheck.mjs",
-      "startedAt": "2026-11-14T23:27:29.324Z",
-      "finishedAt": "2026-11-14T23:28:00.090Z",
-      "result": "PASS"
+      "startedAt": "2026-11-14T23:35:59.507Z",
+      "finishedAt": "2026-11-14T23:36:30.290Z",
+      "result": "PASS",
+      "artifact": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
       "name": "cdp-m2b2-selfcheck.mjs",
       "command": "node ui/scripts/cdp-m2b2-selfcheck.mjs",
-      "startedAt": "2026-11-14T23:28:00.090Z",
-      "finishedAt": "2026-11-14T23:28:32.296Z",
-      "result": "PASS"
+      "startedAt": "2026-11-14T23:36:30.290Z",
+      "finishedAt": "2026-11-14T23:37:03.697Z",
+      "result": "PASS",
+      "artifact": "artifacts/m2b2-selfcheck/result.json"
     },
     {
       "name": "cdp-m2b2-realhost-check.mjs",
       "command": "node ui/scripts/cdp-m2b2-realhost-check.mjs",
-      "startedAt": "2026-11-14T23:28:32.334Z",
-      "finishedAt": "2026-11-14T23:28:44.999Z",
-      "result": "PASS"
+      "startedAt": "2026-11-14T23:37:03.736Z",
+      "finishedAt": "2026-11-14T23:37:16.430Z",
+      "result": "PASS",
+      "artifact": "artifacts/m2b2-realhost/result.json"
     }
   ],
   "checks": [
     {
-      "ac": "AC-OP-06",
+      "suite": "cdp-m2a-selfcheck.mjs",
+      "check": "ui-08.host-confirm-commit",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2a-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-07",
+      "suite": "cdp-m2a-selfcheck.mjs",
+      "check": "ui-08.host-confirm-push",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2a-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-08",
+      "suite": "cdp-m2a-selfcheck.mjs",
+      "check": "ui-08.tooltip-format",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2a-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-09",
+      "suite": "cdp-m2a-selfcheck.mjs",
+      "check": "ui-10b.confirm-bar",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2a-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-10",
+      "suite": "cdp-m2a-selfcheck.mjs",
+      "check": "ui-10b.bar-height",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2a-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-15",
+      "suite": "cdp-m2a-selfcheck.mjs",
+      "check": "ui-10b.bbox-stable",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2a-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-16",
+      "suite": "cdp-m2a-selfcheck.mjs",
+      "check": "ui-10b.no-write-before-accept",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2a-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-17",
+      "suite": "cdp-m2a-selfcheck.mjs",
+      "check": "ui-10.status-template",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2a-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-20",
+      "suite": "cdp-m2a-selfcheck.mjs",
+      "check": "ui-15.batch-entry-feedback",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2a-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-21",
+      "suite": "cdp-m2a-selfcheck.mjs",
+      "check": "ui-15.no-old-boundary-copy",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2a-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-22",
+      "suite": "cdp-m2a-selfcheck.mjs",
+      "check": "op-33.audit-actor-requestid",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2a-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-28",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "mock.boot",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-29",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "mock.source",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-33",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "batch.select-all",
       "status": "PASS",
-      "suite": "cdp-m2a-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-03",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "batch.more-kinds",
       "status": "PASS",
-      "suite": "cdp-m2b1-fix-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-24",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "batch.more-unimplemented-disabled",
       "status": "PASS",
-      "suite": "cdp-m2b1-fix-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-26",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "dryrun.dialog-badge",
       "status": "PASS",
-      "suite": "cdp-m2b1-fix-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-27",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "dryrun.dialog-notice",
       "status": "PASS",
-      "suite": "cdp-m2b1-fix-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-34",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "dryrun.submit-toast",
       "status": "PASS",
-      "suite": "cdp-m2b1-fix-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-35",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "dryrun.job-badge",
       "status": "PASS",
-      "suite": "cdp-m2b1-fix-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-22",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "dryrun.job-state",
       "status": "PASS",
-      "suite": "cdp-m2b2-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-23",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "dryrun.job-progress",
       "status": "PASS",
-      "suite": "cdp-m2b2-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-25",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "dryrun.job-note",
       "status": "PASS",
-      "suite": "cdp-m2b2-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-28",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "cancel.running-visible",
       "status": "PASS",
-      "suite": "cdp-m2b2-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-30",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "cancel.state",
       "status": "PASS",
-      "suite": "cdp-m2b2-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-UI-10c",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "cancel.no-e-timeout",
       "status": "PASS",
-      "suite": "cdp-m2b2-selfcheck.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-01",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "cancel.item-note",
       "status": "PASS",
-      "suite": "cdp-m2b2-realhost-check.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-02",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "selection.zero-hint",
       "status": "PASS",
-      "suite": "cdp-m2b2-realhost-check.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-04",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "selection.zero-toast",
       "status": "PASS",
-      "suite": "cdp-m2b2-realhost-check.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-05",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "selection.zero-no-confirm",
       "status": "PASS",
-      "suite": "cdp-m2b2-realhost-check.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-31",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "selection.zero-more-disabled",
       "status": "PASS",
-      "suite": "cdp-m2b2-realhost-check.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-32",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "real.boot",
       "status": "PASS",
-      "suite": "cdp-m2b2-realhost-check.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-OP-34",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "real.not-forced-mock",
       "status": "PASS",
-      "suite": "cdp-m2b2-realhost-check.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
     },
     {
-      "ac": "AC-SAFE-13",
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "event.listeners-captured",
       "status": "PASS",
-      "suite": "cdp-m2b2-realhost-check.mjs"
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "real.source",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "task.history-present",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "task.history-dryrun-badge",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "task.history-dryrun-no-success-0",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "task.history-cancel-no-e-timeout",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "task.history-cancel-item-note",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "focus.drawer-initial",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "focus.drawer-tab-trap",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "focus.drawer-shift-tab",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "focus.drawer-esc-return",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "focus.dialog-initial",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "focus.dialog-tab-trap",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "focus.dialog-esc-return",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "entry.bar-kinds",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "entry.menu-covers-bar",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "entry.ctx-covers-bar",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "entry.unimplemented-disabled",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "entry.ctx-count",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "segment.history-before",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "event.new-envelope",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "event.prefer-current",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "p0-2.segment-not-hijacked",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "p0-2.unread-hint",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "p0-2.active-visible",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "p0-2.progress-from-current",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "event.old-data-envelope",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "event.canceled-no-timeout",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "event.canceled-notes",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "preview.job-state",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "preview.dryrun-flag",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "preview.state-label",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "preview.progress",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "preview.note",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "preview.item-state",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "preview.item-no-error",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "real.fetch-confirm",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "real.running-visible",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "real.running-auto-focus",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "real.cancel-state",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "real.cancel-no-e-timeout",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "real.cancel-item-notes",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "real.retry-visible",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "real.retry-new-job",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "real.retry-toast",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b1-fix-selfcheck.mjs",
+      "check": "page.no-errors",
+      "status": "PASS",
+      "evidence": "artifacts/m2b1-fix-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "boot.ready",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "boot.host-mode",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "offline.banner",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "offline.statusbar",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "offline.fetch-disabled",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "offline.fetch-tooltip",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "empty.unborn-push-disabled",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "empty.unborn-tooltip-e-ref-not-found",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "empty.unborn-no-confirm-bar",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "no-upstream.confirm-bar",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "m2a.tooltip-format",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.open-and-loaded",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.row-count-page1",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.range-total",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.row-fields",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.row-heads-from-json-projection",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.host-bridge-used",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.filter-action",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.filter-params-host",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.filter-result",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.pagination",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.export-csv",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.export-params-csv",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.open-export-dir",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.export-json",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "audit.export-unavailable-no-fake-success",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.drawer-open",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.refs-loaded",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.ref-fields",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.host-bridge-params",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.confirm-shows-overwrite",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.no-restore-before-confirm",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.restore-success-toast",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.restore-safety-ref-shown",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.restore-host-confirm",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.refresh-after-restore",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.reject-ref-present",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.reject-confirm-open",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.reject-no-fake-success",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.reject-no-new-success-toast",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.reject-error-visible",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "backup.empty-state",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "m2b1.task-center-empty",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "mock.boot",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "mock.no-offline-banner",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "mock.audit-source",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "mock.audit-rows",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "mock.audit-total",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "mock.audit-export",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "mock.backup-refs",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "mock.backup-restore-success",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "mock.backup-empty",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-selfcheck.mjs",
+      "check": "page.no-console-errors",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-selfcheck/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.boot",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.source-local",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.no-false-offline",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.statusbar-online",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.workspace-components",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.fetch-available-online",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.empty-skip-no-fixture",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.audit-query-ready",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.audit-has-rows-or-empty",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.audit-export-csv",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.audit-open-dir-no-fake-success",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.audit-open-dir-path-copied",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.backup-refs-loaded",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.backup-target-ref-present",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.backup-branch-or-legacy",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.backup-ref-fields",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.audit-query-after",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.audit-has-terminal-result",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
+    },
+    {
+      "suite": "cdp-m2b2-realhost-check.mjs",
+      "check": "real.page-no-console-errors",
+      "status": "PASS",
+      "evidence": "artifacts/m2b2-realhost/result.json"
     }
   ],
   "note": "SKIP 不计入 COVERED；AC 逐条证据见 docs/m2b-ac-op-gap.md"
