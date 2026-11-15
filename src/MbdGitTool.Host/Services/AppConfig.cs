@@ -139,6 +139,10 @@ public sealed record AppConfig
         var baseUrl = Override("MBD_GITEA_URL", file.Gitea?.BaseUrl);
         var org = Override("MBD_GITEA_ORG", file.Gitea?.Org);
         var token = Override("MBD_GITEA_TOKEN", file.Gitea?.Token);
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            token = TokenStore.Load();
+        }
         var allowInsecure = ParseBool(Environment.GetEnvironmentVariable("MBD_GITEA_ALLOW_INSECURE_HTTP"))
             ?? file.Gitea?.AllowInsecureHttp
             ?? false;
@@ -162,6 +166,40 @@ public sealed record AppConfig
         };
     }
 
+    /// <summary>
+    /// 保存用户配置到 config.json，并把 Token 写入 DPAPI 加密的 token.bin。
+    /// <para><paramref name="token"/> 为 null/空且 <paramref name="clearToken"/>=false 时保留已有 Token。</para>
+    /// </summary>
+    public static bool Save(AppConfig config, string? token, bool clearToken = false)
+    {
+        try
+        {
+            var path = DefaultConfigPath;
+            var file = new ConfigFile
+            {
+                WorkspaceRoot = Normalize(config.WorkspaceRoot),
+                Gitea = new GiteaConfig
+                {
+                    BaseUrl = Normalize(config.GiteaBaseUrl),
+                    Org = Normalize(config.GiteaOrg),
+                    AllowInsecureHttp = config.AllowInsecureHttp,
+                    Token = null // 不落明文；Token 由 TokenStore 加密保存
+                },
+                AuditRetentionDays = ClampDays(config.AuditRetentionDays, DefaultAuditRetentionDays, 90, 3650),
+                BackupRetentionDays = ClampDays(config.BackupRetentionDays, DefaultBackupRetentionDays, 7, 90)
+            };
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var json = JsonSerializer.Serialize(file, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
+            File.WriteAllText(path, json);
+            if (clearToken) return TokenStore.Save(null);
+            if (!string.IsNullOrWhiteSpace(token)) return TokenStore.Save(token);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return false;
+        }
+    }
     /// <summary>脱敏描述（禁止包含 token 明文，FR-CFG-03/FR-SAFE-03）。</summary>
     public override string ToString()
     {

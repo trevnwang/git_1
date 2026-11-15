@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -31,6 +32,10 @@ public sealed class HostCommandRouter : IDisposable
         new Dictionary<string, TimeSpan>(StringComparer.Ordinal)
         {
             ["getSnapshot"] = TimeSpan.FromSeconds(45),
+    ["getConfig"] = TimeSpan.FromSeconds(5),
+    ["saveConfig"] = TimeSpan.FromSeconds(10),
+    ["testGitea"] = TimeSpan.FromSeconds(45),
+    ["restartApp"] = TimeSpan.FromSeconds(5),
     ["bindComponent"] = TimeSpan.FromSeconds(45),
     ["unbindComponent"] = TimeSpan.FromSeconds(10),
     ["getComponentManagement"] = TimeSpan.FromSeconds(5),
@@ -454,6 +459,97 @@ public sealed class HostCommandRouter : IDisposable
                     return CommandResult.Failure(BridgeErrorCodes.InvalidArgument, "缺少 componentId");
                 var removed = _deletePending.Cancel(cancelId, null);
                 return CommandResult.Success(new { componentId = cancelId, removed });
+            }
+            case "getConfig":
+            {
+                var cfg = _snapshots.Config;
+                return CommandResult.Success(new
+                {
+                    workspaceRoot = cfg.WorkspaceRoot,
+                    giteaBaseUrl = cfg.GiteaBaseUrl,
+                    giteaOrg = cfg.GiteaOrg,
+                    allowInsecureHttp = cfg.AllowInsecureHttp,
+                    hasToken = !string.IsNullOrWhiteSpace(cfg.GiteaToken),
+                    configPath = AppConfig.DefaultConfigPath,
+                    loadError = cfg.LoadError,
+                });
+            }
+
+            case "saveConfig":
+            {
+                var p = ParseParams<SaveConfigParams>(parameters);
+                var workspace = p.WorkspaceRoot?.Trim();
+                if (string.IsNullOrWhiteSpace(workspace))
+                    return CommandResult.Failure(BridgeErrorCodes.InvalidArgument, "请填写本地工作区根目录");
+                string fullWorkspace;
+                try { fullWorkspace = Path.GetFullPath(workspace); }
+                catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+                { return CommandResult.Failure(BridgeErrorCodes.PathInvalid, "工作区路径非法"); }
+                if (!Directory.Exists(fullWorkspace))
+                    return CommandResult.Failure(BridgeErrorCodes.PathInvalid, $"工作区目录不存在：{fullWorkspace}");
+                var root = Path.GetPathRoot(fullWorkspace);
+                if (string.Equals(fullWorkspace.TrimEnd('\\'), root?.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+                    return CommandResult.Failure(BridgeErrorCodes.PathInvalid, "工作区不能是磁盘根目录");
+
+                var baseUrl = p.GiteaBaseUrl?.Trim();
+                var org = p.GiteaOrg?.Trim();
+                if (string.IsNullOrWhiteSpace(baseUrl) != string.IsNullOrWhiteSpace(org))
+                    return CommandResult.Failure(BridgeErrorCodes.GiteaConfigInvalid, "Gitea 地址与组织必须同时填写或同时留空");
+                if (!string.IsNullOrWhiteSpace(baseUrl))
+                {
+                    if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || (uri.Scheme != "http" && uri.Scheme != "https"))
+                        return CommandResult.Failure(BridgeErrorCodes.GiteaConfigInvalid, "Gitea 地址必须是 http/https URL");
+                    if (uri.Scheme == "http" && !p.AllowInsecureHttp && (!string.IsNullOrWhiteSpace(p.Token) || _snapshots.Config.GiteaToken is not null))
+                        return CommandResult.Failure(BridgeErrorCodes.GiteaInsecureHttp, "HTTP Gitea 必须显式勾选“允许不安全 HTTP”，否则拒绝发送 Token");
+                }
+
+                var config = new AppConfig
+                {
+                    WorkspaceRoot = fullWorkspace,
+                    GiteaBaseUrl = string.IsNullOrWhiteSpace(baseUrl) ? null : baseUrl.TrimEnd('/'),
+                    GiteaOrg = string.IsNullOrWhiteSpace(org) ? null : org,
+                    AllowInsecureHttp = p.AllowInsecureHttp,
+                };
+                if (!AppConfig.Save(config, p.Token, p.ClearToken))
+                    return CommandResult.Failure(BridgeErrorCodes.Internal, "配置保存失败（检查 %LOCALAPPDATA% 是否可写）");
+                HostLog.Info($"配置已保存：workspace={fullWorkspace} gitea={config.GiteaBaseUrl ?? "<unset>"} org={config.GiteaOrg ?? "<unset>"} token={(p.ClearToken ? "<cleared>" : string.IsNullOrWhiteSpace(p.Token) ? "<unchanged>" : "<saved>")}");
+                return CommandResult.Success(new { saved = true, restartRequired = true, configPath = AppConfig.DefaultConfigPath });
+            }
+
+            case "testGitea":
+            {
+                var p = ParseParams<TestGiteaParams>(parameters);
+                var baseUrl = p.GiteaBaseUrl?.Trim() ?? _snapshots.Config.GiteaBaseUrl;
+                var org = p.GiteaOrg?.Trim() ?? _snapshots.Config.GiteaOrg;
+                var token = string.IsNullOrWhiteSpace(p.Token) ? _snapshots.Config.GiteaToken : p.Token.Trim();
+                if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(org))
+                    return CommandResult.Failure(BridgeErrorCodes.GiteaConfigInvalid, "请先填写 Gitea 地址与组织");
+                try
+                {
+                    var client = new GiteaClient(baseUrl, org, token);
+                    var repos = await client.GetOrgReposAsync(cancellationToken).ConfigureAwait(false);
+                    return CommandResult.Success(new { reachable = true, repoCount = repos.Count, baseUrl, org });
+                }
+                catch (GiteaApiException ex)
+                {
+                    var code = ex.StatusCode is 401 or 403 ? BridgeErrorCodes.AuthFailed : BridgeErrorCodes.RemoteNotFound;
+                    return CommandResult.Failure(new BridgeError(code, $"Gitea 连接失败（HTTP {ex.StatusCode}）：{ex.Message}"));
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+                {
+                    return CommandResult.Failure(new BridgeError(BridgeErrorCodes.Network, $"Gitea 不可达：{ex.GetType().Name}"));
+                }
+            }
+
+            case "restartApp":
+            {
+                HostLog.Info("用户请求保存配置后重启应用");
+                var exe = Environment.ProcessPath;
+                if (string.IsNullOrWhiteSpace(exe))
+                    return CommandResult.Failure(BridgeErrorCodes.Internal, "无法定位当前程序路径");
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true });
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(new Action(() => System.Windows.Application.Current.Shutdown()));
+                return CommandResult.Success(new { restarting = true });
             }
             case "getHostInfo":
                 return CommandResult.Success(_hostInfo.Get());

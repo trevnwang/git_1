@@ -35,6 +35,14 @@ function clearSearch(): void {
     <img class="brand-logo" src="/logo-icon.png" alt="" aria-hidden="true" />
     <span class="brand" data-testid="title-product">MBD Git Tool</span>
     <span class="pill version" data-testid="title-version">v1.0.0</span>
+    <button
+      v-if="state.source === 'mock' && !state.workspaceRoot"
+      type="button"
+      class="pill src-warn config-cta"
+      data-testid="title-config-cta"
+      title="尚未配置工作区/Gitea，当前显示 Mock 数据；点击打开设置"
+      @click="w.openModal('settings')"
+    >未配置 · 去设置</button>
     <span class="meta org" :title="'组织 ' + (state.owner || '未配置')">{{ state.owner || '未配置' }}</span>
     <span class="meta scope" data-testid="title-scope" :title="`${componentCount} 组件 / ${repoCount} 仓`">
       {{ componentCount }} 组件 / {{ repoCount }} 仓

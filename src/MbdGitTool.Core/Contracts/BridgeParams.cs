@@ -9,6 +9,21 @@ public sealed record BridgeRequest(string? Id, string? Method, JsonElement? Para
 
 public sealed record GetComponentDetailParams(string? ComponentId = null);
 
+/// <summary>v1.0 读取/保存应用配置。</summary>
+public sealed record SaveConfigParams(
+    string? WorkspaceRoot = null,
+    string? GiteaBaseUrl = null,
+    string? GiteaOrg = null,
+    string? Token = null,
+    bool ClearToken = false,
+    bool AllowInsecureHttp = false);
+
+/// <summary>v1.0 测试 Gitea 连接。</summary>
+public sealed record TestGiteaParams(
+    string? GiteaBaseUrl = null,
+    string? GiteaOrg = null,
+    string? Token = null,
+    bool AllowInsecureHttp = false);
 /// <summary>M2b 组件纳入参数（AC-OP-31）。</summary>
 public sealed record BindComponentParams(string? ComponentId = null, string? DisplayName = null);
 

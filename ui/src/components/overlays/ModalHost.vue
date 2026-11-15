@@ -17,7 +17,126 @@ const managementView = ref<'active' | 'removed'>('active')
 const managementItems = computed(() => management.value.items.filter(item =>
   managementView.value === 'removed' ? item.isDeleted || !item.isManaged : item.isManaged && !item.isDeleted,
 ))
-const bindId = ref('')
+const configForm = ref({ workspaceRoot: '', giteaBaseUrl: '', giteaOrg: '', token: '', clearToken: false, allowInsecureHttp: false })
+const configMessage = ref('')
+const configBusy = ref(false)
+watch(() => state.hostConfig, (cfg) => {
+  if (kind.value !== 'settings' || cfg.status !== 'ready') return
+  configForm.value = {
+    workspaceRoot: cfg.workspaceRoot,
+    giteaBaseUrl: cfg.giteaBaseUrl,
+    giteaOrg: cfg.giteaOrg,
+    token: '',
+    clearToken: false,
+    allowInsecureHttp: cfg.allowInsecureHttp,
+  }
+}, { deep: true })
+async function onSaveConfig(): Promise<void> {
+  configBusy.value = true
+  configMessage.value = ''
+  try {
+    const result = await w.saveHostConfig({
+      workspaceRoot: configForm.value.workspaceRoot,
+      giteaBaseUrl: configForm.value.giteaBaseUrl,
+      giteaOrg: configForm.value.giteaOrg,
+      token: configForm.value.token || undefined,
+      clearToken: configForm.value.clearToken,
+      allowInsecureHttp: configForm.value.allowInsecureHttp,
+    })
+    configMessage.value = result.message
+    if (result.ok) w.notify(result.message, 'success', 6000)
+  } finally {
+    configBusy.value = false
+  }
+}
+async function onTestGitea(): Promise<void> {
+  configBusy.value = true
+  configMessage.value = ''
+  try {
+    const result = await w.testGitea({
+      giteaBaseUrl: configForm.value.giteaBaseUrl,
+      giteaOrg: configForm.value.giteaOrg,
+      token: configForm.value.token || undefined,
+      allowInsecureHttp: configForm.value.allowInsecureHttp,
+    })
+    configMessage.value = result.message
+    w.notify(result.message, result.ok ? 'success' : 'error', 6000)
+  } finally {
+    configBusy.value = false
+  }
+}
+async function onRestartApp(): Promise<void> {
+  await w.restartApp()
+}
+
+// FR-CFG-01：首次配置向导（工作区 → Gitea → Token → 测试/保存）。
+const onboardStep = ref(0)
+const onboardForm = ref({ workspaceRoot: '', giteaBaseUrl: '', giteaOrg: '', token: '', allowInsecureHttp: false })
+const onboardMessage = ref('')
+const onboardBusy = ref(false)
+watch(() => state.hostConfig, (cfg) => {
+  if (cfg.status !== 'ready') return
+  onboardForm.value = {
+    workspaceRoot: cfg.workspaceRoot,
+    giteaBaseUrl: cfg.giteaBaseUrl,
+    giteaOrg: cfg.giteaOrg,
+    token: '',
+    allowInsecureHttp: cfg.allowInsecureHttp,
+  }
+}, { deep: true })
+watch(kind, (value) => {
+  if (value === 'onboarding') {
+    onboardStep.value = 0
+    onboardMessage.value = ''
+  }
+})
+function onboardingNext(): void {
+  onboardMessage.value = ''
+  if (onboardStep.value === 0) {
+    if (!onboardForm.value.workspaceRoot.trim()) { onboardMessage.value = '请填写本地工作区根目录'; return }
+  } else if (onboardStep.value === 1) {
+    const url = onboardForm.value.giteaBaseUrl.trim()
+    const org = onboardForm.value.giteaOrg.trim()
+    if ((url && !org) || (!url && org)) { onboardMessage.value = 'Gitea 地址与组织需同时填写或同时留空'; return }
+    if (url && !/^https?:\/\//i.test(url)) { onboardMessage.value = 'Gitea 地址必须以 http:// 或 https:// 开头'; return }
+  } else if (onboardStep.value === 2) {
+    if (/^http:\/\//i.test(onboardForm.value.giteaBaseUrl) && onboardForm.value.token.trim() && !onboardForm.value.allowInsecureHttp) {
+      onboardMessage.value = 'HTTP Gitea 发送 Token 前必须勾选“允许不安全 HTTP”'; return
+    }
+  }
+  onboardStep.value = Math.min(3, onboardStep.value + 1)
+}
+function onboardingBack(): void {
+  onboardMessage.value = ''
+  onboardStep.value = Math.max(0, onboardStep.value - 1)
+}
+async function onboardingTest(): Promise<void> {
+  onboardBusy.value = true
+  const result = await w.testGitea({
+    giteaBaseUrl: onboardForm.value.giteaBaseUrl,
+    giteaOrg: onboardForm.value.giteaOrg,
+    token: onboardForm.value.token || undefined,
+    allowInsecureHttp: onboardForm.value.allowInsecureHttp,
+  })
+  onboardMessage.value = result.message
+  onboardBusy.value = false
+}
+async function onboardingFinish(): Promise<void> {
+  onboardBusy.value = true
+  const result = await w.saveHostConfig({
+    workspaceRoot: onboardForm.value.workspaceRoot,
+    giteaBaseUrl: onboardForm.value.giteaBaseUrl,
+    giteaOrg: onboardForm.value.giteaOrg,
+    token: onboardForm.value.token || undefined,
+    allowInsecureHttp: onboardForm.value.allowInsecureHttp,
+  })
+  onboardMessage.value = result.message
+  onboardBusy.value = false
+  if (result.ok) {
+    w.notify(result.message, 'success', 6000)
+    await w.restartApp()
+  }
+}const bindId = ref('')
 const bindDisplay = ref('')
 async function onBindComponent(): Promise<void> {
   await w.bindComponent(bindId.value, bindDisplay.value)
@@ -219,6 +338,42 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_U
         <p class="hint">CI 独立通道：永不参与组件聚合、卡片底色与严重度排序（CI-10）。</p>
       </div>
 
+      <!-- 首次配置向导（FR-CFG-01） -->
+      <div v-else-if="kind === 'onboarding'" class="modal-body settings-body" data-testid="onboarding-modal">
+        <div class="section-title">首次配置向导</div>
+        <p class="hint">第 {{ onboardStep + 1 }} / 4 步：完成工作区与 Gitea 配置后即可使用真实仓库数据。</p>
+        <div v-if="onboardStep === 0" class="settings-section">
+          <h3>1. 本地工作区</h3>
+          <div class="field"><label>本地根目录</label><input v-model="onboardForm.workspaceRoot" data-testid="onboarding-workspace" placeholder="例如 D:\Workspace\repos" /></div>
+          <p class="hint">工具会扫描该目录下的直接子目录，识别绑定到 Gitea 的 git 仓库。</p>
+        </div>
+        <div v-else-if="onboardStep === 1" class="settings-section">
+          <h3>2. Gitea</h3>
+          <div class="field"><label>Gitea 地址</label><input v-model="onboardForm.giteaBaseUrl" data-testid="onboarding-gitea-url" placeholder="http://192.168.50.20:3000" /></div>
+          <div class="field"><label>组织</label><input v-model="onboardForm.giteaOrg" data-testid="onboarding-gitea-org" placeholder="RTCRepos" /></div>
+          <p class="hint">如只需本地扫描，可把两项都留空；保存后仍可在此补充。</p>
+        </div>
+        <div v-else-if="onboardStep === 2" class="settings-section">
+          <h3>3. 认证</h3>
+          <div class="field"><label>PAT Token</label><input v-model="onboardForm.token" type="password" data-testid="onboarding-token" placeholder="可留空（公开组织只读）" /></div>
+          <div class="field"><label>允许不安全 HTTP</label><input v-model="onboardForm.allowInsecureHttp" type="checkbox" data-testid="onboarding-allow-insecure" /></div>
+          <p class="hint">Token 使用 Windows DPAPI 加密保存，不写入 config.json 或日志。</p>
+          <button type="button" class="btn" data-testid="onboarding-test" :disabled="onboardBusy" @click="onboardingTest">测试连接</button>
+        </div>
+        <div v-else class="settings-section">
+          <h3>4. 确认</h3>
+          <div class="field"><label>工作区</label><input :value="onboardForm.workspaceRoot" disabled /></div>
+          <div class="field"><label>Gitea</label><input :value="onboardForm.giteaBaseUrl || '（仅本地扫描）'" disabled /></div>
+          <div class="field"><label>组织</label><input :value="onboardForm.giteaOrg || '—'" disabled /></div>
+          <p class="hint">点击“保存并启动”后应用会重启，并按新配置扫描真实仓库。</p>
+        </div>
+        <p v-if="onboardMessage" class="hint" data-testid="onboarding-message">{{ onboardMessage }}</p>
+        <div class="inline settings-actions">
+          <button type="button" class="btn" data-testid="onboarding-back" :disabled="onboardStep === 0 || onboardBusy" @click="onboardingBack">上一步</button>
+          <button v-if="onboardStep < 3" type="button" class="btn primary" data-testid="onboarding-next" :disabled="onboardBusy" @click="onboardingNext">下一步</button>
+          <button v-else type="button" class="btn primary" data-testid="onboarding-finish" :disabled="onboardBusy" @click="onboardingFinish">保存并启动</button>
+        </div>
+      </div>
       <!-- 设置 -->
       <div v-else-if="kind === 'settings'" class="modal-body settings-body">
         <div class="settings-layout">
@@ -235,16 +390,24 @@ ICiProvider { getLatest(componentId); getAggregate(componentId); subscribe('CI_U
             </section>
             <section id="settings-workspace" class="settings-section">
               <h3>工作区</h3>
-              <div class="field"><label>本地根目录</label><input disabled :value="state.workspaceRoot || '（Host 未返回工作区根目录）'" /></div>
+              <div class="field"><label>本地根目录</label><input v-model="configForm.workspaceRoot" data-testid="settings-workspace-root" placeholder="例如 D:\Workspace\repos" /></div>
               <div class="field"><label>扫描频率</label><input disabled value="指纹 15s / 深扫变化触发" /></div>
-              <p class="hint">M1 已接入真实目录扫描；首扫三阶段进度在 M2/M3 收口。</p>
+              <p class="hint">必须是已存在目录；保存并重启后，Host 会按该目录扫描真实仓库。</p>
             </section>
             <section id="settings-auth" class="settings-section">
               <h3>认证</h3>
-              <div class="field"><label>Gitea 地址</label><input disabled :value="state.giteaBaseUrl || '（Host 未返回）'" /></div>
-              <div class="field"><label>组织</label><input disabled :value="state.owner || '（未配置）'" /></div>
-              <div class="field"><label>Token 状态</label><input disabled value="已注入（环境变量/凭据管理器；值不展示）" /></div>
-              <p class="hint">M2 已启用单仓写操作（PULL/FETCH/CHKOUT/COMMIT/PUSH）；Token 仅经环境变量/凭据引用，不落配置文件。</p>
+              <div class="field"><label>Gitea 地址</label><input v-model="configForm.giteaBaseUrl" data-testid="settings-gitea-url" placeholder="http://192.168.50.20:3000" /></div>
+              <div class="field"><label>组织</label><input v-model="configForm.giteaOrg" data-testid="settings-gitea-org" placeholder="RTCRepos" /></div>
+              <div class="field"><label>Token</label><input v-model="configForm.token" type="password" data-testid="settings-gitea-token" :placeholder="state.hostConfig.hasToken ? '已保存（留空则不修改）' : 'PAT（可留空，公开组织只读）'" /></div>
+              <div class="field"><label>允许不安全 HTTP</label><input v-model="configForm.allowInsecureHttp" type="checkbox" data-testid="settings-allow-insecure" /></div>
+              <div class="field"><label>清除已保存 Token</label><input v-model="configForm.clearToken" type="checkbox" data-testid="settings-clear-token" /></div>
+              <p class="hint">Token 使用 Windows DPAPI 加密保存到 `%LOCALAPPDATA%\MbdGitTool\token.bin`，不写入 config.json/日志。</p>
+              <div class="inline settings-actions">
+                <button type="button" class="btn" data-testid="settings-test-gitea" :disabled="configBusy" @click="onTestGitea">测试连接</button>
+                <button type="button" class="btn primary" data-testid="settings-save-config" :disabled="configBusy" @click="onSaveConfig">保存配置</button>
+                <button type="button" class="btn" data-testid="settings-restart-app" :disabled="configBusy" @click="onRestartApp">保存并重启</button>
+              </div>
+              <p v-if="configMessage" class="hint" data-testid="settings-config-message">{{ configMessage }}</p>
             </section>
             <section id="settings-safety" class="settings-section">
               <h3>操作与安全</h3>

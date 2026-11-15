@@ -554,6 +554,10 @@ export type RequestMethod =
   | 'bindComponent'
   | 'unbindComponent'
   | 'getComponentManagement'
+  | 'getConfig'
+  | 'saveConfig'
+  | 'testGitea'
+  | 'restartApp'
   | 'undoCreate'
   | 'getDeletePending'
   | 'cancelDeletePending'
@@ -586,6 +590,10 @@ export const TIMEOUTS: Record<RequestMethod, number> = {
   bindComponent: 45_000,
   unbindComponent: 120_000,
   getComponentManagement: 5_000,
+  getConfig: 5_000,
+  saveConfig: 10_000,
+  testGitea: 45_000,
+  restartApp: 5_000,
   undoCreate: 60_000,
   getDeletePending: 5_000,
   cancelDeletePending: 10_000,
@@ -1888,6 +1896,18 @@ export const api = {
   },
   async getComponentManagement(): Promise<{ items: Array<{ componentId: string; displayName?: string | null; isManaged: boolean; isDeleted: boolean; updatedAt?: string }> }> {
     return (await request<unknown>('getComponentManagement', {})) as { items: Array<{ componentId: string; displayName?: string | null; isManaged: boolean; isDeleted: boolean; updatedAt?: string }> }
+  },
+  async getConfig(): Promise<{ workspaceRoot: string | null; giteaBaseUrl: string | null; giteaOrg: string | null; allowInsecureHttp: boolean; hasToken: boolean; configPath: string; loadError: string | null }> {
+    return (await request<unknown>('getConfig', {})) as { workspaceRoot: string | null; giteaBaseUrl: string | null; giteaOrg: string | null; allowInsecureHttp: boolean; hasToken: boolean; configPath: string; loadError: string | null }
+  },
+  async saveConfig(input: { workspaceRoot: string; giteaBaseUrl?: string; giteaOrg?: string; token?: string; clearToken?: boolean; allowInsecureHttp?: boolean }): Promise<{ saved: boolean; restartRequired: boolean; configPath: string }> {
+    return (await request<unknown>('saveConfig', input)) as { saved: boolean; restartRequired: boolean; configPath: string }
+  },
+  async testGitea(input: { giteaBaseUrl?: string; giteaOrg?: string; token?: string; allowInsecureHttp?: boolean }): Promise<{ reachable: boolean; repoCount: number; baseUrl: string; org: string }> {
+    return (await request<unknown>('testGitea', input)) as { reachable: boolean; repoCount: number; baseUrl: string; org: string }
+  },
+  async restartApp(): Promise<{ restarting: boolean }> {
+    return (await request<unknown>('restartApp', {})) as { restarting: boolean }
   },
   async undoCreate(jobId: string): Promise<unknown> {
     return await request<unknown>('undoCreate', { jobId })

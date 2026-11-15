@@ -18,10 +18,10 @@
 | 卸载 | Windows「应用和功能」→ MBD 组件全生命周期 Git 工具；或开始菜单卸载快捷方式 |
 | 签名 | **未做代码签名**，Windows SmartScreen 可能提示“未知发布者”，选择“仍要运行”即可 |
 | 安装包内容 | 自包含 .NET 10 运行时 + Host + 前端资源（无需另装 .NET） |
-| 文件大小 | 46,553,517 字节 |
-| SHA256 | `B000A93859E4755817388A80CE18717CA5EF6D8F3A02044AF6B98299B327A161` |
+| 文件大小 | 46,546,076 字节 |
+| SHA256 | `CE19C9C04318507C686C4850D9C58CFA9F923B5518D68C88B22C112F09FEA06D` |
 
-首次启动后进入配置向导：填写 Gitea BaseURL、组织名、PAT、本地工作区根目录，并测试连接。
+首次启动会自动进入四步配置向导（工作区 → Gitea → Token → 确认），可测试连接并“保存并启动”；之后也可在菜单「设置」中修改。未配置时标题栏会显示“未配置 · 去设置”，不会把 Mock 数据当作真实数据。
 
 ---
 
@@ -31,7 +31,7 @@
 - **四仓文件树**：Design/Impl/MIL/SIL 2×2、懒加载、只读路径安全、危险扩展名确认。
 - **单仓操作**：FETCH / PULL（`--ff-only`）/ CHKOUT / COMMIT / PUSH，底部按钮条与确认条。
 - **批量操作**：Clone / Pull / Fetch / Checkout / SYNC / Delete / Restore / CREATE；任务中心逐仓进度、取消、仅重试失败项、重启不重复执行。
-- **安全**：写前 journal + 崩溃 reconcile、`.trash` 软删除（30 天）、`refs/backup/sync/*` 备份恢复、DELETE_PENDING、审计 ≥90 天、Token 仅 Credential Manager/header。
+- **安全**：写前 journal + 崩溃 reconcile、`.trash` 软删除（30 天）、`refs/backup/sync/*` 备份恢复、DELETE_PENDING、审计 ≥90 天、Token 使用 Windows DPAPI 加密存于 `%LOCALAPPDATA%\MbdGitTool\token.bin`，仅以 header 发送。
 - **组件修复**：Repair / Re-clone、NO_UPSTREAM 三子型修复、detached HEAD 建分支、EMPTY 首推。
 - **组件管理**：按组件 ID 纳入、停止管理、本地删除（强确认）、已移出视图、待处理删除。
 - **审计与导出**：operation_log 查询/CSV/JSON 导出、JSONL 兼容、脱敏。
@@ -186,7 +186,7 @@ artifacts/                     # 构建/发布产物（gitignored）
 
 ## 8. 安全与数据
 
-- Token 存 Windows Credential Manager；不写日志/命令行/remote URL。
+- Token 使用 Windows DPAPI（CurrentUser）加密存于 `%LOCALAPPDATA%\\MbdGitTool\\token.bin`；不写日志/命令行/remote URL，config.json 中 token 为 null。
 - 删除仅本地 `.trash`（30 天）；SYNC 前写 `refs/backup/sync/*`；恢复前写 `refs/backup/restore/*`。
 - 写操作前 journal + 崩溃 reconcile；不猜测成功。
 - 审计 `operation_log`（SQLite + JSONL）默认保留 90 天。

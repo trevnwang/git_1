@@ -192,6 +192,16 @@ interface WorkbenchState {
   }
   // ── M2b-2 备份 ref 恢复 ──
   deletePending: Array<{ componentId: string; repoType: string; repoName: string; errorCode: string; createdAt: string }>
+  hostConfig: {
+    status: 'idle' | 'loading' | 'ready' | 'error'
+    workspaceRoot: string
+    giteaBaseUrl: string
+    giteaOrg: string
+    allowInsecureHttp: boolean
+    hasToken: boolean
+    configPath: string
+    loadError: string
+  }
   management: {
     status: 'idle' | 'loading' | 'ready' | 'error'
     items: Array<{ componentId: string; displayName: string; isManaged: boolean; isDeleted: boolean; updatedAt: string }>
@@ -422,6 +432,7 @@ const state = reactive<WorkbenchState>({
     exportError: '',
   },
   deletePending: [],
+  hostConfig: { status: 'idle', workspaceRoot: '', giteaBaseUrl: '', giteaOrg: '', allowInsecureHttp: false, hasToken: false, configPath: '', loadError: '' },
   management: { status: 'idle', items: [], error: '' },
   backupRefs: {
     status: 'idle',
@@ -682,6 +693,7 @@ function openModal(kind: ModalKind): void {
   // 「日志与诊断」内嵌操作审计：打开时按当前过滤条件重新拉取（Host 未实现时显示不可用态，不伪造数据）。
   if (kind === 'logs') void refreshOperationLog(true)
   if (kind === 'components') { void loadComponentManagement(); void loadDeletePending() }
+  if (kind === 'settings' || kind === 'onboarding') void loadHostConfig()
 }
 
 function closeModal(): void {
@@ -1048,6 +1060,15 @@ async function init(): Promise<void> {
   notify('正在连接 Host 并扫描本地仓库…（首次可能 10–20s）')
   await loadInitialSnapshot()
   await initJobs()
+  // FR-CFG-01：未配置工作区时自动进入首次配置向导（不把无配置 Mock 当作正常首屏）。
+  try {
+    await loadHostConfig()
+    if (state.hostConfig.status === 'ready' && !state.hostConfig.workspaceRoot) {
+      openModal('onboarding')
+    }
+  } catch {
+    /* 配置读取失败不阻塞主界面；标题栏仍提供“去设置”入口 */
+  }
 }
 
 async function refresh(): Promise<void> {
@@ -2869,6 +2890,55 @@ async function loadComponentManagement(): Promise<void> {
   }
 }
 
+async function loadHostConfig(): Promise<void> {
+  state.hostConfig = { ...state.hostConfig, status: 'loading', loadError: '' }
+  try {
+    if (!hasHostBridge() || state.mockFallback) {
+      state.hostConfig = { ...state.hostConfig, status: 'ready' }
+      return
+    }
+    const data = await api.getConfig()
+    state.hostConfig = {
+      status: 'ready',
+      workspaceRoot: data.workspaceRoot ?? '',
+      giteaBaseUrl: data.giteaBaseUrl ?? '',
+      giteaOrg: data.giteaOrg ?? '',
+      allowInsecureHttp: data.allowInsecureHttp,
+      hasToken: data.hasToken,
+      configPath: data.configPath,
+      loadError: data.loadError ?? '',
+    }
+  } catch (error) {
+    state.hostConfig = { ...state.hostConfig, status: 'error', loadError: toErrorMessage(error) }
+  }
+}
+
+async function saveHostConfig(input: { workspaceRoot: string; giteaBaseUrl?: string; giteaOrg?: string; token?: string; clearToken?: boolean; allowInsecureHttp?: boolean }): Promise<{ ok: boolean; message: string }> {
+  try {
+    const result = await api.saveConfig(input)
+    await loadHostConfig()
+    return { ok: true, message: `配置已保存：${result.configPath}。请重启应用后生效。` }
+  } catch (error) {
+    return { ok: false, message: toErrorMessage(error) }
+  }
+}
+
+async function testGitea(input: { giteaBaseUrl?: string; giteaOrg?: string; token?: string; allowInsecureHttp?: boolean }): Promise<{ ok: boolean; message: string }> {
+  try {
+    const result = await api.testGitea(input)
+    return { ok: true, message: `连接成功：可见 ${result.repoCount} 个仓库（${result.org}）` }
+  } catch (error) {
+    return { ok: false, message: toErrorMessage(error) }
+  }
+}
+
+async function restartApp(): Promise<void> {
+  try {
+    await api.restartApp()
+  } catch (error) {
+    notify(`重启失败：${toErrorMessage(error)}`, 'error')
+  }
+}
 async function loadDeletePending(): Promise<void> {
   try {
     if (!hasHostBridge() || state.mockFallback) { state.deletePending = []; return }
@@ -3735,6 +3805,10 @@ export interface WorkbenchStore {
   loadBackupRefs: typeof loadBackupRefs
   loadComponentManagement: typeof loadComponentManagement
   loadDeletePending: typeof loadDeletePending
+  loadHostConfig: typeof loadHostConfig
+  saveHostConfig: typeof saveHostConfig
+  testGitea: typeof testGitea
+  restartApp: typeof restartApp
   cancelDeletePending: typeof cancelDeletePending
   bindComponent: typeof bindComponent
   repairRepo: typeof repairRepo
@@ -3867,6 +3941,10 @@ export const workbench: WorkbenchStore = {
   loadComponentManagement,
   loadDeletePending,
   cancelDeletePending,
+  loadHostConfig,
+  saveHostConfig,
+  testGitea,
+  restartApp,
   bindComponent,
   repairRepo,
   fixRepo,
