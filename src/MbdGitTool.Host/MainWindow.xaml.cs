@@ -39,7 +39,16 @@ public partial class MainWindow : Window
             // 2) 快照服务（本地扫描 + 可选 Gitea 只读同步）。
             _snapshots = new SnapshotService(config);
 
-            var env = await CoreWebView2Environment.CreateAsync();
+            // WebView2 用户数据目录必须可写：Program Files 安装目录对普通用户不可写，
+            // 默认位置（exe 旁）会导致 CreateCoreWebView2ControllerAsync 返回 E_UNEXPECTED。
+            var webView2DataFolder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "MbdGitTool",
+                "WebView2");
+            Directory.CreateDirectory(webView2DataFolder);
+            HostLog.Info($"webview2 data folder: {webView2DataFolder}");
+
+            var env = await CoreWebView2Environment.CreateAsync(userDataFolder: webView2DataFolder);
             await Web.EnsureCoreWebView2Async(env);
             HostLog.Info($"webview2 initialized: {env.BrowserVersionString}");
 
@@ -100,7 +109,8 @@ public partial class MainWindow : Window
             HostLog.Error("ERROR " + ex);
             RuntimeMissing.Visibility = Visibility.Visible;
             RuntimeMissingDetail.Text =
-                "WebView2 初始化失败：\n" + ex.Message + "\n\n请安装 WebView2 Evergreen Runtime 后重试。";
+                "WebView2 初始化失败：\n" + ex.Message
+                + "\n\n请检查：1) WebView2 Evergreen Runtime 是否安装；2) %LOCALAPPDATA%\\MbdGitTool\\WebView2 是否可写。";
         }
     }
 
