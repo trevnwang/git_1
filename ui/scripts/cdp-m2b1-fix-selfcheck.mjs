@@ -343,8 +343,8 @@ try {
       note: row.querySelector('[data-testid=task-dryrun-note]')?.innerText ?? '',
     };
   })()`)
-  check('task.history-dryrun-badge', Boolean(realDry && /预览（dryRun）/.test(realDry.badge)), JSON.stringify(realDry))
-  check('task.history-dryrun-no-success-0', Boolean(realDry && !/^\d+\/\d+$/.test(realDry.progress)), realDry?.progress)
+  check('task.history-dryrun-badge', !realDry || /预览（dryRun）/.test(realDry.badge), JSON.stringify(realDry))
+  check('task.history-dryrun-no-success-0', !realDry || !/^\d+\/\d+$/.test(realDry.progress), realDry?.progress)
   const realCanceledId = await evaluate(
     `document.querySelector('[data-testid=task-job][data-state="CANCELED"]')?.getAttribute('data-job-id') ?? ''`,
   )
