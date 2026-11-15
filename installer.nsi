@@ -30,6 +30,9 @@ VIAddVersionKey /LANG=2052 "FileVersion"     "${APP_VERSION}"
 VIAddVersionKey /LANG=2052 "ProductVersion"  "${APP_VERSION}"
 VIAddVersionKey /LANG=2052 "LegalCopyright"  "Copyright (C) 2026 ${APP_PUBLISHER}"
 
+!define MUI_ICON "docs\logo\app.ico"
+!define MUI_UNICON "docs\logo\app.ico"
+
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE}"
 !define MUI_FINISHPAGE_RUN_TEXT "运行 ${APP_NAME}"

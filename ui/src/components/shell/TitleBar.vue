@@ -32,6 +32,7 @@ function clearSearch(): void {
 
 <template>
   <header class="title-bar" data-testid="titlebar">
+    <img class="brand-logo" src="/logo-icon.png" alt="" aria-hidden="true" />
     <span class="brand" data-testid="title-product">MBD Git Tool</span>
     <span class="pill version" data-testid="title-version">v1.0.0</span>
     <span class="meta org" :title="'组织 ' + (state.owner || '未配置')">{{ state.owner || '未配置' }}</span>
