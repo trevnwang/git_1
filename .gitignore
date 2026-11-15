@@ -20,3 +20,6 @@ artifacts/
 # OS
 Thumbs.db
 .DS_Store
+
+# v1.0 安装包产物（本地 release，不提交二进制）
+/MbdGitTool-Setup-*.exe

@@ -1698,7 +1698,7 @@ export function normalizeHostInfo(value: unknown): HostInfoDto {
     for (const key of Object.keys(limits)) limitsOut[key] = readNumber(limits, key)
   }
   return {
-    appVersion: readString(record, 'appVersion') ?? '0.3.0',
+    appVersion: readString(record, 'appVersion') ?? '1.0.0',
     webView2Version: readString(record, 'webView2Version') ?? '—',
     features: featuresOut,
     limits: limitsOut,

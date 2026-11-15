@@ -645,7 +645,7 @@ export function mockCiStatus(componentId: string): CiStatusDto {
 
 export function mockHostInfo(): HostInfoDto {
   return {
-    appVersion: '0.3.0',
+    appVersion: '1.0.0',
     webView2Version: 'Mock（浏览器）',
     features: { fileTree: true, workspaceTree: true, openPath: true, repoActions: false, ci: false },
     limits: { maxTreeEntries: 2000, snapshotTimeoutMs: 45_000 },
