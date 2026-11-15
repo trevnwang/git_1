@@ -9,7 +9,7 @@
 
 > 约定：`P0` = v1.0 不可缺；`P1` = v1.0 应完成；`P2` = 可排 v1.1。状态为功能实现状态；最终 Gate 签收状态以 README 为准。
 
-## FR-CFG-01 · 首次启动向导
+## FR-CFG-01
 
 - **需求编号**：FR-CFG-01
 - **需求名称**：首次启动向导
@@ -20,7 +20,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CFG-02 · “测试连接”返回认证结果、组织可见仓库数、权限范围
+## FR-CFG-02
 
 - **需求编号**：FR-CFG-02
 - **需求名称**：“测试连接”返回认证结果、组织可见仓库数、权限范围
@@ -31,7 +31,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CFG-03 · Token 存 Windows Credential Manager
+## FR-CFG-03
 
 - **需求编号**：FR-CFG-03
 - **需求名称**：Token 存 Windows Credential Manager
@@ -42,7 +42,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CFG-04 · Token 过期/401 时全局提示并在恢复后自动续跑
+## FR-CFG-04
 
 - **需求编号**：FR-CFG-04
 - **需求名称**：Token 过期/401 时全局提示并在恢复后自动续跑
@@ -53,7 +53,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CFG-05 · 代理/自签证书配置（系统代理默认、手动覆盖、证书信任选项）
+## FR-CFG-05
 
 - **需求编号**：FR-CFG-05
 - **需求名称**：代理/自签证书配置（系统代理默认、手动覆盖、证书信任选项）
@@ -64,7 +64,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CFG-06 · 配置热更新（组织/根目录变更需确认影响范围并重扫）
+## FR-CFG-06
 
 - **需求编号**：FR-CFG-06
 - **需求名称**：配置热更新（组织/根目录变更需确认影响范围并重扫）
@@ -75,7 +75,7 @@
 - **状态**：v1.1（非 v1.0）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SYNC-01 · 同步组织仓库清单
+## FR-SYNC-01
 
 - **需求编号**：FR-SYNC-01
 - **需求名称**：同步组织仓库清单
@@ -86,7 +86,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SYNC-02 · 同步已绑定/可见仓的分支与 Tag
+## FR-SYNC-02
 
 - **需求编号**：FR-SYNC-02
 - **需求名称**：同步已绑定/可见仓的分支与 Tag
@@ -97,7 +97,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SYNC-03 · 首启立即执行一次组织同步
+## FR-SYNC-03
 
 - **需求编号**：FR-SYNC-03
 - **需求名称**：首启立即执行一次组织同步
@@ -108,7 +108,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SYNC-04 · 每轮同步记录 `sync_run`（总数/成功/失败/覆盖率/耗时）
+## FR-SYNC-04
 
 - **需求编号**：FR-SYNC-04
 - **需求名称**：每轮同步记录 `sync_run`（总数/成功/失败/覆盖率/耗时）
@@ -119,7 +119,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SYNC-05 · 远程仓删除/改名
+## FR-SYNC-05
 
 - **需求编号**：FR-SYNC-05
 - **需求名称**：远程仓删除/改名
@@ -130,7 +130,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SYNC-06 · 增量策略以仓库 `updated_at` 水位为主
+## FR-SYNC-06
 
 - **需求编号**：FR-SYNC-06
 - **需求名称**：增量策略以仓库 `updated_at` 水位为主
@@ -141,7 +141,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SCAN-01 · 遍历 workspace_root 的直接子目录，识别“git 仓 + origin 匹配 Gitea 同名仓”
+## FR-SCAN-01
 
 - **需求编号**：FR-SCAN-01
 - **需求名称**：遍历 workspace_root 的直接子目录，识别“git 仓 + origin 匹配 Gitea 同名仓”
@@ -152,7 +152,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SCAN-02 · 采集单仓
+## FR-SCAN-02
 
 - **需求编号**：FR-SCAN-02
 - **需求名称**：采集单仓
@@ -163,7 +163,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SCAN-03 · 扫描不得写仓库
+## FR-SCAN-03
 
 - **需求编号**：FR-SCAN-03
 - **需求名称**：扫描不得写仓库
@@ -174,7 +174,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SCAN-04 · 分层扫描
+## FR-SCAN-04
 
 - **需求编号**：FR-SCAN-04
 - **需求名称**：分层扫描
@@ -185,7 +185,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SCAN-05 · 关系判定前必须保证 remote-tracking ref 新鲜
+## FR-SCAN-05
 
 - **需求编号**：FR-SCAN-05
 - **需求名称**：关系判定前必须保证 remote-tracking ref 新鲜
@@ -196,7 +196,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SCAN-06 · 长路径、大小写、reparse point、网络盘检测与告警
+## FR-SCAN-06
 
 - **需求编号**：FR-SCAN-06
 - **需求名称**：长路径、大小写、reparse point、网络盘检测与告警
@@ -207,18 +207,18 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-STA-01 · 14 个单仓主状态 + 正交标记 + 组件聚合
+## FR-STA-01
 
 - **需求编号**：FR-STA-01
 - **需求名称**：14 个单仓主状态 + 正交标记 + 组件聚合
 - **优先级**：P0
-- **描述**：实现单仓 14 个互斥主状态（UNKNOWN/INVALID/MISSING/EMPTY/UNMERGED/IN_PROGRESS/DETACHED_TAG/DETACHED_COMMIT/DIVERGED/BEHIND/AHEAD/NO_UPSTREAM/DIRTY/SYNCED）+ §7.3 正交标记（dirty_tracked/untracked/stashed/shallow/lfs_missing/reparse_point/stale/busy/remote_gone/tag_moved/mixed_branch）+ §7.4 组件聚合优先级（`max(组件覆盖态, 四仓主状态)`，无法命中/任一仓 UNKNOWN 时兜底 UNKNOWN，禁止假绿）；章节原文见 `reqs/archive/specification-v0.4.1.md` §7.2/§7.3/§7.4
+- **描述**：实现单仓 14 个互斥主状态（UNKNOWN/INVALID/MISSING/EMPTY/UNMERGED/IN_PROGRESS/DETACHED_TAG/DETACHED_COMMIT/DIVERGED/BEHIND/AHEAD/NO_UPSTREAM/DIRTY/SYNCED）+ 归档规格 §7.3 的正交标记（dirty_tracked/untracked/stashed/shallow/lfs_missing/reparse_point/stale/busy/remote_gone/tag_moved/mixed_branch）+ 归档规格 §7.4 的组件聚合优先级（`max(组件覆盖态, 四仓主状态)`，无法命中/任一仓 UNKNOWN 时兜底 UNKNOWN，禁止假绿）；章节原文见 `reqs/archive/specification-v0.4.1.md`（§7.2 主状态/§7.3 标记/§7.4 聚合）
 - **验收标准（AC）**：**附录 C 状态矩阵**逐条通过（14 主状态 × 关键 flag × 15 聚合态）
 - **关联 AC**：AC-STA-01、AC-STA-02、AC-STA-03、AC-STA-12、AC-STA-13、AC-STA-15
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-STA-02 · 数据不可用一律 UNKNOWN/STALE
+## FR-STA-02
 
 - **需求编号**：FR-STA-02
 - **需求名称**：数据不可用一律 UNKNOWN/STALE
@@ -229,7 +229,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-STA-03 · 关系判定用 compare_ref 与 merge-base
+## FR-STA-03
 
 - **需求编号**：FR-STA-03
 - **需求名称**：关系判定用 compare_ref 与 merge-base
@@ -240,7 +240,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-STA-04 · 状态记录带 `calc_at`/`data_source`/`error_code`/`is_stale`
+## FR-STA-04
 
 - **需求编号**：FR-STA-04
 - **需求名称**：状态记录带 `calc_at`/`data_source`/`error_code`/`is_stale`
@@ -251,7 +251,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-STA-05 · 操作完成 ≤2s 回写
+## FR-STA-05
 
 - **需求编号**：FR-STA-05
 - **需求名称**：操作完成 ≤2s 回写
@@ -262,7 +262,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-STA-06 · 组件四仓 Tag 一致性无条件计算（不依赖“基线模式”）
+## FR-STA-06
 
 - **需求编号**：FR-STA-06
 - **需求名称**：组件四仓 Tag 一致性无条件计算（不依赖“基线模式”）
@@ -273,18 +273,18 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-BOARD-01 · 默认视图 = 工作台左侧组件卡片列表（参考图为准），不再有“表格默认/卡片可选”
+## FR-BOARD-01
 
 - **需求编号**：FR-BOARD-01
 - **需求名称**：默认视图 = 工作台左侧组件卡片列表（参考图为准），不再有“表格默认/卡片可选”
 - **优先级**：P0
-- **描述**：**默认视图 = 工作台左侧组件卡片列表（参考图为准）**，不再有“表格默认/卡片可选”：每个组件一张卡片，字段与 §11.3 一致；默认排序 = `severity_rank` 升序（数值越小越严重）→ 组件 ID 升序；**旧看板表格视图降级 v1.1**，v1 不提供入口、不验收（D-023）
+- **描述**：**默认视图 = 工作台左侧组件卡片列表（参考图为准）**，不再有“表格默认/卡片可选”：每个组件一张卡片，字段与归档规格 §11.3 的组件卡片定义一致；默认排序 = `severity_rank` 升序（数值越小越严重）→ 组件 ID 升序；**旧看板表格视图降级 v1.1**，v1 不提供入口、不验收（D-023）
 - **验收标准（AC）**：卡片列表为唯一默认视图；默认排序断言；`table` 视图入口不存在（AC-UI-02/AC-UI-14）
 - **关联 AC**：AC-BOARD-01、AC-BOARD-02、AC-BOARD-03、AC-BOARD-14、AC-BOARD-15、AC-BOARD-16
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-BOARD-02 · 工作台搜索与筛选
+## FR-BOARD-02
 
 - **需求编号**：FR-BOARD-02
 - **需求名称**：工作台搜索与筛选
@@ -295,7 +295,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-BOARD-03 · 工作台七态齐备
+## FR-BOARD-03
 
 - **需求编号**：FR-BOARD-03
 - **需求名称**：工作台七态齐备
@@ -306,18 +306,18 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-BOARD-04 · 组件级批量操作入口（§11.6）
+## FR-BOARD-04
 
 - **需求编号**：FR-BOARD-04
-- **需求名称**：组件级批量操作入口（§11.6）
+- **需求名称**：组件级批量操作入口
 - **优先级**：P1
-- **描述**：组件级批量操作入口（§11.6）：对选中组件执行 Clone/Pull/Fetch/Checkout/Tag/SYNC/Delete/Restore/Create；**阈值 = 选中 >10 个组件或 >40 个仓**时二次确认；支持“全选筛选结果”；入口不得新增全宽工具栏或改变 7 区域布局
+- **描述**：组件级批量操作入口（归档规格 §11.6 批量入口）：对选中组件执行 Clone/Pull/Fetch/Checkout/Tag/SYNC/Delete/Restore/Create；**阈值 = 选中 >10 个组件或 >40 个仓**时二次确认；支持“全选筛选结果”；入口不得新增全宽工具栏或改变 7 区域布局
 - **验收标准（AC）**：选择 11 个组件触发确认；任务中心可逐仓查看；布局 bbox 断言（AC-UI-02）
 - **关联 AC**：AC-BOARD-09、AC-BOARD-10、AC-BOARD-11
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-BOARD-05 · 数据新鲜度展示（本地/远程分源）与手动刷新（标题区与状态栏各一处入口）
+## FR-BOARD-05
 
 - **需求编号**：FR-BOARD-05
 - **需求名称**：数据新鲜度展示（本地/远程分源）与手动刷新（标题区与状态栏各一处入口）
@@ -328,7 +328,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-BOARD-06 · 未绑定仓库入口（菜单栏/标题区入口 → 抽屉）
+## FR-BOARD-06
 
 - **需求编号**：FR-BOARD-06
 - **需求名称**：未绑定仓库入口（菜单栏/标题区入口 → 抽屉）
@@ -339,7 +339,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-DETAIL-01 · 组件详情
+## FR-DETAIL-01
 
 - **需求编号**：FR-DETAIL-01
 - **需求名称**：组件详情
@@ -350,7 +350,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-DETAIL-02 · 单仓详情
+## FR-DETAIL-02
 
 - **需求编号**：FR-DETAIL-02
 - **需求名称**：单仓详情
@@ -361,7 +361,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-DETAIL-03 · 单仓详情文件 Tab 复用文件树规则
+## FR-DETAIL-03
 
 - **需求编号**：FR-DETAIL-03
 - **需求名称**：单仓详情文件 Tab 复用文件树规则
@@ -372,7 +372,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-DETAIL-04 · 四仓分支不一致时（卡片与信息面板）显示 Impl 分支为主 + “分支不一致”角标 + 四仓对照
+## FR-DETAIL-04
 
 - **需求编号**：FR-DETAIL-04
 - **需求名称**：四仓分支不一致时（卡片与信息面板）显示 Impl 分支为主 + “分支不一致”角标 + 四仓对照
@@ -383,7 +383,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-DETAIL-05 · 右键菜单
+## FR-DETAIL-05
 
 - **需求编号**：FR-DETAIL-05
 - **需求名称**：右键菜单
@@ -394,7 +394,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OP-01 · 批量 Clone
+## FR-OP-01
 
 - **需求编号**：FR-OP-01
 - **需求名称**：批量 Clone
@@ -405,7 +405,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OP-02 · 批量 Pull/Fetch
+## FR-OP-02
 
 - **需求编号**：FR-OP-02
 - **需求名称**：批量 Pull/Fetch
@@ -416,7 +416,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OP-03 · 批量 Checkout 分支
+## FR-OP-03
 
 - **需求编号**：FR-OP-03
 - **需求名称**：批量 Checkout 分支
@@ -427,7 +427,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OP-04 · 批量切 Tag（暂定 D-029）
+## FR-OP-04
 
 - **需求编号**：FR-OP-04
 - **需求名称**：批量切 Tag（暂定 D-029）
@@ -438,7 +438,7 @@
 - **状态**：暂缓（D-029，不参与 v1.0 验收）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OP-05 · 受控 SYNC（“用远程覆盖本地”）
+## FR-OP-05
 
 - **需求编号**：FR-OP-05
 - **需求名称**：受控 SYNC（“用远程覆盖本地”）
@@ -449,7 +449,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OP-06 · 本地删除
+## FR-OP-06
 
 - **需求编号**：FR-OP-06
 - **需求名称**：本地删除
@@ -460,7 +460,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OP-07 · CREATE 分支
+## FR-OP-07
 
 - **需求编号**：FR-OP-07
 - **需求名称**：CREATE 分支
@@ -471,7 +471,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OP-08 · 任务中心
+## FR-OP-08
 
 - **需求编号**：FR-OP-08
 - **需求名称**：任务中心
@@ -482,7 +482,7 @@
 - **状态**：部分实现（边界/证据见 README 已知限制）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OP-09 · 操作审计
+## FR-OP-09
 
 - **需求编号**：FR-OP-09
 - **需求名称**：操作审计
@@ -493,7 +493,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OP-10 · 操作互斥
+## FR-OP-10
 
 - **需求编号**：FR-OP-10
 - **需求名称**：操作互斥
@@ -504,18 +504,18 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OP-11 · 恢复操作
+## FR-OP-11
 
 - **需求编号**：FR-OP-11
 - **需求名称**：恢复操作
 - **优先级**：P0
-- **描述**：**恢复操作**：从 `.trash`（按删除记录）或 `refs/backup/*`（按组件/仓/备份时间）恢复；**备份 ref `refs/backup/sync/*` 保留 ≥30 天（`backup.retentionDays` 可配，见附录 D）+ 定期清理任务 + 任务中心可见/可恢复**（H-05）；恢复前展示将覆盖的当前状态与冲突，需确认；恢复过程写审计
+- **描述**：**恢复操作**：从 `.trash`（按删除记录）或 `refs/backup/*`（按组件/仓/备份时间）恢复；**备份 ref `refs/backup/sync/*` 保留 ≥30 天（`backup.retentionDays` 可配，见归档规格 附录 D（配置键））+ 定期清理任务 + 任务中心可见/可恢复**（H-05）；恢复前展示将覆盖的当前状态与冲突，需确认；恢复过程写审计
 - **验收标准（AC）**：AC-OP-30：删除后可恢复；SYNC 后未推送 commit 可从备份 ref 恢复；保留期内备份 ref 可列出并恢复，超期由清理任务回收
 - **关联 AC**：AC-OP-30
 - **状态**：部分实现（边界/证据见 README 已知限制）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OP-12 · 组件纳入/移出管理
+## FR-OP-12
 
 - **需求编号**：FR-OP-12
 - **需求名称**：组件纳入/移出管理
@@ -526,18 +526,18 @@
 - **状态**：部分实现（边界/证据见 README 已知限制）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-REPO-01 · Fetch / Pull（ff-only）/ Checkout 分支或 Tag
+## FR-REPO-01
 
 - **需求编号**：FR-REPO-01
 - **需求名称**：Fetch / Pull（ff-only）/ Checkout 分支或 Tag
 - **优先级**：P0
-- **描述**：Fetch / Pull（ff-only）/ Checkout 分支或 Tag；操作前重新 scan；dirty 阻断规则同 9.7
+- **描述**：Fetch / Pull（ff-only）/ Checkout 分支或 Tag；操作前重新 scan；dirty 阻断规则同归档规格 §9.7 批量操作
 - **验收标准（AC）**：与命令行结果一致
 - **关联 AC**：AC-SAFE-16、AC-SAFE-17、AC-REPO-01、AC-REPO-02、AC-REPO-03
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-REPO-02 · Push
+## FR-REPO-02
 
 - **需求编号**：FR-REPO-02
 - **需求名称**：Push
@@ -548,7 +548,7 @@
 - **状态**：部分实现（边界/证据见 README 已知限制）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-REPO-03 · Commit（最小化）
+## FR-REPO-03
 
 - **需求编号**：FR-REPO-03
 - **需求名称**：Commit（最小化）
@@ -559,7 +559,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-REPO-04 · Reset（保留/混合/硬）——v1.1 再做，且必须先备份 ref
+## FR-REPO-04
 
 - **需求编号**：FR-REPO-04
 - **需求名称**：Reset（保留/混合/硬）——v1.1 再做，且必须先备份 ref
@@ -570,18 +570,18 @@
 - **状态**：v1.1（非 v1.0）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-REPO-05 · 状态修复类操作（对应 7.6）
+## FR-REPO-05
 
 - **需求编号**：FR-REPO-05
-- **需求名称**：状态修复类操作（对应 7.6）
+- **需求名称**：状态修复类操作
 - **优先级**：P0
-- **描述**：**状态修复类操作**（对应 7.6）：Repair/Re-clone（INVALID）、set-upstream 三子型修复（NO_UPSTREAM）、基于 detached HEAD 建分支（DETACHED_*）、EMPTY 空仓首次推送（建 upstream）；均走预检+job+逐仓结果
+- **描述**：**状态修复类操作**（对应归档规格 §7.6 状态×操作矩阵）：Repair/Re-clone（INVALID）、set-upstream 三子型修复（NO_UPSTREAM）、基于 detached HEAD 建分支（DETACHED_*）、EMPTY 空仓首次推送（建 upstream）；均走预检+job+逐仓结果
 - **验收标准（AC）**：AC-REPO-08/09/10/11：四类修复各 1 个夹具，执行后状态转移正确
 - **关联 AC**：AC-UI-10b、AC-OP-05、AC-REPO-08、AC-REPO-09、AC-REPO-10、AC-REPO-11
 - **状态**：部分实现（边界/证据见 README 已知限制）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SAFE-01 · 破坏性操作前展示丢失内容并强确认
+## FR-SAFE-01
 
 - **需求编号**：FR-SAFE-01
 - **需求名称**：破坏性操作前展示丢失内容并强确认
@@ -592,7 +592,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SAFE-02 · 删除仅本地
+## FR-SAFE-02
 
 - **需求编号**：FR-SAFE-02
 - **需求名称**：删除仅本地
@@ -603,7 +603,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SAFE-03 · Token/日志脱敏
+## FR-SAFE-03
 
 - **需求编号**：FR-SAFE-03
 - **需求名称**：Token/日志脱敏
@@ -614,7 +614,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SAFE-04 · 写操作全部走写前 journal + 崩溃恢复 reconcile（pre/expect/post 推断，禁止猜测成功）
+## FR-SAFE-04
 
 - **需求编号**：FR-SAFE-04
 - **需求名称**：写操作全部走写前 journal + 崩溃恢复 reconcile（pre/expect/post 推断，禁止猜测成功）
@@ -625,7 +625,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SAFE-05 · 危险扩展名与路径穿越防护
+## FR-SAFE-05
 
 - **需求编号**：FR-SAFE-05
 - **需求名称**：危险扩展名与路径穿越防护
@@ -636,7 +636,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-SAFE-06 · 启动时扫描既有仓库 `.git/config`/`insteadOf`/URL 中的凭据并告警（不自动改用户配置）
+## FR-SAFE-06
 
 - **需求编号**：FR-SAFE-06
 - **需求名称**：启动时扫描既有仓库 `.git/config`/`insteadOf`/URL 中的凭据并告警（不自动改用户配置）
@@ -647,7 +647,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OPS-01 · 应用内通知中心（从菜单栏「帮助/通知」或标题区铃铛进入的右侧抽屉，不占工作台区域）
+## FR-OPS-01
 
 - **需求编号**：FR-OPS-01
 - **需求名称**：应用内通知中心（从菜单栏「帮助/通知」或标题区铃铛进入的右侧抽屉，不占工作台区域）
@@ -658,29 +658,29 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OPS-02 · 日志与诊断（从菜单栏「工具 → 日志与诊断」进入的二级页面/抽屉）
+## FR-OPS-02
 
 - **需求编号**：FR-OPS-02
 - **需求名称**：日志与诊断（从菜单栏「工具 → 日志与诊断」进入的二级页面/抽屉）
 - **优先级**：P0
-- **描述**：日志与诊断（**从菜单栏「工具 → 日志与诊断」进入的二级页面/抽屉**）：结构化滚动文件（**单文件 10MB × 保留 30 天**，审计日志保留 ≥90 天）、**级别过滤=显示 ≥所选级别**、搜索、暂停、一键脱敏诊断包；诊断包内容以 §12.5 清单为准（日志、脱敏配置、DB 快照、schema 版本、最近 job/sync_run、版本信息、转储清单）
+- **描述**：日志与诊断（**从菜单栏「工具 → 日志与诊断」进入的二级页面/抽屉**）：结构化滚动文件（**单文件 10MB × 保留 30 天**，审计日志保留 ≥90 天）、**级别过滤=显示 ≥所选级别**、搜索、暂停、一键脱敏诊断包；诊断包内容以归档规格 §12.5 诊断包清单为准（日志、脱敏配置、DB 快照、schema 版本、最近 job/sync_run、版本信息、转储清单）
 - **验收标准（AC）**：滚动/留存/脱敏/≥级别断言；诊断包含 §12.5 全部必需项
 - **关联 AC**：AC-SAFE-06、AC-OPS-03、AC-OPS-04、AC-OPS-05、AC-OPS-06
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OPS-03 · 设置（从菜单栏「设置」或标题区齿轮进入的抽屉/二级页面）
+## FR-OPS-03
 
 - **需求编号**：FR-OPS-03
 - **需求名称**：设置（从菜单栏「设置」或标题区齿轮进入的抽屉/二级页面）
 - **优先级**：P0
-- **描述**：设置（**从菜单栏「设置」或标题区齿轮进入的抽屉/二级页面**）：通用/工作区/认证/操作与安全/CI 集成（禁用占位）/实验特性；设置键、默认值、校验、生效范围见 **附录 D**；**“实验特性”分区 v1 无可配置键（仅说明/开关占位）**；设置项不得改变工作台 7 区域结构
+- **描述**：设置（**从菜单栏「设置」或标题区齿轮进入的抽屉/二级页面**）：通用/工作区/认证/操作与安全/CI 集成（禁用占位）/实验特性；设置键、默认值、校验、生效范围见 **归档规格 附录 D（配置键）**；**“实验特性”分区 v1 无可配置键（仅说明/开关占位）**；设置项不得改变工作台 7 区域结构
 - **验收标准（AC）**：设置键表核对；非法值被拒绝并提示；布局 bbox 断言
 - **关联 AC**：AC-OPS-07、AC-OPS-08
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OPS-04 · 单实例锁
+## FR-OPS-04
 
 - **需求编号**：FR-OPS-04
 - **需求名称**：单实例锁
@@ -691,18 +691,18 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OPS-05 · 状态栏（§11.0 区域 G）分两段
+## FR-OPS-05
 
 - **需求编号**：FR-OPS-05
-- **需求名称**：状态栏（§11.0 区域 G）分两段
+- **需求名称**：状态栏双段信息
 - **优先级**：P1
-- **描述**：**状态栏（§11.0 区域 G）分两段**：左段固定“**最近一次操作**”文案（`最近一次操作：<动作> <组件>/<RepoType> — <成功|失败(错误码)|进行中> · HH:mm`，未操作时显示“无”，失败可展开最近 5 条）；右段 6 段：数据新鲜度 / 进程健康 / 操作队列 / CI 队列（v1 恒 0）/ 通知 / 网络状态。**进程健康 = Host + GitWorker 2 灯；各 BackgroundService（RemoteSync/LocalScan/StatusCalc/JOB_RUNNER）以子状态/悬浮明细呈现**
+- **描述**：**状态栏（归档规格 §11.0 区域 G：状态栏）分两段**：左段固定“**最近一次操作**”文案（`最近一次操作：<动作> <组件>/<RepoType> — <成功|失败(错误码)|进行中> · HH:mm`，未操作时显示“无”，失败可展开最近 5 条）；右段 6 段：数据新鲜度 / 进程健康 / 操作队列 / CI 队列（v1 恒 0）/ 通知 / 网络状态。**进程健康 = Host + GitWorker 2 灯；各 BackgroundService（RemoteSync/LocalScan/StatusCalc/JOB_RUNNER）以子状态/悬浮明细呈现**
 - **验收标准（AC）**：布局快照；灯光数与映射断言；“最近一次操作”文案模板断言（AC-UI-01/10）
 - **关联 AC**：AC-OPS-11
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OPS-06 · 数据库 schema 版本 + 迁移 + 迁移前自动备份 + 损坏检测与重建（重建只需重扫）
+## FR-OPS-06
 
 - **需求编号**：FR-OPS-06
 - **需求名称**：数据库 schema 版本 + 迁移 + 迁移前自动备份 + 损坏检测与重建（重建只需重扫）
@@ -713,7 +713,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OPS-07 · 自动更新（v1.1）
+## FR-OPS-07
 
 - **需求编号**：FR-OPS-07
 - **需求名称**：自动更新（v1.1）
@@ -724,18 +724,18 @@
 - **状态**：v1.1（非 v1.0）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OPS-08 · 首启编排与就绪门控
+## FR-OPS-08
 
 - **需求编号**：FR-OPS-08
 - **需求名称**：首启编排与就绪门控
 - **优先级**：P0
-- **描述**：**首启编排与就绪门控**：三阶段固定为 `LOCAL_DISCOVERY`（本地发现）→ `REMOTE_RECONCILE`（远程对账）→ `STATUS_CALC`（状态计算）；每阶段进度事件冻结为 `{stage,total,current,cancellable}`（§11.1）；远程阶段可跳过降级；远程就绪后自动重判本地仓；**远程未就绪时不得判 INVALID/MISSING，正确态为 `UNKNOWN` + `incomplete=1`（H-01）**。**统一 §3.1/§11.1/AC-OPS-15/16 的口径为三阶段**
+- **描述**：**首启编排与就绪门控**：三阶段固定为 `LOCAL_DISCOVERY`（本地发现）→ `REMOTE_RECONCILE`（远程对账）→ `STATUS_CALC`（状态计算）；每阶段进度事件冻结为 `{stage,total,current,cancellable}`（归档规格 §11.1 首启进度事件）；远程阶段可跳过降级；远程就绪后自动重判本地仓；**远程未就绪时不得判 INVALID/MISSING，正确态为 `UNKNOWN` + `incomplete=1`（H-01）**。**统一归档规格 §3.1/§11.1 与 AC-OPS-15/16 的口径为三阶段**
 - **验收标准（AC）**：AC-OPS-15/16：分阶段 progress 事件断言（`LOCAL_DISCOVERY→REMOTE_RECONCILE→STATUS_CALC` + `{stage,total,current,cancellable}`）；跳过远程后进入只读，远程恢复后组件由 `UNKNOWN`（`incomplete=1`）自动重判为真实聚合态
 - **关联 AC**：AC-OPS-15、AC-OPS-16
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-OPS-09 · 错误码表（前缀 CFG/SYNC/SCAN/STATE/OP/FS/NET/GIT/SEC）与用户可读文案
+## FR-OPS-09
 
 - **需求编号**：FR-OPS-09
 - **需求名称**：错误码表（前缀 CFG/SYNC/SCAN/STATE/OP/FS/NET/GIT/SEC）与用户可读文案
@@ -746,18 +746,18 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CI-01 · 10 个 CI 锚点占位
+## FR-CI-01
 
 - **需求编号**：FR-CI-01
 - **需求名称**：10 个 CI 锚点占位
 - **优先级**：P0
-- **描述**：实现 **§11.4 的 10 处 CI 锚点（v0.3 新落点，编号 CI-1…CI-10 不变）**：菜单栏/标题区 CI 入口、组件卡片 CI 槽位、右侧信息面板 CI 汇总条、单仓详情 CI Tab、状态栏 CI 队列段、通知抽屉 CI 事件类目、标题区筛选面板 CI facet、设置 CI 分区、数据契约、聚合分离；**10/10 必须在 v1 有落点，不得因新工作台删减**
+- **描述**：实现 **归档规格 §11.4 的 10 处 CI 锚点（v1 设计落点，编号 CI-1…CI-10 不变）**：菜单栏/标题区 CI 入口、组件卡片 CI 槽位、右侧信息面板 CI 汇总条、单仓详情 CI Tab、状态栏 CI 队列段、通知抽屉 CI 事件类目、标题区筛选面板 CI facet、设置 CI 分区、数据契约、聚合分离；**10/10 必须在 v1 有落点，不得因新工作台删减**
 - **验收标准（AC）**：锚点存在性快照测试 10/10（AC-UI-12）；位置变更需同步本表与 AC
 - **关联 AC**：AC-DETAIL-03、AC-OPS-02、AC-CI-01、AC-CI-02
 - **状态**：占位/预留（v1.0 仅设计落点）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CI-02 · CI 数据契约与 CI_UPDATED 事件
+## FR-CI-02
 
 - **需求编号**：FR-CI-02
 - **需求名称**：CI 数据契约与 CI_UPDATED 事件
@@ -768,7 +768,7 @@
 - **状态**：占位/预留（v1.0 仅设计落点）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CI-03 · CI 独立通道
+## FR-CI-03
 
 - **需求编号**：FR-CI-03
 - **需求名称**：CI 独立通道
@@ -779,7 +779,7 @@
 - **状态**：占位/预留（v1.0 仅设计落点）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CI-04 · 无 CI 时显示“CI 未接入”统一空态组件，禁止裸 TODO/白块
+## FR-CI-04
 
 - **需求编号**：FR-CI-04
 - **需求名称**：无 CI 时显示“CI 未接入”统一空态组件，禁止裸 TODO/白块
@@ -790,7 +790,7 @@
 - **状态**：占位/预留（v1.0 仅设计落点）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CI-05 · `ci_status` 表 + `ci.*` 配置键 + 事件类型在 v1 建好（空数据）
+## FR-CI-05
 
 - **需求编号**：FR-CI-05
 - **需求名称**：`ci_status` 表 + `ci.*` 配置键 + 事件类型在 v1 建好（空数据）
@@ -801,7 +801,7 @@
 - **状态**：占位/预留（v1.0 仅设计落点）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-WS-01 · 主界面 7 区域固定且顺序不可交换（上→下、左→右）
+## FR-WS-01
 
 - **需求编号**：FR-WS-01
 - **需求名称**：主界面 7 区域固定且顺序不可交换（上→下、左→右）
@@ -812,7 +812,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-WS-02 · 尺寸与缩放
+## FR-WS-02
 
 - **需求编号**：FR-WS-02
 - **需求名称**：尺寸与缩放
@@ -823,7 +823,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-WS-03 · 视图切换
+## FR-WS-03
 
 - **需求编号**：FR-WS-03
 - **需求名称**：视图切换
@@ -834,7 +834,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-WS-04 · 二级入口全部经菜单栏或标题区进入，不设旧 App Shell 左侧图标导航
+## FR-WS-04
 
 - **需求编号**：FR-WS-04
 - **需求名称**：二级入口全部经菜单栏或标题区进入，不设旧 App Shell 左侧图标导航
@@ -845,7 +845,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-WS-05 · 键盘与可访问性
+## FR-WS-05
 
 - **需求编号**：FR-WS-05
 - **需求名称**：键盘与可访问性
@@ -856,7 +856,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-TREE-01 · 读取目录
+## FR-TREE-01
 
 - **需求编号**：FR-TREE-01
 - **需求名称**：读取目录
@@ -867,7 +867,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-TREE-02 · 四仓 2×2 固定
+## FR-TREE-02
 
 - **需求编号**：FR-TREE-02
 - **需求名称**：四仓 2×2 固定
@@ -878,7 +878,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-TREE-03 · 双击打开
+## FR-TREE-03
 
 - **需求编号**：FR-TREE-03
 - **需求名称**：双击打开
@@ -889,7 +889,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-TREE-04 · 只读与路径安全
+## FR-TREE-04
 
 - **需求编号**：FR-TREE-04
 - **需求名称**：只读与路径安全
@@ -900,18 +900,18 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-TREE-05 · 节点状态标记
+## FR-TREE-05
 
 - **需求编号**：FR-TREE-05
 - **需求名称**：节点状态标记
 - **优先级**：P1
-- **描述**：**节点状态标记**：每个仓库根节点显示该仓主状态徽标（§11.2 通道 A token，图标+文案+颜色），选中行高亮；已跟踪且未提交改动的文件行显示 `●`、untracked 显示 `○`（数据取自既有 `git status` 快照，**不得为文件树额外起 git 进程**）；该仓 STALE 时徽标灰化并显示“数据 X 前”
+- **描述**：**节点状态标记**：每个仓库根节点显示该仓主状态徽标（归档规格 §11.2 的状态色 token（通道 A），图标+文案+颜色），选中行高亮；已跟踪且未提交改动的文件行显示 `●`、untracked 显示 `○`（数据取自既有 `git status` 快照，**不得为文件树额外起 git 进程**）；该仓 STALE 时徽标灰化并显示“数据 X 前”
 - **验收标准（AC）**：状态矩阵夹具；进程计数断言（展开文件树不新增 git 进程）；AC-UI-05
 - **关联 AC**：见 `docs/m2b-ac-op-gap.md`
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-TREE-06 · 文件树右键菜单仅只读项
+## FR-TREE-06
 
 - **需求编号**：FR-TREE-06
 - **需求名称**：文件树右键菜单仅只读项
@@ -922,7 +922,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-FOLDER-01 · 文件夹视图结构
+## FR-FOLDER-01
 
 - **需求编号**：FR-FOLDER-01
 - **需求名称**：文件夹视图结构
@@ -933,7 +933,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-FOLDER-02 · 文件夹视图交互
+## FR-FOLDER-02
 
 - **需求编号**：FR-FOLDER-02
 - **需求名称**：文件夹视图交互
@@ -944,7 +944,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-FOLDER-03 · 文件夹视图状态标记
+## FR-FOLDER-03
 
 - **需求编号**：FR-FOLDER-03
 - **需求名称**：文件夹视图状态标记
@@ -955,7 +955,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-FOLDER-04 · 文件夹视图过滤
+## FR-FOLDER-04
 
 - **需求编号**：FR-FOLDER-04
 - **需求名称**：文件夹视图过滤
@@ -966,7 +966,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-FOLDER-05 · 文件夹视图与工作台切换
+## FR-FOLDER-05
 
 - **需求编号**：FR-FOLDER-05
 - **需求名称**：文件夹视图与工作台切换
@@ -977,7 +977,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-ACT-01 · 按钮固定 5 个且文案/顺序与参考图一致
+## FR-ACT-01
 
 - **需求编号**：FR-ACT-01
 - **需求名称**：按钮固定 5 个且文案/顺序与参考图一致
@@ -988,18 +988,18 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-ACT-02 · 可用性严格取 §7.6 矩阵（映射见 §7.6 末条）
+## FR-ACT-02
 
 - **需求编号**：FR-ACT-02
-- **需求名称**：可用性严格取 §7.6 矩阵（映射见 §7.6 末条）
+- **需求名称**：底部按钮可用性严格取矩阵
 - **优先级**：P0
-- **描述**：**可用性严格取 §7.6 矩阵**（映射见 §7.6 末条）：PULL=Pull(ff)、FETCH=Fetch、CHKOUT=Checkout 分支（切 Tag 走 CHKOUT 二级选择、按切 Tag 列）、COMMIT=Commit、PUSH=Push；禁用时 tooltip 必须给出“原因 + 替代动作 + 错误码”；**M1 只读边界：M1 阶段 5 按钮全部禁用（含 FETCH）**，只读能力通过刷新/重扫/文件树查看体现（D-024）
+- **描述**：**可用性严格取归档规格 §7.6 状态×操作矩阵**（映射见该节末条）：PULL=Pull(ff)、FETCH=Fetch、CHKOUT=Checkout 分支（切 Tag 走 CHKOUT 二级选择、按切 Tag 列）、COMMIT=Commit、PUSH=Push；禁用时 tooltip 必须给出“原因 + 替代动作 + 错误码”；**M1 只读边界：M1 阶段 5 按钮全部禁用（含 FETCH）**，只读能力通过刷新/重扫/文件树查看体现（D-024）
 - **验收标准（AC）**：14 主状态 × 5 按钮矩阵逐格断言；M1 全禁用截图与理由断言；AC-UI-08/09
 - **关联 AC**：见 `docs/m2b-ac-op-gap.md`
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-ACT-03 · 前置条件
+## FR-ACT-03
 
 - **需求编号**：FR-ACT-03
 - **需求名称**：前置条件
@@ -1010,7 +1010,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-ACT-04 · 确认与安全
+## FR-ACT-04
 
 - **需求编号**：FR-ACT-04
 - **需求名称**：确认与安全
@@ -1021,18 +1021,18 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-ACT-05 · 进行中/失败
+## FR-ACT-05
 
 - **需求编号**：FR-ACT-05
 - **需求名称**：进行中/失败
 - **优先级**：P0
-- **描述**：**进行中/失败**：执行中该按钮显示 spinner 且同仓其余按钮禁用（同仓操作串行）；状态栏左段实时显示进行中；失败在状态栏显示错误码+中文文案并可重试；`BUSY`（外部 git）/`CONCURRENT_CHANGE`（CAS）按错误码处理，**禁止删锁**；**合作式取消服从 §7.6**：`PULL` 等长任务支持取消；`FETCH` 为短网络任务不提供取消（超时中断）；`COMMIT` 不可取消；`PUSH` 在服务端接收前可中断、取消点后不可取消；取消后以实际扫描为准
+- **描述**：**进行中/失败**：执行中该按钮显示 spinner 且同仓其余按钮禁用（同仓操作串行）；状态栏左段实时显示进行中；失败在状态栏显示错误码+中文文案并可重试；`BUSY`（外部 git）/`CONCURRENT_CHANGE`（CAS）按错误码处理，**禁止删锁**；**合作式取消服从归档规格 §7.6 状态×操作矩阵**：`PULL` 等长任务支持取消；`FETCH` 为短网络任务不提供取消（超时中断）；`COMMIT` 不可取消；`PUSH` 在服务端接收前可中断、取消点后不可取消；取消后以实际扫描为准
 - **验收标准（AC）**：M2a：错误码/BUSY/CAS/进行中/失败可读；M2b：job 状态与取消语义断言；AC-UI-10（M2a）+ AC-UI-10c（M2b）
 - **关联 AC**：AC-UI-10c
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-ACT-06 · 完成后回写
+## FR-ACT-06
 
 - **需求编号**：FR-ACT-06
 - **需求名称**：完成后回写
@@ -1043,7 +1043,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-ACT-07 · 版本门禁（禁止可点但无效果）
+## FR-ACT-07
 
 - **需求编号**：FR-ACT-07
 - **需求名称**：版本门禁（禁止可点但无效果）
@@ -1054,7 +1054,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CARD-01 · 组件卡片内容（左列 C 区，宽随栏宽 220–360px、高 ≥72px，底色中性）
+## FR-CARD-01
 
 - **需求编号**：FR-CARD-01
 - **需求名称**：组件卡片内容（左列 C 区，宽随栏宽 220–360px、高 ≥72px，底色中性）
@@ -1065,18 +1065,18 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CARD-02 · 选中与联动
+## FR-CARD-02
 
 - **需求编号**：FR-CARD-02
 - **需求名称**：选中与联动
 - **优先级**：P0
-- **描述**：**选中与联动**：单击卡片 = 选中组件并加载四仓文件树（默认聚焦第一个存在的仓）、右侧信息面板切换到该组件；`Ctrl/Shift` 多选 = 进入批量选择态（§11.6）；双击卡片 = 打开组件详情抽屉（不替换工作台）；选中态有 2px 焦点环与 `aria-selected`；**单一选中模型** `{componentId, focusedRepoType}` 为文件树/信息面板/按钮条唯一数据源
+- **描述**：**选中与联动**：单击卡片 = 选中组件并加载四仓文件树（默认聚焦第一个存在的仓）、右侧信息面板切换到该组件；`Ctrl/Shift` 多选 = 进入批量选择态（归档规格 §11.6 批量入口）；双击卡片 = 打开组件详情抽屉（不替换工作台）；选中态有 2px 焦点环与 `aria-selected`；**单一选中模型** `{componentId, focusedRepoType}` 为文件树/信息面板/按钮条唯一数据源
 - **验收标准（AC）**：联动断言；单一选中模型（改选中后三处同步）；AC-UI-02/11
 - **关联 AC**：见 `docs/m2b-ac-op-gap.md`
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CARD-03 · 列表规模与检索
+## FR-CARD-03
 
 - **需求编号**：FR-CARD-03
 - **需求名称**：列表规模与检索
@@ -1087,7 +1087,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CARD-04 · 批量入口（不破坏参考图布局）
+## FR-CARD-04
 
 - **需求编号**：FR-CARD-04
 - **需求名称**：批量入口（不破坏参考图布局）
@@ -1098,7 +1098,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-CARD-05 · 卡片区七态 + 刷新
+## FR-CARD-05
 
 - **需求编号**：FR-CARD-05
 - **需求名称**：卡片区七态 + 刷新
@@ -1109,7 +1109,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-INFO-01 · 右侧信息面板 E 区（宽 220–320px，纵向滚动，字段不得横向溢出）
+## FR-INFO-01
 
 - **需求编号**：FR-INFO-01
 - **需求名称**：右侧信息面板 E 区（宽 220–320px，纵向滚动，字段不得横向溢出）
@@ -1120,7 +1120,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-INFO-02 · 空态与一致性
+## FR-INFO-02
 
 - **需求编号**：FR-INFO-02
 - **需求名称**：空态与一致性
@@ -1131,7 +1131,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-INFO-03 · 构建状态区（CI 通道 B）
+## FR-INFO-03
 
 - **需求编号**：FR-INFO-03
 - **需求名称**：构建状态区（CI 通道 B）
@@ -1142,7 +1142,7 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-INFO-04 · 信息新鲜度
+## FR-INFO-04
 
 - **需求编号**：FR-INFO-04
 - **需求名称**：信息新鲜度
@@ -1152,4 +1152,3 @@
 - **关联 AC**：见 `docs/m2b-ac-op-gap.md`
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
-
