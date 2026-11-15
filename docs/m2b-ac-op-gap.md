@@ -1,7 +1,7 @@
 # M2b AC-OP 全量证据矩阵（截至 m2b-2b / 2026-11-14）
 
 > 用途：M2b final 的逐条验收台账。状态：**COVERED**=有自动化/真实证据；**PARTIAL**=有实现/部分用例但缺 AC 指定断言；**GAP**=未实现或无从验证。
-> 当前结论：**M2b 未完成**；`m2b-2b` 只是阶段 tag。测试基线 420/420；真机 reconcile NOT_APPLIED 已验证；故障注入报告见 `docs/m2b-fault-injection-report.md`（未通过）。证据来源：`tests/MbdGitTool.Host.Tests`、`ui/scripts/cdp-*.mjs`、`docs/m2b*.md`。
+> 当前结论：**M2b 未完成**；`m2b-2b` 只是阶段 tag。测试基线 423/423（v1.0）；真机 reconcile NOT_APPLIED 已验证；故障注入报告见 `docs/m2b-fault-injection-report.md`（未通过）。证据来源：`tests/MbdGitTool.Host.Tests`、`ui/scripts/cdp-*.mjs`、`docs/m2b*.md`。
 
 | AC | 主题 | 状态 | 现有证据 | 缺口/下一步 |
 |---|---|---|---|---|

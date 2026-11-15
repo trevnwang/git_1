@@ -5,7 +5,7 @@
 | ADR 编号 | D-026 |
 | 日期 | 2026-11-14 |
 | 状态 | **Accepted（仅用于 M2b-2a 阶段 tag）**；不改变 M2b-2b/M2 出口要求 |
-| 关联 | `docs/review-m2b2-code.md` P1-1…P1-5、`docs/review-m2b2-gate-code.md`、`docs/review-m2b2-gate.md`（B1/B2）、`docs/m2b-status.md` |
+| 关联 | `docs/archive/review-m2b2-code.md` P1-1…P1-5、`docs/archive/review-m2b2-gate-code.md`、`docs/archive/review-m2b2-gate.md`（B1/B2）、`docs/archive/m2b-status.md` |
 | 决策 | M2b-2a 阶段 tag 允许在 P1-2（备份 ref 分支身份）与 P1-4（SQLite 写失败降级/JSONL→DB 回填）**已知未闭合**的前提下签发；两项必须在 M2b-2b 完成，不得带入 M2b/M2 完成声明 |
 
 ## 1. 背景
@@ -22,7 +22,7 @@ M2b-2a 是**阶段 checkpoint**，不是 M2b 完成；两项 P1 属于恢复精�
 1. 恢复前 clean 门禁（tracked/untracked/ignored 全阻断）、恢复前安全 ref（毫秒+GUID 唯一）、审计写 `RESTORE_BACKUP`；
 2. JSONL 始终写入（SQLite 旁路失败不影响动作/审计主链路）；UI/API 不把 DB 失败伪装成成功；
 3. M2b-2a tag 只标注 M2b-2a；M2b-2b 完成前不得发布 M2b/M2 完成声明；
-4. `docs/m2b-status.md` 更正审计行数与测试污染来源，不将历史测试行作为生产证据。
+4. `docs/archive/m2b-status.md` 更正审计行数与测试污染来源，不将历史测试行作为生产证据。
 
 ## 3. M2b-2b 必须完成
 

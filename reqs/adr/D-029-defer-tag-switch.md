@@ -4,7 +4,7 @@
 |---|---|
 | 日期 | 2026-11-15 |
 | 状态 | **Accepted（用户决策）** |
-| 关联 | `specification.md` §3.3/§16.4、Annex A AC-OP-11…14；D-025；v0.4 冻结 |
+| 关联 | `reqs/archive/specification-v0.4.1.md` §3.3/§16.4、Annex A AC-OP-11…14；D-025；v0.4 冻结 |
 | 决策 | **批量“切 Tag”功能暂不交付、不参与 M2b 验收与代码实现计划**；已有后端实现保留但 UI 禁用；`baseline_snapshot`/TAG_DRIFT 的 Tag 相关验收同暂定 |
 
 ## 1. 原因（用户说明）

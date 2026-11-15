@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 |---|---|
 | 状态 | **随 v0.4 需求冻结生效**（D-025 §4 M2b 出口补充 AC-OP-34/35；实现前仍以 specification 为准） |
-| 关联 | `reqs/specification.md` §8.1/§16/Annex A；D-025；D-026 |
+| 关联 | `reqs/archive/specification-v0.4.1.md` §8.1/§16/Annex A；D-025；D-026 |
 | 目的 | 明确 §16 新增行为对 §8.1 表/枚举/写者的最小变更，避免实现时绕开冻结语义 |
 
 ## 1. 数据与写者
@@ -23,4 +23,4 @@
 
 - 不改变任何安全顺序：DELETE 四阻断、SYNC 备份→stash→reset、REPAIR/RECLONE 回滚、restore clean 门禁、确认/typed confirm 均保持。
 - 新 API：`bindComponent`、`unbindComponent`（INSERT 归属 `COMPONENT_MGMT`）、`undoCreate`（创建 `CREATE_UNDO` job）、`repair`/`reclone`（runBatch kind）；均需参数校验/审计/失败零改动。
-- 若实现需要改变本 ADR 范围，先改 `specification.md` + 本 ADR，再开发。
+- 若实现需要改变本 ADR 范围，先改 `reqs/archive/specification-v0.4.1.md` + 本 ADR，再开发。
