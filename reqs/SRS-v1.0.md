@@ -207,12 +207,12 @@
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
 - **关联域**：见 `reqs/archive/specification-v0.4.1.md` 功能域/附录 D；AC 台账 `docs/m2b-ac-op-gap.md`
 
-## FR-STA-01 · 实现 7.2 的 14 主状态 + 7.3 标记 + 7.4 聚合优先级（含 UNKNOWN 兜底）
+## FR-STA-01 · 14 个单仓主状态 + 正交标记 + 组件聚合
 
 - **需求编号**：FR-STA-01
-- **需求名称**：实现 7.2 的 14 主状态 + 7.3 标记 + 7.4 聚合优先级（含 UNKNOWN 兜底）
+- **需求名称**：14 个单仓主状态 + 正交标记 + 组件聚合
 - **优先级**：P0
-- **描述**：实现 7.2 的 14 主状态 + 7.3 标记 + 7.4 聚合优先级（含 UNKNOWN 兜底）；判定必须穷尽互斥
+- **描述**：实现单仓 14 个互斥主状态（UNKNOWN/INVALID/MISSING/EMPTY/UNMERGED/IN_PROGRESS/DETACHED_TAG/DETACHED_COMMIT/DIVERGED/BEHIND/AHEAD/NO_UPSTREAM/DIRTY/SYNCED）+ §7.3 正交标记（dirty_tracked/untracked/stashed/shallow/lfs_missing/reparse_point/stale/busy/remote_gone/tag_moved/mixed_branch）+ §7.4 组件聚合优先级（`max(组件覆盖态, 四仓主状态)`，无法命中/任一仓 UNKNOWN 时兜底 UNKNOWN，禁止假绿）；章节原文见 `reqs/archive/specification-v0.4.1.md` §7.2/§7.3/§7.4
 - **验收标准（AC）**：**附录 C 状态矩阵**逐条通过（14 主状态 × 关键 flag × 15 聚合态）
 - **关联 AC**：AC-STA-01、AC-STA-02、AC-STA-03、AC-STA-12、AC-STA-13、AC-STA-15
 - **状态**：已实现（待 M2b final Gate 签收；证据见 README/AC 台账）
