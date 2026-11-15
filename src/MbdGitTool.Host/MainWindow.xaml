@@ -8,7 +8,7 @@
         <wv2:WebView2 x:Name="Web" />
         <Border x:Name="RuntimeMissing" Visibility="Collapsed" Background="#14161A">
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                <TextBlock Text="WebView2 Runtime 缺失" Foreground="#F87171" FontSize="20" HorizontalAlignment="Center"/>
+                <TextBlock Text="界面初始化失败" Foreground="#F87171" FontSize="20" HorizontalAlignment="Center"/>
                 <TextBlock x:Name="RuntimeMissingDetail" Foreground="#E6E8EB" Margin="0,12,0,0" HorizontalAlignment="Center"/>
             </StackPanel>
         </Border>
